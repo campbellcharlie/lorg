@@ -1,0 +1,72 @@
+:root {
+    --resize_handle_thickness: 8px;
+    --resize_handle_thickness_hover: 8px;
+    --resize_handle_shifting: calc((var(--resize_handle_thickness) / 2)*-1);
+    /* --resize_handle_shifting: calc((var(--resize_handle_thickness) / 2)*-1); */
+    --resize_handle_color: var(--cyan);
+}
+
+.resize_main {
+    position: relative;
+}
+
+.resize_handle {
+    width: var(--resize_handle_thickness);
+    height: var(--resize_handle_thickness);
+    position: absolute;
+    transition: all 0.1s;
+    opacity: 0;
+    background: var(--resize_handle_color);
+    z-index: 9999;
+}
+
+.resize_handle:hover {
+    opacity: 1;
+}
+
+.resize_handle.left,
+.resize_handle.right {
+    top: 50%;
+    bottom: 50%;
+    margin-top: auto;
+    margin-bottom: auto;
+    height: 100%;
+}
+
+.resize_handle.left:hover,
+.resize_handle.right:hover {
+    width: var(--resize_handle_thickness_hover);
+}
+
+.resize_handle.top,
+.resize_handle.bottom {
+    left: 0;
+    right: 0;
+    margin: auto;
+    width: 100%;
+}
+
+.resize_handle.top:hover,
+.resize_handle.bottom:hover {
+    height: var(--resize_handle_thickness_hover);
+}
+
+.resize_handle.left {
+    left: var(--resize_handle_shifting);
+    cursor: w-resize;
+}
+
+.resize_handle.top {
+    top: var(--resize_handle_shifting);
+    cursor: n-resize;
+}
+
+.resize_handle.bottom {
+    bottom: var(--resize_handle_shifting);
+    cursor: s-resize;
+}
+
+.resize_handle.right {
+    right: var(--resize_handle_shifting);
+    cursor: e-resize;
+}

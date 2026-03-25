@@ -1,0 +1,171 @@
+@tailwind components;
+
+@layer components {
+	.shortcut-key {
+		@apply h-16 rounded-sm bg-white/20 px-8 py-2 font-RobotoMono text-sm text-white/50;
+	}
+
+	input,
+	select,
+	textarea {
+		outline: none;
+		border: none;
+		background: none;
+	}
+
+	select {
+		@apply block w-full rounded pl-12 text-white placeholder-white;
+	}
+
+	option {
+		@apply px-8 py-4;
+	}
+
+	.dropdown {
+		@apply relative;
+	}
+
+	.dropdown:before,
+	.dropdown:after {
+		@apply left-auto right-4 top-[35%] m-auto -translate-y-1/2;
+		content: '';
+		position: absolute;
+		z-index: 2;
+		width: 0;
+		height: 0;
+		border: 4px dashed;
+		border-color: #888888 transparent;
+		pointer-events: none;
+	}
+
+	.dropdown:before {
+		border-bottom-style: solid;
+		border-top: none;
+	}
+
+	.dropdown:after {
+		margin-top: 7px;
+		border-top-style: solid;
+		border-bottom: none;
+	}
+
+	[type='text'] {
+		@apply bg-dark/0;
+	}
+
+	.focusable,
+	input,
+	input:focus,
+	select,
+	select:focus,
+	textarea,
+	textarea:focus {
+		@apply overflow-auto focus:ring-[0.15rem] focus:ring-inset focus:ring-green/50;
+	}
+
+	.focusWhenFocusedWithin {
+		@apply focus-within:overflow-auto focus-within:ring-[0.15rem] focus-within:ring-inset focus-within:ring-green/50;
+	}
+
+	.focused {
+		@apply overflow-auto ring-[0.15rem] ring-inset ring-green/50;
+	}
+
+	input.unfocusable:focus,
+	textarea.unfocusable:focus {
+		@apply focus:overflow-hidden focus:ring-[0.15rem] focus:ring-inset focus:ring-green/0;
+	}
+
+	input[type='checkbox'] {
+		@apply h-16 w-16 rounded-sm bg-white/10 text-green3 ring-white/20 hover:bg-white/20 hover:ring-white/20  focus:bg-[none] focus:outline-none focus-visible:ring focus-visible:ring-white/10 focus-visible:ring-offset-1  active:bg-green3;
+	}
+
+	input[type='checkbox'],
+	input[type='checkbox']:checked {
+		outline: none !important;
+		box-shadow: none !important;
+		border: none !important;
+	}
+
+	input[type='checkbox']:checked {
+		@apply bg-green3 outline-none hover:bg-green3 focus:outline-none;
+	}
+
+	.input-variant-1 {
+		@apply h-full w-full rounded-[4px] border border-white/0 bg-faded-surface pl-32 hover:bg-surface/90 focus:bg-surface;
+	}
+
+	[contenteditable='true']:empty:before {
+		content: attr(placeholder);
+		color: #6b7280;
+		white-space: pre;
+	}
+
+	.switch-md {
+		transform: scale(0.9);
+	}
+
+	.switch-sm {
+		transform: scale(0.8);
+	}
+
+	.switch-vsm {
+		transform: scale(0.7);
+	}
+
+	.switch {
+		/* @apply switch-md; */
+		position: relative;
+		display: inline-block;
+		width: 50px;
+		height: 24px;
+	}
+
+	.switch input {
+		opacity: 0;
+		width: 0;
+		height: 0;
+	}
+
+	.slider {
+		@apply bg-dark;
+		position: absolute;
+		cursor: default;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		-webkit-transition: 0.2s;
+		transition: 0.2s;
+		border-radius: 4px;
+	}
+
+	.slider:before {
+		position: absolute;
+		content: '';
+		height: 16px;
+		width: 16px;
+		left: 4px;
+		top: 50%;
+		transform: translateY(-50%);
+		bottom: auto;
+		background: var(--c2);
+		-webkit-transition: 0.2s;
+		transition: 0.2s;
+		border-radius: 2px;
+	}
+
+	input:checked + .slider {
+		@apply bg-green;
+		/* background-color: rgba(255, 255, 255, 0.144); */
+	}
+
+	input:checked + .slider:before {
+		height: 18px;
+		width: 18px;
+		@apply rounded bg-dark;
+		-webkit-transform: translateX(26px);
+		-ms-transform: translateX(26px);
+		transform: translateX(25px) translateY(-50%);
+	}
+}

@@ -1,0 +1,56 @@
+@tailwind components;
+
+@layer components {
+    sidebar domain {
+        @apply font-medium opacity-60 overflow-visible;
+    }
+
+    sidebar .sidebarTab {
+        @apply rounded;
+    }
+
+    sidebar .title,
+    sidebar .content {
+        @apply w-full cursor-default whitespace-nowrap text-white/70;
+    }
+
+    sidebar .title {
+        @apply h-24 overflow-visible rounded-[4px];
+    }
+
+    sidebar .title:hover {
+        @apply bg-under-light text-white/80;
+    }
+
+    /* sidebar .content {
+        @apply border-l-[0.5px] border-white/[0.10];
+    } */
+
+    sidebar .content .sidebarTab {
+        /* @apply -ml-4; */
+    }
+
+    sidebar .title:hover~.content {
+        @apply border-white/[0.10];
+    }
+
+    sidebar .sidebarTab.selected {
+        /* @apply bg-white/[0.05]; */
+    }
+
+    sidebar .selected {
+        @apply bg-white/[0.08];
+    }
+
+    sidebar .selected:hover {
+        @apply bg-surface;
+    }
+
+    sidebar .selectedTitle {
+        @apply bg-under-light;
+    }
+
+    sidebar .selectedTitle {
+        @apply text-white/90;
+    }
+}

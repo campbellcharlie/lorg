@@ -1,0 +1,94 @@
+:root {
+
+    /* --_shade1: 18, 19, 23;
+    --_shade2: 32, 32, 40;
+    --_shade3: 47, 48, 59; */
+
+    --gap:2px;
+
+    --main-sidebar-width: 64px;
+    --main-title-height: 40px;
+    --main-footer-height: 20px;
+
+    --cyan: #2db9d2;
+
+    /* Latest Onces */
+    /* --bg-dark: #0C0C0D; */
+    /* --bg-surface: #202122; */
+    /* --bg-faded-surface: #161618; */
+/* 
+    --bg-dark: #101011;
+    --bg-surface: #1D1E20;
+    --bg-faded-surface: #1b1b1d; */
+    /* ================================= */
+    /* ================================= */
+    /* --bg-dark: #1d1b1a;
+    --bg-surface: #292524;
+    --bg-faded-surface: #141413; */
+    /* ================================= */
+    /* --bg-dark: #1c1818; */
+    /* --bg-surface: #231f1f; */
+    /* ================================= */
+    /* --bg-dark: #181c1c; */
+    /* --bg-surface: #1f2123; */
+
+    --_shade1: 12, 12, 13, 1;
+    --_shade2: 21, 22, 25, 1;
+    --_shade3: 23, 24, 27, 1;
+    --_shade4: 29, 29, 32, 1;
+    --_shade5: 38, 39, 44, 1;
+
+    --_green3: 33, 150, 83;
+    --_green2: 39, 174, 96;
+    --_green1: 111, 207, 151;
+
+    --_blue3: 33, 150, 83;
+    --_blue2: 39, 174, 96;
+    --_blue1: 111, 207, 151;
+
+    --_c1: 141, 154, 180;
+    --_c2: 82, 95, 122;
+    --_text: 198, 199, 210;
+
+    --_red: 235, 87, 87;
+    --_orange: 242, 153, 74;
+    --_yellow: 242, 201, 76;
+
+    --_blue3: 47, 128, 237;
+    --_blue2: 45, 156, 219;
+    --_blue1: 86, 204, 242;
+
+    --_purple2: 155, 81, 224;
+    --_purple1: 187, 107, 217;
+
+    --shade1: rgb(var(--_shade1));
+    --shade2: rgb(var(--_shade2));
+    --shade3: rgb(var(--_shade3));
+    --shade4: rgb(var(--_shade4));
+    --shade5: rgb(var(--_shade5));
+
+    --green3: rgb(var(--_green3));
+    --green2: rgb(var(--_green2));
+    --green1: rgb(var(--_green1));
+
+    --blue3: rgb(var(--_blue3));
+    --blue2: rgb(var(--_blue2));
+    --blue1: rgb(var(--_blue1));
+
+    --c1: rgb(var(--_c1));
+    --c2: rgb(var(--_c2));
+    --text: rgb(var(--_text));
+
+    --red: rgb(var(--_red));
+    --orange: rgb(var(--_orange));
+    --yellow: rgb(var(--_yellow));
+
+    --blue3: rgb(var(--_blue3));
+    --blue2: rgb(var(--_blue2));
+    --blue1: rgb(var(--_blue1));
+
+    --purple2: rgb(var(--_purple2));
+    --purple1: rgb(var(--_purple1));
+
+    --border1: 1px solid rgb(255, 255, 255, 0.1);
+}

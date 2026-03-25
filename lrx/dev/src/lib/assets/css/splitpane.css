@@ -1,0 +1,88 @@
+.splitpanes.modern-theme .splitpanes__pane {
+	background-color: none;
+	transition: none;
+}
+
+.splitpanes.modern-theme .splitpanes__splitter {
+	background-color: none;
+	position: relative;
+}
+
+.splitpanes.modern-theme .splitpanes__splitter:before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0;
+	transition: opacity 0.4s;
+	background-color: var(--green2);
+	/* background-color: var(--cyan); */
+	opacity: 0;
+	z-index:500;
+	/* border-radius: 4px; */
+}
+
+.splitpanes.modern-theme .splitpanes__splitter:hover:before {
+	opacity: 1;
+}
+
+.splitpanes.modern-theme .splitpanes__splitter.splitpanes__splitter__active {
+	z-index: 500;
+	/* Fix an issue of overlap fighting with a near hovered splitter */
+}
+
+.modern-theme.splitpanes--vertical > .splitpanes__splitter {
+	width: var(--gap);
+}
+
+.modern-theme.splitpanes--horizontal > .splitpanes__splitter {
+	height: var(--gap);
+}
+
+.modern-theme.splitpanes--vertical > .splitpanes__splitter:before {
+	/* left: -3px; */
+	/* right: -3px; */
+	height: 100%;
+	cursor: w-resize;
+	width: 4px;
+}
+
+.modern-theme.splitpanes--horizontal > .splitpanes__splitter:before {
+	/* top: -3px; */
+	/* bottom: -3px; */
+	width: 100%;
+	cursor: row-resize;
+	height: 4px;
+}
+
+.no-splitter.splitpanes .splitpanes__pane {
+	background-color: none;
+}
+
+.no-splitter.splitpanes .splitpanes__splitter {
+	background-color: none;
+	position: relative;
+	/* width: 4px;
+    height: 4px; */
+}
+
+.no-splitter.splitpanes--horizontal > .splitpanes__splitter:before {
+	width: 4px;
+	height: 4px;
+	pointer-events: none;
+	cursor: none;
+}
+
+.no-splitter.splitpanes--vertical > .splitpanes__splitter {
+	width: 4px;
+}
+
+.no-splitter.splitpanes--horizontal > .splitpanes__splitter {
+	height: 4px;
+}
+
+.no-splitter.splitpanes--vertical > .splitpanes__splitter:before {
+	width: 4px;
+	height: 4px;
+	pointer-events: none;
+	cursor: none;
+}

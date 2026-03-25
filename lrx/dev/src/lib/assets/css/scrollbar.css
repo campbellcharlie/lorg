@@ -1,0 +1,108 @@
+@tailwind components;
+
+/* width */
+:root {
+	--scrollbar-bg: rgba(0, 0, 0, 0);
+	--scrollbar-bg-hover: rgba(255, 255, 255, 0.052);
+	--scrollbar-thumb: rgba(var(--_c1), 0.1);
+	--scrollbar-thumb-hover: rgba(255, 255, 255, 0.5);
+}
+
+.scrollbox {
+	overflow: auto;
+	visibility: hidden;
+}
+
+.scrollbox-content,
+.scrollbox:hover,
+.scrollbox:focus {
+	visibility: visible;
+}
+
+.scroll,
+.scroll-x,
+.scroll-y {
+	/* transition: all 100ms; */
+}
+
+.scroll {
+	overflow: hidden;
+}
+
+.scroll-x {
+	overflow-x: hidden;
+}
+
+.scroll-y {
+	overflow-y: hidden;
+}
+
+.scroll:hover {
+	overflow: auto;
+}
+
+.scroll-x:hover {
+	overflow-x: auto;
+}
+
+.scroll-y:hover {
+	overflow-y: auto;
+}
+
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+	padding: 4px;
+	background: var(--scrollbar-bg);
+}
+
+/* Track */
+::-webkit-scrollbar-track:hover {
+	padding: 4px;
+	background: var(--scrollbar-bg-hover);
+	border: outset 1px solid rgba(255, 255, 255, 0.15);
+}
+
+::-webkit-scrollbar-track:hover ~ ::-webkit-scrollbar-thumb {
+	background: var(--scrollbar-track-hover);
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+	@apply hover:bg-under-light;
+	background: var(--scrollbar-thumb);
+	border: 2px solid var(--scrollbar-bg);
+	border-radius: 1px;
+}
+
+/* the bottom corner of the scrollbar, where both horizontal and vertical scrollbars meet. */
+::-webkit-scrollbar-corner {
+	background: var(--scrollbar-bg);
+}
+
+.scrollfade-top {
+	@apply h-8 absolute top-0 w-full right-[8px] bg-gradient-to-b from-surface z-10;
+}
+
+.scrollfade-bottom {
+	@apply h-8 absolute bottom-0 w-full right-[8px] bg-gradient-to-t from-surface z-10;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+	width: 4px;
+	height: 4px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+	background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.05);
+	/* border-radius: 10px; */
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.1);
+}

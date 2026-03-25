@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lorg</title>
+  <link rel="icon" type="image/svg+xml" href="lorg-icon.svg">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="logo">lorg</div>
+      <div class="sidebar-section">
+        <nav id="nav">
+          <button class="nav-btn active" data-view="traffic">Traffic</button>
+          <button class="nav-btn" data-view="repeater">Repeater</button>
+          <button class="nav-btn" data-view="intercept">Intercept</button>
+          <button class="nav-btn" data-view="settings">Settings</button>
+        </nav>
+      </div>
+      <div id="host-list" class="sidebar-section">
+        <div class="section-title">Hosts <span id="host-count" class="count-badge">0</span> <button id="clear-host-filter" class="btn-clear hidden">clear</button></div>
+        <div id="hosts"></div>
+      </div>
+      <div class="sidebar-footer">
+        <div><span id="status-indicator" class="status-dot"></span> <span id="status-text">Connecting...</span></div>
+        <div id="project-status" class="project-status"></div>
+      </div>
+    </aside>
+
+    <main id="content">
+      <!-- Traffic View -->
+      <div id="view-traffic" class="view active">
+        <div class="toolbar">
+          <input type="text" id="traffic-filter" placeholder="status:200  |  method:POST  |  path:/api  |  host:example  |  source:ai" class="filter-input">
+          <label class="filter-toggle">
+            <input type="checkbox" id="filter-hide-noise" checked> Hide noise
+          </label>
+          <label class="filter-toggle">
+            <input type="checkbox" id="filter-ai-only"> AI only
+          </label>
+          <button id="traffic-refresh" class="btn btn-sm">Refresh</button>
+          <span id="traffic-count" class="count-badge">0</span>
+        </div>
+        <div class="table-container">
+          <table id="traffic-table">
+            <thead>
+              <tr>
+                <th class="col-id sortable sort-desc" data-sort="index">#</th>
+                <th class="col-method sortable" data-sort="method">Method</th>
+                <th class="col-host sortable" data-sort="host">Host</th>
+                <th class="col-path sortable" data-sort="path">Path</th>
+                <th class="col-status sortable" data-sort="status">Status</th>
+                <th class="col-length sortable" data-sort="length">Length</th>
+                <th class="col-source sortable" data-sort="source">Source</th>
+              </tr>
+            </thead>
+            <tbody id="traffic-body"></tbody>
+          </table>
+        </div>
+        <div id="resize-handle" class="resize-handle hidden"></div>
+        <div id="traffic-detail" class="detail-pane hidden">
+          <div class="detail-toolbar">
+            <button id="btn-send-to-repeater" class="btn btn-sm btn-primary">Send to Repeater</button>
+          </div>
+          <div class="detail-split">
+            <div class="detail-split-pane">
+              <div class="pane-header">Request</div>
+              <pre id="detail-request-raw" class="raw-http"></pre>
+            </div>
+            <div class="detail-split-pane">
+              <div class="pane-header">Response</div>
+              <pre id="detail-response-raw" class="raw-http"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Repeater View -->
+      <div id="view-repeater" class="view">
+        <div class="repeater-layout">
+          <div class="repeater-config">
+            <div class="repeater-fields">
+              <label>Host <input type="text" id="rep-host" placeholder="example.com" class="input-sm"></label>
+              <label>Port <input type="number" id="rep-port" value="443" class="input-sm input-narrow"></label>
+              <label class="checkbox-label"><input type="checkbox" id="rep-tls" checked> TLS</label>
+              <label>HTTP <select id="rep-http-version" class="input-sm input-narrow"><option value="1">1.1</option><option value="2">2</option></select></label>
+              <button id="rep-send" class="btn btn-primary">Send</button>
+            </div>
+            <div id="rep-note" class="repeater-note"></div>
+          </div>
+          <div class="repeater-panes">
+            <div class="repeater-pane">
+              <div class="pane-header">Request</div>
+              <div class="editor-wrap">
+                <pre id="rep-request-highlight" class="editor-highlight raw-http"></pre>
+                <textarea id="rep-request" class="editor-input" spellcheck="false" placeholder="GET / HTTP/1.1&#10;Host: example.com&#10;&#10;"></textarea>
+              </div>
+            </div>
+            <div class="repeater-pane">
+              <div class="pane-header">Response <span id="rep-time" class="time-badge"></span></div>
+              <pre id="rep-response" class="raw-editor readonly"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Intercept View -->
+      <div id="view-intercept" class="view">
+        <div class="toolbar">
+          <span id="intercept-status">Intercept is off</span>
+          <button id="intercept-toggle" class="btn btn-sm">Enable</button>
+        </div>
+        <div id="intercept-list" class="table-container">
+          <p class="empty-state">No intercepted requests. Enable intercept on a proxy first.</p>
+        </div>
+      </div>
+
+      <!-- Settings View -->
+      <div id="view-settings" class="view">
+        <div class="settings-panel">
+          <h2 class="settings-title">Preferences</h2>
+          <div class="settings-group">
+            <label class="settings-label">Theme
+              <select id="pref-theme" class="input-sm settings-input">
+                <option value="obsidian">Obsidian (default)</option>
+                <option value="dracula">Dracula</option>
+                <option value="gruvbox">Gruvbox</option>
+                <option value="nord">Nord</option>
+                <option value="monokai">Monokai Pro</option>
+                <option value="solarized">Solarized Dark</option>
+                <option value="catppuccin">Catppuccin Mocha</option>
+                <option value="rosepine">Rosé Pine</option>
+                <option value="midnight">Midnight Blue</option>
+                <option value="ember">Ember</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Editor Font
+              <select id="pref-font" class="input-sm settings-input">
+                <option value="'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace">System Mono (default)</option>
+                <option value="'Cascadia Code', monospace">Cascadia Code</option>
+                <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+                <option value="'Fira Code', monospace">Fira Code</option>
+                <option value="'SF Mono', monospace">SF Mono</option>
+                <option value="'Consolas', monospace">Consolas</option>
+                <option value="'Source Code Pro', monospace">Source Code Pro</option>
+                <option value="'IBM Plex Mono', monospace">IBM Plex Mono</option>
+                <option value="'Hack', monospace">Hack</option>
+                <option value="'Menlo', monospace">Menlo</option>
+                <option value="monospace">Generic Monospace</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Font Size
+              <select id="pref-font-size" class="input-sm settings-input">
+                <option value="10px">10px</option>
+                <option value="11px">11px</option>
+                <option value="12px" selected>12px</option>
+                <option value="13px">13px</option>
+                <option value="14px">14px</option>
+                <option value="15px">15px</option>
+                <option value="16px">16px</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Line Height
+              <select id="pref-line-height" class="input-sm settings-input">
+                <option value="1.2">Tight (1.2)</option>
+                <option value="1.4">Normal (1.4)</option>
+                <option value="1.5" selected>Default (1.5)</option>
+                <option value="1.6">Relaxed (1.6)</option>
+                <option value="1.8">Spacious (1.8)</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-group">
+            <label class="settings-label">Word Wrap in Response
+              <select id="pref-wrap" class="input-sm settings-input">
+                <option value="pre-wrap" selected>Wrap</option>
+                <option value="pre">No Wrap (scroll)</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-preview">
+            <div class="pane-header">Preview</div>
+            <pre id="settings-preview-text" class="raw-http" style="padding:10px 12px; height:160px; overflow:auto; background:var(--bg);"></pre>
+          </div>
+
+          <h2 class="settings-title" style="margin-top:28px;">Scope Rules</h2>
+          <div class="settings-group">
+            <label class="settings-label">Load from file
+              <div style="display:flex; gap:6px;">
+                <input type="text" id="scope-file" class="input-sm" style="width:180px" placeholder="/path/to/scope.yaml">
+                <button id="scope-load-btn" class="btn btn-sm">Load</button>
+              </div>
+            </label>
+          </div>
+          <div class="settings-group">
+            <div class="settings-label">Add Rule</div>
+            <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+              <select id="scope-type" class="input-sm" style="width:84px">
+                <option value="include">Include</option>
+                <option value="exclude">Exclude</option>
+              </select>
+              <input type="text" id="scope-host" class="input-sm" style="width:160px" placeholder="Host (e.g. example.com)">
+              <input type="text" id="scope-port" class="input-sm" style="width:64px" placeholder="Port">
+              <input type="text" id="scope-path" class="input-sm" style="width:100px" placeholder="Path prefix">
+              <button id="scope-add-btn" class="btn btn-sm btn-primary">Add</button>
+            </div>
+          </div>
+          <div id="scope-rules-display" style="margin-top:12px;">
+            <div class="pane-header">Current Rules <button id="scope-refresh-btn" class="btn-clear">refresh</button></div>
+            <div id="scope-includes" style="padding:6px 12px;"></div>
+            <div id="scope-excludes" style="padding:6px 12px;"></div>
+          </div>
+          <div style="margin-top:12px;">
+            <button id="scope-reset-btn" class="btn btn-sm" style="color:var(--red);">Reset All Scope Rules</button>
+          </div>
+
+          <h2 class="settings-title" style="margin-top:28px;">Proxy</h2>
+          <div id="proxy-info" style="padding:6px 0; font-size:11px; color:var(--text-muted);">Loading...</div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Context menu -->
+  <div id="context-menu" class="context-menu hidden">
+    <button class="context-menu-item" data-action="copy-curl">Copy as curl</button>
+    <button class="context-menu-item" data-action="copy-curl-proxy">Copy as curl (through proxy)</button>
+    <button class="context-menu-item" data-action="copy-raw">Copy raw request</button>
+    <button class="context-menu-item" data-action="send-repeater">Send to Repeater</button>
+  </div>
+
+  <script src="assets/app.js"></script>
+  <script>
+  // Noise filter -- hides common browser/CDN noise from traffic table.
+  // This runs after app.js and patches the filter pipeline via MutationObserver.
+  (function() {
+    var NOISE_PATTERNS = [
+      'googleapis.com', 'gvt1.com', 'gvt2.com', 'gvt3.com',
+      'google.com', 'google-analytics.com', 'googletagmanager.com',
+      'gstatic.com', 'typekit.net', 'cloudfront.net',
+      'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
+      'facebook.com', 'fbcdn.net', 'hotjar.com', 'sentry.io',
+      'cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com',
+      'fonts.googleapis.com', 'fonts.gstatic.com',
+      'chrome-extension://', 'moz-extension://',
+      'safebrowsing.googleapis.com', 'update.googleapis.com',
+      'accounts.google.com', 'clients1.google.com',
+      'ocsp.', 'crl.', 'detectportal.firefox.com',
+    ];
+
+    // Noise extensions (static assets that clutter traffic)
+    var NOISE_EXTENSIONS = [
+      '.woff', '.woff2', '.ttf', '.eot', '.otf',
+      '.ico', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp',
+      '.map',
+    ];
+
+    var checkbox = document.getElementById('filter-hide-noise');
+    if (!checkbox) return;
+
+    function isNoiseRow(tr) {
+      var hostCell = tr.querySelector('.col-host');
+      var pathCell = tr.querySelector('.col-path');
+      if (!hostCell || !pathCell) return false;
+
+      var host = (hostCell.textContent || '').toLowerCase();
+      var path = (pathCell.textContent || pathCell.getAttribute('title') || '').toLowerCase();
+
+      for (var i = 0; i < NOISE_PATTERNS.length; i++) {
+        if (host.indexOf(NOISE_PATTERNS[i]) !== -1) return true;
+        if (path.indexOf(NOISE_PATTERNS[i]) !== -1) return true;
+      }
+
+      for (var j = 0; j < NOISE_EXTENSIONS.length; j++) {
+        if (path.lastIndexOf(NOISE_EXTENSIONS[j]) === path.length - NOISE_EXTENSIONS[j].length) return true;
+      }
+
+      return false;
+    }
+
+    function applyNoiseFilter() {
+      if (!checkbox.checked) {
+        var hidden = document.querySelectorAll('#traffic-body tr.noise-hidden');
+        for (var k = 0; k < hidden.length; k++) {
+          hidden[k].classList.remove('noise-hidden');
+        }
+        return;
+      }
+      var rows = document.querySelectorAll('#traffic-body tr');
+      for (var i = 0; i < rows.length; i++) {
+        if (isNoiseRow(rows[i])) {
+          rows[i].classList.add('noise-hidden');
+        } else {
+          rows[i].classList.remove('noise-hidden');
+        }
+      }
+    }
+
+    // Re-apply whenever the tbody content changes (app.js re-renders via innerHTML)
+    var tbody = document.getElementById('traffic-body');
+    if (tbody) {
+      var observer = new MutationObserver(function() {
+        if (checkbox.checked) applyNoiseFilter();
+      });
+      observer.observe(tbody, { childList: true, subtree: true });
+    }
+
+    checkbox.addEventListener('change', applyNoiseFilter);
+
+    // Apply on initial load after a tick (app.js may not have rendered yet)
+    setTimeout(applyNoiseFilter, 500);
+  })();
+  </script>
+</body>
+</html>

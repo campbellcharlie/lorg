@@ -1,0 +1,59 @@
+{
+  "name": "lorg",
+  "version": "2026.3.9",
+  "author": {
+    "name": "Gitesh Sharma",
+    "email": "gitesh@lorg.com"
+  },
+  "main": "./src/index.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^36.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.campbellcharlie.lorg",
+    "productName": "lorg",
+    "extraResources": [
+      {
+        "from": "bin/${os}/${arch}/",
+        "to": "bin",
+        "filter": [
+          "lorg*",
+          "cook*"
+        ]
+      },
+      {
+        "from": "../../lrx/frontend/dist/",
+        "to": "frontend"
+      }
+    ],
+    "files": [
+      "src/index.js",
+      "src/preload.js",
+      "src/icons/**/*"
+    ],
+    "artifactName": "${productName}-${os}-${arch}-${version}.${ext}",
+    "mac": {
+      "icon": "src/icons/lorg.png",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "icon": "src/icons/lorg.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "src/icons/lorg.png",
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}
