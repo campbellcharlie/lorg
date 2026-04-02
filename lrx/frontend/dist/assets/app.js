@@ -263,7 +263,8 @@
       case 'path': return (req.path || req.url || '/').toLowerCase();
       case 'status': return resp.status || 0;
       case 'length': return resp.length || 0;
-      case 'source': return (row.generated_by || '').indexOf('ai/mcp') !== -1 ? 'a' : 'z';
+      case 'source': var g = row.generated_by || ''; return g.indexOf('ai/mcp') !== -1 ? 'a' : g.indexOf('repeater/') !== -1 ? 'm' : 'z';
+      case 'time': return row.created || '';
       default: return 0;
     }
   }
@@ -292,6 +293,12 @@
 
     $('#traffic-count').textContent = trafficData.length;
 
+    if (trafficData.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No traffic captured yet. Start a proxy or send requests via MCP.</td></tr>';
+      lastTrafficFingerprint = '';
+      return;
+    }
+
     // Update sort indicators on headers
     $$('#traffic-table th').forEach(function(th) {
       th.classList.remove('sort-asc', 'sort-desc');
@@ -309,8 +316,11 @@
       var path = req.path || req.url || '/';
       var status = resp.status || '';
       var length = resp.length || '';
-      var source = (row.generated_by || '').indexOf('ai/mcp') !== -1 ? 'AI' : 'Proxy';
-      var sourceClass = source === 'AI' ? 'source-ai' : 'source-proxy';
+      var genBy = row.generated_by || '';
+      var source = genBy.indexOf('ai/mcp') !== -1 ? 'AI' : genBy.indexOf('repeater/') !== -1 ? 'Repeater' : 'Proxy';
+      var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : 'source-proxy';
+      var created = row.created || '';
+      var timeStr = created ? formatTime(created) : '';
       var methodClass = 'method-' + method.toLowerCase();
       var statusClass = status >= 500 ? 'status-5xx' : status >= 400 ? 'status-4xx' : status >= 300 ? 'status-3xx' : status >= 200 ? 'status-2xx' : '';
       var selected = row.id === selectedTrafficId ? 'selected' : '';
@@ -323,6 +333,7 @@
         '<td class="col-status"><span class="' + statusClass + '">' + escapeHtml(String(status)) + '</span></td>' +
         '<td class="col-length">' + (length ? formatBytes(length) : '') + '</td>' +
         '<td class="col-source"><span class="' + sourceClass + '">' + source + '</span></td>' +
+        '<td class="col-time">' + escapeHtml(timeStr) + '</td>' +
         '</tr>';
     }).join('');
 
@@ -335,24 +346,35 @@
     selectedTrafficId = id;
     renderTraffic(true);
 
-    // Fetch raw request and response
-    var reqData = await api('/api/collections/_req/records/' + id);
-    var respData = await api('/api/collections/_resp/records/' + id);
+    // Fetch from unified endpoint (checks _req/_resp, then _data.req/resp, then reconstructs from JSON)
+    var detail = await api('/api/traffic/' + id + '/detail');
 
     var detailPane = $('#traffic-detail');
     detailPane.classList.remove('hidden');
     var resizeHandle = document.getElementById('resize-handle');
     if (resizeHandle) resizeHandle.classList.remove('hidden');
 
-    $('#detail-request-raw').innerHTML = reqData ? highlightHTTP(reqData.raw || 'No request data') : 'Failed to load';
-    $('#detail-response-raw').innerHTML = respData ? highlightHTTP(respData.raw || 'No response data') : 'Failed to load';
+    // Store raw data for format toggle
+    detailPane._rawRequest = '';
+    detailPane._rawResponse = '';
+    detailPane._detailSource = 'none';
+
+    if (detail) {
+      detailPane._rawRequest = detail.request || '';
+      detailPane._rawResponse = detail.response || '';
+      detailPane._detailSource = detail.source || 'none';
+      $('#detail-request-raw').innerHTML = highlightHTTP(detail.request || 'No request data');
+      renderResponseWithFormat(detail.response, 'pretty');
+    } else {
+      $('#detail-request-raw').innerHTML = 'Failed to load';
+      $('#detail-response-raw').innerHTML = 'Failed to load';
+    }
 
     // Store for "send to repeater"
-    detailPane.dataset.reqRaw = reqData ? reqData.raw || '' : '';
+    detailPane.dataset.reqRaw = detailPane._rawRequest;
     detailPane.dataset.host = '';
     detailPane.dataset.port = '';
 
-    // Try to extract host/port from the _data record
     var row = trafficData.find(function(r) { return r.id === id; });
     if (row) {
       detailPane.dataset.host = (row.host || '').replace(/^https?:\/\//, '');
@@ -361,7 +383,190 @@
     }
   }
 
+  // --- Response Format Toggle ---
+  var currentResponseFormat = 'pretty';
+
+  function renderResponseWithFormat(rawResp, format) {
+    var el = $('#detail-response-raw');
+    if (!rawResp) { el.innerHTML = 'No response data'; return; }
+
+    currentResponseFormat = format;
+
+    // Update active button
+    $$('.fmt-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === format); });
+
+    if (format === 'pretty') {
+      el.innerHTML = highlightHTTP(rawResp);
+    } else if (format === 'raw') {
+      el.textContent = rawResp;
+    } else if (format === 'headers') {
+      var headerEnd = rawResp.indexOf('\r\n\r\n');
+      if (headerEnd < 0) headerEnd = rawResp.indexOf('\n\n');
+      var headers = headerEnd >= 0 ? rawResp.substring(0, headerEnd) : rawResp;
+      el.innerHTML = highlightHTTP(headers);
+    }
+  }
+
   // --- Repeater ---
+  var reqInput, reqHighlight;
+
+  // Highlight for editor overlay -- no line numbers, no text transforms.
+  // The output must contain the exact same characters as the textarea so
+  // the transparent textarea and the coloured <pre> stay aligned.
+  function highlightHTTPNoLineNumbers(raw) {
+    if (!raw) return '';
+    // Do NOT normalise \r\n or pretty-print -- must match textarea verbatim
+    var lines = raw.split('\n');
+    var inBody = false;
+    var result = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      // Detect header/body boundary (empty line)
+      if (!inBody && line.replace(/\r$/, '') === '') {
+        inBody = true;
+        result.push(line); // preserve the blank line as-is
+        continue;
+      }
+      if (inBody) {
+        result.push('<span class="hl-body">' + escapeHtml(line) + '</span>');
+        continue;
+      }
+      var escaped = escapeHtml(line);
+      if (i === 0) {
+        result.push(highlightFirstLine(escaped));
+      } else {
+        var colonIdx = escaped.indexOf(':');
+        if (colonIdx > 0) {
+          var hName = escaped.substring(0, colonIdx);
+          var hValue = escaped.substring(colonIdx + 1);
+          result.push('<span class="hl-header-name">' + hName + '</span><span class="hl-colon">:</span><span class="hl-header-value">' + hValue + '</span>');
+        } else {
+          result.push(escaped);
+        }
+      }
+    }
+    return result.join('\n');
+  }
+
+  function syncRequestHighlight() {
+    if (!reqInput || !reqHighlight) return;
+    reqHighlight.innerHTML = highlightHTTPNoLineNumbers(reqInput.value) || '\n';
+  }
+
+  // --- Repeater Tabs ---
+  var repeaterTabs = [];
+  var activeTabIndex = -1;
+  var MAX_REPEATER_TABS = 20;
+
+  function loadRepeaterTabs() {
+    try { repeaterTabs = JSON.parse(localStorage.getItem('lorg-repeater-history') || '[]'); } catch(e) { repeaterTabs = []; }
+    renderRepeaterTabs();
+  }
+
+  function saveRepeaterTabs() {
+    try { localStorage.setItem('lorg-repeater-history', JSON.stringify(repeaterTabs)); } catch(e) {}
+  }
+
+  function renderRepeaterTabs() {
+    var container = $('#repeater-tabs');
+    if (!container) return;
+    var tabsHtml = repeaterTabs.map(function(tab, idx) {
+      var label = tab.host || 'New';
+      if (label.length > 20) label = label.substring(0, 20) + '\u2026';
+      var active = idx === activeTabIndex ? 'active' : '';
+      return '<div class="repeater-tab ' + active + '" data-tab="' + idx + '" title="' + escapeAttr(tab.host || '') + '">' +
+        '#' + (idx + 1) + ' ' + escapeHtml(label) +
+        '<span class="repeater-tab-close" data-close="' + idx + '">&times;</span>' +
+        '</div>';
+    }).join('');
+    tabsHtml += '<button class="repeater-tab-add" id="rep-tab-add" title="New tab">+</button>';
+    container.innerHTML = tabsHtml;
+
+    // Bind tab clicks
+    $$('.repeater-tab', container).forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        if (e.target.classList.contains('repeater-tab-close')) return;
+        switchRepeaterTab(parseInt(el.dataset.tab, 10));
+      });
+    });
+    $$('.repeater-tab-close', container).forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        e.stopPropagation();
+        closeRepeaterTab(parseInt(el.dataset.close, 10));
+      });
+    });
+    var addBtn = $('#rep-tab-add');
+    if (addBtn) addBtn.addEventListener('click', function() { addRepeaterTab('', '443', true, '', '', ''); });
+  }
+
+  function addRepeaterTab(host, port, tls, request, response, time) {
+    if (repeaterTabs.length >= MAX_REPEATER_TABS) {
+      repeaterTabs.shift();
+    }
+    repeaterTabs.push({host: host, port: port, tls: tls, request: request, response: response, time: time});
+    activeTabIndex = repeaterTabs.length - 1;
+    saveRepeaterTabs();
+    renderRepeaterTabs();
+    loadRepeaterTabData(activeTabIndex);
+  }
+
+  function switchRepeaterTab(idx) {
+    if (idx < 0 || idx >= repeaterTabs.length) return;
+    saveCurrentTabState();
+    activeTabIndex = idx;
+    renderRepeaterTabs();
+    loadRepeaterTabData(idx);
+  }
+
+  function closeRepeaterTab(idx) {
+    if (idx < 0 || idx >= repeaterTabs.length) return;
+    repeaterTabs.splice(idx, 1);
+    if (activeTabIndex >= repeaterTabs.length) activeTabIndex = repeaterTabs.length - 1;
+    if (activeTabIndex < 0) activeTabIndex = -1;
+    saveRepeaterTabs();
+    renderRepeaterTabs();
+    if (activeTabIndex >= 0) {
+      loadRepeaterTabData(activeTabIndex);
+    } else {
+      $('#rep-host').value = '';
+      $('#rep-port').value = '443';
+      $('#rep-tls').checked = true;
+      if (reqInput) reqInput.value = '';
+      syncRequestHighlight();
+      $('#rep-response').textContent = '';
+      $('#rep-time').textContent = '';
+    }
+  }
+
+  function saveCurrentTabState() {
+    if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) return;
+    repeaterTabs[activeTabIndex] = {
+      host: $('#rep-host').value,
+      port: $('#rep-port').value,
+      tls: $('#rep-tls').checked,
+      request: reqInput ? reqInput.value : '',
+      response: $('#rep-response').innerHTML || '',
+      time: $('#rep-time').textContent || '',
+    };
+    saveRepeaterTabs();
+  }
+
+  function loadRepeaterTabData(idx) {
+    if (idx < 0 || idx >= repeaterTabs.length) return;
+    var tab = repeaterTabs[idx];
+    $('#rep-host').value = tab.host || '';
+    $('#rep-port').value = tab.port || '443';
+    $('#rep-tls').checked = tab.tls !== false;
+    if (reqInput) reqInput.value = tab.request || '';
+    syncRequestHighlight();
+    if (tab.response) {
+      $('#rep-response').innerHTML = tab.response;
+    } else {
+      $('#rep-response').textContent = '';
+    }
+    $('#rep-time').textContent = tab.time || '';
+  }
+
   function sendToRepeater() {
     var detailPane = $('#traffic-detail');
     var raw = detailPane.dataset.reqRaw || '';
@@ -369,19 +574,11 @@
     var port = detailPane.dataset.port || '443';
     var tls = detailPane.dataset.tls === 'true';
 
-    // Auto-detect HTTP version from request line
     var isH2 = /HTTP\/2/i.test(raw.split('\n')[0] || '');
-
-    $('#rep-host').value = host;
-    $('#rep-port').value = port;
-    $('#rep-tls').checked = tls;
     $('#rep-http-version').value = isH2 ? '2' : '1';
-    $('#rep-request').value = raw;
-    $('#rep-request-highlight').innerHTML = highlightHTTP(raw) || '\n';
-    $('#rep-response').textContent = '';
-    $('#rep-time').textContent = '';
-    $('#rep-note').textContent = '';
 
+    addRepeaterTab(host, port, tls, raw, '', '');
+    $('#rep-note').textContent = '';
     switchView('repeater');
   }
 
@@ -438,6 +635,7 @@
     } else {
       $('#rep-response').textContent = 'Request failed -- check host and port';
     }
+    saveCurrentTabState();
   }
 
   // --- Navigation ---
@@ -452,6 +650,21 @@
     if (bytes < 1024) return bytes + 'B';
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'K';
     return (bytes / 1048576).toFixed(1) + 'M';
+  }
+
+  function formatTime(isoStr) {
+    try {
+      var d = new Date(isoStr);
+      var now = new Date();
+      var diff = (now - d) / 1000;
+      if (diff < 60) return Math.floor(diff) + 's ago';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      var h = d.getHours().toString().padStart(2, '0');
+      var m = d.getMinutes().toString().padStart(2, '0');
+      var s = d.getSeconds().toString().padStart(2, '0');
+      return h + ':' + m + ':' + s;
+    } catch(e) { return ''; }
   }
 
   function escapeHtml(str) {
@@ -562,19 +775,12 @@
   }
 
   function highlightFirstLine(line) {
-    // Request: GET /path HTTP/1.1
-    var reqMatch = line.match(/^(<span[^>]*>)?(\S+)(\s+)(\S+)(\s+)(HTTP\/[\d.]+)/i);
+    // Request: GET /path HTTP/1.1 (must preserve every character including trailing)
+    var reqMatch = line.match(/^(\S+)(\s+)(\S+)(\s+)(HTTP\/[\d.]+)(.*)/i);
     if (reqMatch) {
-      return '<span class="hl-method">' + reqMatch[2] + '</span>' + reqMatch[3] +
-             '<span class="hl-url">' + reqMatch[4] + '</span>' + reqMatch[5] +
-             '<span class="hl-version">' + reqMatch[6] + '</span>';
-    }
-    // Also try on the raw escaped line without spans
-    var parts = line.match(/^(\S+)\s+(\S+)\s+(HTTP\/[\d.]+)/i);
-    if (parts) {
-      return '<span class="hl-method">' + parts[1] + '</span> ' +
-             '<span class="hl-url">' + parts[2] + '</span> ' +
-             '<span class="hl-version">' + parts[3] + '</span>';
+      return '<span class="hl-method">' + reqMatch[1] + '</span>' + reqMatch[2] +
+             '<span class="hl-url">' + reqMatch[3] + '</span>' + reqMatch[4] +
+             '<span class="hl-version">' + reqMatch[5] + '</span>' + reqMatch[6];
     }
     // Response: HTTP/1.1 200 OK
     var respMatch = line.match(/^(HTTP\/[\d.]+)\s+(\d{3})\s*(.*)/i);
@@ -632,6 +838,22 @@
   function loadPreferences() {
     var prefs = {};
     try { prefs = JSON.parse(localStorage.getItem('lorg-prefs') || '{}'); } catch(e) {}
+    applyPrefsObject(prefs);
+    // Try server in background
+    api('/api/collections/_settings/records/UIPREFS________').then(function(rec) {
+      if (rec && rec.value) {
+        try {
+          var serverPrefs = JSON.parse(rec.value);
+          if (serverPrefs && serverPrefs.theme) {
+            applyPrefsObject(serverPrefs);
+            localStorage.setItem('lorg-prefs', JSON.stringify(serverPrefs));
+          }
+        } catch(e) {}
+      }
+    }).catch(function() {});
+  }
+
+  function applyPrefsObject(prefs) {
     if (prefs.theme) { applyTheme(prefs.theme); var el = $('#pref-theme'); if (el) el.value = prefs.theme; }
     if (prefs.font) { document.documentElement.style.setProperty('--font', prefs.font); $('#pref-font').value = prefs.font; }
     if (prefs.fontSize) { document.documentElement.style.setProperty('--font-size', prefs.fontSize); $('#pref-font-size').value = prefs.fontSize; }
@@ -663,6 +885,11 @@
       wrap: $('#pref-wrap').value,
     };
     localStorage.setItem('lorg-prefs', JSON.stringify(prefs));
+    // Try to save to server (fire-and-forget)
+    api('/api/collections/_settings/records/UIPREFS________', {
+      method: 'PATCH',
+      body: JSON.stringify({ value: JSON.stringify(prefs) }),
+    }).catch(function() {});
   }
 
   function applyPreference(key, value) {
@@ -709,40 +936,216 @@
 
   // --- Scope Management ---
   async function loadScopeRules() {
-    var data = await api('/mcp/message', { method: 'POST' }); // Can't call MCP tools from frontend directly
-    // Use REST fallback — fetch scope rules via a simple proxy endpoint
-    // For now, we'll store scope state client-side and sync via the settings UI
+    var data = await api('/api/scope');
     var el = $('#scope-includes');
     var el2 = $('#scope-excludes');
-    el.innerHTML = '<span style="color:var(--text-dim); font-size:10px;">Scope rules are managed via MCP tools (scopeLoad, scopeAddRule, scopeCheck). Use Claude Code or the CLI to manage scope.</span>';
-    el2.innerHTML = '';
+    if (!data) {
+      el.innerHTML = '<span style="color:var(--text-dim); font-size:10px;">Failed to load scope rules</span>';
+      el2.innerHTML = '';
+      return;
+    }
+
+    var includes = data.includes || [];
+    var excludes = data.excludes || [];
+
+    if (includes.length === 0 && excludes.length === 0) {
+      el.innerHTML = '<span style="color:var(--text-dim); font-size:10px;">No scope rules. Add rules below or load from a file.</span>';
+      el2.innerHTML = '';
+      return;
+    }
+
+    el.innerHTML = includes.map(function(r, i) {
+      return '<div class="scope-rule"><span><span class="scope-tag-include">INCLUDE</span><span class="scope-rule-text">' +
+        escapeHtml(r.host || '*') + (r.port ? ':' + escapeHtml(r.port) : '') + (r.path ? escapeHtml(r.path) : '') +
+        '</span>' + (r.reason ? '<span class="scope-rule-reason">' + escapeHtml(r.reason) + '</span>' : '') +
+        '</span><button class="btn-clear scope-remove-btn" data-scope-type="include" data-scope-idx="' + i + '">&times;</button></div>';
+    }).join('');
+
+    el2.innerHTML = excludes.map(function(r, i) {
+      return '<div class="scope-rule"><span><span class="scope-tag-exclude">EXCLUDE</span><span class="scope-rule-text">' +
+        escapeHtml(r.host || '*') + (r.port ? ':' + escapeHtml(r.port) : '') + (r.path ? escapeHtml(r.path) : '') +
+        '</span>' + (r.reason ? '<span class="scope-rule-reason">' + escapeHtml(r.reason) + '</span>' : '') +
+        '</span><button class="btn-clear scope-remove-btn" data-scope-type="exclude" data-scope-idx="' + i + '">&times;</button></div>';
+    }).join('');
+
+    // Bind remove buttons via event delegation
+    $$('.scope-remove-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        await api('/api/scope/remove', { method: 'POST', body: JSON.stringify({ type: btn.dataset.scopeType, index: parseInt(btn.dataset.scopeIdx, 10) }) });
+        loadScopeRules();
+      });
+    });
   }
 
   function initScope() {
     $('#scope-load-btn').addEventListener('click', async function() {
       var filePath = $('#scope-file').value.trim();
       if (!filePath) return;
-      // This would need an API endpoint to trigger scopeLoad — for now show instructions
-      alert('Use MCP tool: scopeLoad with filePath "' + filePath + '"\n\nScope management is done via Claude Code MCP tools.\nThe UI shows the current state after MCP operations.');
+      var result = await api('/api/scope/load', { method: 'POST', body: JSON.stringify({ filePath: filePath }) });
+      if (result && result.success) {
+        loadScopeRules();
+      } else {
+        var errMsg = (result && result.error) ? result.error : 'Failed to load scope file';
+        $('#scope-includes').innerHTML = '<span style="color:var(--red); font-size:10px;">' + escapeHtml(errMsg) + '</span>';
+      }
     });
 
-    $('#scope-add-btn').addEventListener('click', function() {
+    $('#scope-add-btn').addEventListener('click', async function() {
       var type = $('#scope-type').value;
       var host = $('#scope-host').value.trim();
       var port = $('#scope-port').value.trim();
       var path = $('#scope-path').value.trim();
-      if (!host) { alert('Host is required'); return; }
-      alert('Use MCP tool: scopeAddRule\n  type: ' + type + '\n  host: ' + host + (port ? '\n  port: ' + port : '') + (path ? '\n  path: ' + path : ''));
+      if (!host) { $('#scope-host').focus(); return; }
+      await api('/api/scope/add', {
+        method: 'POST',
+        body: JSON.stringify({ type: type, host: host, port: port, path: path }),
+      });
+      $('#scope-host').value = '';
+      $('#scope-port').value = '';
+      $('#scope-path').value = '';
+      loadScopeRules();
     });
 
-    $('#scope-reset-btn').addEventListener('click', function() {
+    $('#scope-reset-btn').addEventListener('click', async function() {
       if (confirm('Reset all scope rules?')) {
-        alert('Use MCP tool: scopeReset with confirm: true');
+        await api('/api/scope/reset', { method: 'POST', body: JSON.stringify({}) });
+        loadScopeRules();
       }
     });
 
     $('#scope-refresh-btn').addEventListener('click', loadScopeRules);
     loadScopeRules();
+  }
+
+  // --- Intercept View ---
+  var interceptPolling = null;
+
+  async function toggleIntercept() {
+    var data = await api('/api/proxy/list');
+    if (!data || !data.proxies || data.proxies.length === 0) {
+      $('#intercept-status').textContent = 'No proxy running';
+      return;
+    }
+    var proxy = data.proxies[0];
+    var proxyId = proxy.id;
+    var currentState = proxy.intercept;
+    var newState = !currentState;
+
+    await api('/api/collections/_proxies/records/' + proxyId, {
+      method: 'PATCH',
+      body: JSON.stringify({ intercept: newState }),
+    });
+
+    updateInterceptUI(newState);
+  }
+
+  function updateInterceptUI(enabled) {
+    var statusEl = $('#intercept-status');
+    var toggleEl = $('#intercept-toggle');
+    if (enabled) {
+      statusEl.textContent = 'Intercept is on';
+      statusEl.style.color = 'var(--accent)';
+      toggleEl.textContent = 'Disable';
+      toggleEl.classList.add('btn-primary');
+      startInterceptPolling();
+    } else {
+      statusEl.textContent = 'Intercept is off';
+      statusEl.style.color = '';
+      toggleEl.textContent = 'Enable';
+      toggleEl.classList.remove('btn-primary');
+      stopInterceptPolling();
+    }
+  }
+
+  function startInterceptPolling() {
+    if (interceptPolling) return;
+    pollIntercepts();
+    interceptPolling = setInterval(pollIntercepts, 1000);
+  }
+
+  function stopInterceptPolling() {
+    if (interceptPolling) { clearInterval(interceptPolling); interceptPolling = null; }
+  }
+
+  async function pollIntercepts() {
+    var data = await api('/api/collections/_intercept/records?perPage=50&sort=-created');
+    if (!data || !data.items) return;
+    var items = data.items;
+    var countEl = $('#intercept-count');
+    if (countEl) countEl.textContent = items.length;
+
+    var queue = $('#intercept-queue');
+    var emptyEl = $('#intercept-empty');
+    if (items.length === 0) {
+      if (emptyEl) emptyEl.style.display = '';
+      return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    queue.innerHTML = items.map(function(item) {
+      var req = item.req_json || {};
+      var method = req.method || '?';
+      var host = item.host || '';
+      var path = req.path || req.url || '/';
+      return '<div class="intercept-item" data-id="' + escapeAttr(item.id) + '">' +
+        '<span class="method-' + method.toLowerCase() + '">' + escapeHtml(method) + '</span> ' +
+        '<span style="color:var(--text-secondary)">' + escapeHtml(host) + '</span>' +
+        '<span style="color:var(--text-tertiary)">' + escapeHtml(path) + '</span>' +
+        '</div>';
+    }).join('');
+
+    $$('.intercept-item', queue).forEach(function(el) {
+      el.addEventListener('click', function() { selectIntercept(el.dataset.id); });
+    });
+
+    if (!$('#intercept-editor').dataset.currentId && items.length > 0) {
+      selectIntercept(items[0].id);
+    }
+  }
+
+  async function selectIntercept(id) {
+    var detail = await api('/api/traffic/' + id + '/detail');
+    var editor = $('#intercept-editor');
+    editor.classList.remove('hidden');
+    editor.dataset.currentId = id;
+    $('#intercept-req-id').textContent = '#' + id.substring(0, 8);
+
+    var raw = (detail && detail.request) ? detail.request : '';
+    var interceptInput = $('#intercept-request');
+    var interceptHighlight = $('#intercept-highlight');
+    interceptInput.value = raw;
+    interceptHighlight.innerHTML = highlightHTTPNoLineNumbers(raw) || '\n';
+
+    interceptInput.oninput = function() {
+      interceptHighlight.innerHTML = highlightHTTPNoLineNumbers(interceptInput.value) || '\n';
+    };
+    interceptInput.onscroll = function() {
+      interceptHighlight.scrollTop = interceptInput.scrollTop;
+      interceptHighlight.scrollLeft = interceptInput.scrollLeft;
+    };
+  }
+
+  async function interceptAction(action) {
+    var editor = $('#intercept-editor');
+    var id = editor.dataset.currentId;
+    if (!id) return;
+
+    var isEdited = action === 'forward';
+    var editedReq = $('#intercept-request').value;
+
+    await api('/api/intercept/action', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: id,
+        action: action,
+        is_req_edited: isEdited,
+        req_edited: isEdited ? editedReq : '',
+      }),
+    });
+
+    editor.classList.add('hidden');
+    editor.dataset.currentId = '';
+    pollIntercepts();
   }
 
   // --- Proxy Info ---
@@ -804,13 +1207,9 @@
     // Repeater
     $('#rep-send').addEventListener('click', sendRepeaterRequest);
 
-    // Sync request textarea with highlight overlay
-    var reqInput = $('#rep-request');
-    var reqHighlight = $('#rep-request-highlight');
-
-    function syncRequestHighlight() {
-      reqHighlight.innerHTML = highlightHTTP(reqInput.value) || '\n';
-    }
+    // Sync request textarea with highlight overlay (reqInput/reqHighlight are module-scoped)
+    reqInput = $('#rep-request');
+    reqHighlight = $('#rep-request-highlight');
 
     reqInput.addEventListener('input', syncRequestHighlight);
     reqInput.addEventListener('scroll', function() {
@@ -825,8 +1224,44 @@
           e.preventDefault();
           sendRepeaterRequest();
         }
+        if (e.shiftKey && e.key === 'R') { e.preventDefault(); switchView('repeater'); }
+        if (e.shiftKey && e.key === 'T') { e.preventDefault(); switchView('traffic'); }
+        if (e.key === 'f' || e.key === 'F') {
+          if (currentView === 'traffic') { e.preventDefault(); $('#traffic-filter').focus(); }
+        }
+      }
+      if (e.key === 'Escape') {
+        var detail = $('#traffic-detail');
+        if (detail && !detail.classList.contains('hidden')) {
+          detail.classList.add('hidden');
+          var handle = document.getElementById('resize-handle');
+          if (handle) handle.classList.add('hidden');
+          selectedTrafficId = null;
+          renderTraffic(true);
+        } else {
+          $('#traffic-filter').value = '';
+          applyClientFilter();
+        }
       }
     });
+
+    // Response format toggle
+    document.addEventListener('click', function(e) {
+      if (e.target.classList.contains('fmt-btn')) {
+        var detailPane = $('#traffic-detail');
+        renderResponseWithFormat(detailPane._rawResponse || '', e.target.dataset.fmt);
+      }
+    });
+
+    // Intercept view
+    $('#intercept-toggle').addEventListener('click', toggleIntercept);
+    var fwdBtn = $('#intercept-forward');
+    if (fwdBtn) fwdBtn.addEventListener('click', function() { interceptAction('forward'); });
+    var dropBtn = $('#intercept-drop');
+    if (dropBtn) dropBtn.addEventListener('click', function() { interceptAction('drop'); });
+
+    // Load repeater tabs
+    loadRepeaterTabs();
 
     // Resizable detail pane (drag handle between table and detail)
     (function() {
@@ -934,9 +1369,9 @@
         }
 
         // Fetch raw request for curl conversion
-        var reqData = await api('/api/collections/_req/records/' + contextRowId);
-        if (!reqData || !reqData.raw) { alert('Failed to load request'); return; }
-        var rawReq = reqData.raw;
+        var reqDetail = await api('/api/traffic/' + contextRowId + '/detail');
+        if (!reqDetail || !reqDetail.request) { alert('Failed to load request'); return; }
+        var rawReq = reqDetail.request;
 
         if (action === 'copy-raw') {
           navigator.clipboard.writeText(rawReq);
@@ -1014,6 +1449,13 @@
     checkStatus();
     loadHosts();
     loadTraffic();
+
+    // Check initial intercept state
+    api('/api/proxy/list').then(function(data) {
+      if (data && data.proxies && data.proxies.length > 0) {
+        updateInterceptUI(data.proxies[0].intercept || false);
+      }
+    });
 
     // Auto-refresh every 5 seconds
     setInterval(function() {

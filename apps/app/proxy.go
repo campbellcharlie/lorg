@@ -38,7 +38,11 @@ type ProxyManager struct {
 	proxyIndex atomic.Uint64 // Counter for proxy IDs
 }
 
-// Global proxy manager instance
+// ProxyMgr is the global proxy manager instance.
+// Intentionally kept as a package-level var rather than a Backend field because:
+// 1. It is initialized before Backend exists (used during proxy setup)
+// 2. It is accessed from RawProxyWrapper callbacks which don't have Backend reference
+// 3. Multiple packages reference it for request ID coordination
 var ProxyMgr = &ProxyManager{
 	instances: make(map[string]*ProxyInstance),
 }
@@ -277,17 +281,24 @@ func (pm *ProxyManager) StopProxy(id string) error {
 	return err
 }
 
-// StopAllProxies stops all running proxies
+// StopAllProxies stops all running proxies and cleans up all resources
 func (pm *ProxyManager) StopAllProxies() {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-	for id, inst := range pm.instances {
-		if inst != nil && inst.Proxy != nil {
-			if err := inst.Proxy.Stop(); err != nil {
-				log.Printf("[ProxyManager] Error stopping proxy %s: %v", id, err)
-			}
+	pm.mu.Lock()
+	ids := make([]string, 0, len(pm.instances))
+	for id := range pm.instances {
+		ids = append(ids, id)
+	}
+	pm.mu.Unlock()
+
+	for _, id := range ids {
+		if err := pm.StopProxy(id); err != nil {
+			log.Printf("[ProxyManager] Error stopping proxy %s: %v", id, err)
 		}
 	}
+
+	pm.mu.Lock()
+	pm.instances = make(map[string]*ProxyInstance)
+	pm.mu.Unlock()
 }
 
 // ApplyToAllProxies applies a function to all running proxies
@@ -304,64 +315,16 @@ func (pm *ProxyManager) ApplyToAllProxies(fn func(proxy *RawProxyWrapper, proxyI
 // TakeScreenshot captures a screenshot using the Chrome browser attached to a proxy instance
 // Returns: screenshot bytes, file path (if saved), error
 func (pm *ProxyManager) TakeScreenshot(proxyID string, fullPage bool, savePath string) ([]byte, string, error) {
-	pm.mu.Lock()
-	inst := pm.instances[proxyID]
-	if inst == nil {
-		pm.mu.Unlock()
-		return nil, "", fmt.Errorf("proxy %s not found", proxyID)
+	chrome, err := pm.GetChromeRemote(proxyID)
+	if err != nil {
+		return nil, "", err
 	}
 
-	if inst.Browser != "chrome" {
-		pm.mu.Unlock()
-		return nil, "", fmt.Errorf("proxy %s does not have a Chrome browser attached (browser: %s)", proxyID, inst.Browser)
-	}
-
-	// Initialize ChromeRemote if not already present
-	if inst.Chrome == nil {
-		if inst.BrowserCmd == nil || inst.BrowserCmd.Process == nil {
-			pm.mu.Unlock()
-			return nil, "", fmt.Errorf("Chrome browser process not running for proxy %s", proxyID)
-		}
-
-		// Get the profile directory from the browser command
-		var profileDir string
-		for _, arg := range inst.BrowserCmd.Args {
-			if strings.HasPrefix(arg, "--user-data-dir=") {
-				profileDir = strings.TrimPrefix(arg, "--user-data-dir=")
-				break
-			}
-		}
-
-		if profileDir == "" {
-			pm.mu.Unlock()
-			return nil, "", fmt.Errorf("could not determine Chrome profile directory for proxy %s", proxyID)
-		}
-
-		// Get the Chrome debug URL
-		debugURL, err := browser.GetChromeDebugURL(profileDir)
-		if err != nil {
-			pm.mu.Unlock()
-			return nil, "", fmt.Errorf("failed to get Chrome debug URL: %v", err)
-		}
-
-		// Connect to Chrome
-		cr, err := browser.NewChromeRemote(debugURL)
-		if err != nil {
-			pm.mu.Unlock()
-			return nil, "", fmt.Errorf("failed to connect to Chrome: %v", err)
-		}
-		inst.Chrome = cr
-	}
-	chrome := inst.Chrome
-	pm.mu.Unlock()
-
-	// Capture the screenshot
 	screenshotBytes, err := chrome.TakeScreenshot("", fullPage)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to capture screenshot: %v", err)
 	}
 
-	// Save to file if path is provided
 	var filePath string
 	if savePath != "" {
 		if err := os.WriteFile(savePath, screenshotBytes, 0644); err != nil {
@@ -376,55 +339,11 @@ func (pm *ProxyManager) TakeScreenshot(proxyID string, fullPage bool, savePath s
 
 // ClickElement clicks an element on the page using the Chrome browser attached to a proxy instance
 func (pm *ProxyManager) ClickElement(proxyID string, url string, selector string, waitForNavigation bool) error {
-	pm.mu.Lock()
-	inst := pm.instances[proxyID]
-	if inst == nil {
-		pm.mu.Unlock()
-		return fmt.Errorf("proxy %s not found", proxyID)
+	chrome, err := pm.GetChromeRemote(proxyID)
+	if err != nil {
+		return err
 	}
 
-	if inst.Browser != "chrome" {
-		pm.mu.Unlock()
-		return fmt.Errorf("proxy %s does not have a Chrome browser attached (browser: %s)", proxyID, inst.Browser)
-	}
-
-	// Initialize ChromeRemote if not already present
-	if inst.Chrome == nil {
-		if inst.BrowserCmd == nil || inst.BrowserCmd.Process == nil {
-			pm.mu.Unlock()
-			return fmt.Errorf("Chrome browser process not running for proxy %s", proxyID)
-		}
-
-		var profileDir string
-		for _, arg := range inst.BrowserCmd.Args {
-			if strings.HasPrefix(arg, "--user-data-dir=") {
-				profileDir = strings.TrimPrefix(arg, "--user-data-dir=")
-				break
-			}
-		}
-
-		if profileDir == "" {
-			pm.mu.Unlock()
-			return fmt.Errorf("could not determine Chrome profile directory for proxy %s", proxyID)
-		}
-
-		debugURL, err := browser.GetChromeDebugURL(profileDir)
-		if err != nil {
-			pm.mu.Unlock()
-			return fmt.Errorf("failed to get Chrome debug URL: %v", err)
-		}
-
-		cr, err := browser.NewChromeRemote(debugURL)
-		if err != nil {
-			pm.mu.Unlock()
-			return fmt.Errorf("failed to connect to Chrome: %v", err)
-		}
-		inst.Chrome = cr
-	}
-	chrome := inst.Chrome
-	pm.mu.Unlock()
-
-	// Click the element
 	if err := chrome.ClickElement("", url, selector, waitForNavigation); err != nil {
 		return fmt.Errorf("failed to click element: %v", err)
 	}
@@ -434,55 +353,11 @@ func (pm *ProxyManager) ClickElement(proxyID string, url string, selector string
 
 // GetElements retrieves information about clickable elements on the page
 func (pm *ProxyManager) GetElements(proxyID string, url string) ([]browser.ElementInfo, error) {
-	pm.mu.Lock()
-	inst := pm.instances[proxyID]
-	if inst == nil {
-		pm.mu.Unlock()
-		return nil, fmt.Errorf("proxy %s not found", proxyID)
+	chrome, err := pm.GetChromeRemote(proxyID)
+	if err != nil {
+		return nil, err
 	}
 
-	if inst.Browser != "chrome" {
-		pm.mu.Unlock()
-		return nil, fmt.Errorf("proxy %s does not have a Chrome browser attached (browser: %s)", proxyID, inst.Browser)
-	}
-
-	// Initialize ChromeRemote if not already present
-	if inst.Chrome == nil {
-		if inst.BrowserCmd == nil || inst.BrowserCmd.Process == nil {
-			pm.mu.Unlock()
-			return nil, fmt.Errorf("Chrome browser process not running for proxy %s", proxyID)
-		}
-
-		var profileDir string
-		for _, arg := range inst.BrowserCmd.Args {
-			if strings.HasPrefix(arg, "--user-data-dir=") {
-				profileDir = strings.TrimPrefix(arg, "--user-data-dir=")
-				break
-			}
-		}
-
-		if profileDir == "" {
-			pm.mu.Unlock()
-			return nil, fmt.Errorf("could not determine Chrome profile directory for proxy %s", proxyID)
-		}
-
-		debugURL, err := browser.GetChromeDebugURL(profileDir)
-		if err != nil {
-			pm.mu.Unlock()
-			return nil, fmt.Errorf("failed to get Chrome debug URL: %v", err)
-		}
-
-		cr, err := browser.NewChromeRemote(debugURL)
-		if err != nil {
-			pm.mu.Unlock()
-			return nil, fmt.Errorf("failed to connect to Chrome: %v", err)
-		}
-		inst.Chrome = cr
-	}
-	chrome := inst.Chrome
-	pm.mu.Unlock()
-
-	// Get elements from the page
 	elements, err := chrome.GetElements("", url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get elements: %v", err)

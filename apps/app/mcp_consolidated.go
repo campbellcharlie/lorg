@@ -59,7 +59,7 @@ type ConsolidatedSessionArgs struct {
 	Action         string            `json:"action" jsonschema:"required" jsonschema_description:"Operation: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract"`
 	Name           string            `json:"name,omitempty" jsonschema_description:"Session name (create, switch, delete, getHeaders, updateCookies, getCookies, setCookie)"`
 	Cookies        map[string]string `json:"cookies,omitempty" jsonschema_description:"Initial cookies as name:value (create)"`
-	Headers        map[string]string `json:"headers,omitempty" jsonschema_description:"Custom headers (create)"`
+	Headers        FlexibleStringMap `json:"headers,omitempty" jsonschema_description:"Custom headers (create)"`
 	CookieValues   []string          `json:"cookieValues,omitempty" jsonschema_description:"Set-Cookie values to merge (updateCookies)"`
 	CookieName     string            `json:"cookieName,omitempty" jsonschema_description:"Cookie name (setCookie)"`
 	CookieValue    string            `json:"cookieValue,omitempty" jsonschema_description:"Cookie value (setCookie)"`
@@ -418,14 +418,15 @@ func (backend *Backend) trafficTagHandler(ctx context.Context, request mcp.CallT
 
 // ConsolidatedProjectArgs is the union argument struct for the project tool.
 type ConsolidatedProjectArgs struct {
-	Action      string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: setup, info, setName, export, setLogging"`
-	Name        string   `json:"name,omitempty" jsonschema_description:"Project name (setup, setName)"`
-	DbDir       string   `json:"dbDir,omitempty" jsonschema_description:"Directory for SQLite DB files (setup)"`
-	OutputPath  string   `json:"outputPath,omitempty" jsonschema_description:"Output path for export (export)"`
-	ProjectName string   `json:"projectName,omitempty" jsonschema_description:"Project name for export metadata (export)"`
-	HostFilter  string   `json:"hostFilter,omitempty" jsonschema_description:"Only export traffic for this host (export)"`
-	Enabled     bool     `json:"enabled,omitempty" jsonschema_description:"Enable or disable traffic logging (setLogging)"`
-	Sources     []string `json:"sources,omitempty" jsonschema_description:"Which sources to log: proxy, repeater, mcp, template, all (setLogging)"`
+	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
+	Name          string   `json:"name,omitempty" jsonschema_description:"Project name (setup, setName)"`
+	DbDir         string   `json:"dbDir,omitempty" jsonschema_description:"Directory for SQLite DB files (setup)"`
+	OutputPath    string   `json:"outputPath,omitempty" jsonschema_description:"Output path for export (export)"`
+	ProjectName   string   `json:"projectName,omitempty" jsonschema_description:"Project name for export metadata (export)"`
+	HostFilter    string   `json:"hostFilter,omitempty" jsonschema_description:"Only export traffic for this host (export)"`
+	Enabled       bool     `json:"enabled,omitempty" jsonschema_description:"Enable or disable traffic logging (setLogging)"`
+	Sources       []string `json:"sources,omitempty" jsonschema_description:"Which sources to log: proxy, repeater, mcp, template, all (setLogging)"`
+	RedactionMode string   `json:"redactionMode,omitempty" jsonschema_description:"Redaction mode: off, balanced, strict (setRedactionMode)"`
 }
 
 func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -449,8 +450,12 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 	case "setLogging":
 		// Delegate: SetTrafficLoggingArgs uses json:"enabled", json:"sources" -- all match.
 		return backend.setTrafficLoggingHandler(ctx, request)
+	case "setRedactionMode":
+		return backend.setRedactionModeHandler(ctx, request)
+	case "getRedactionMode":
+		return backend.getRedactionModeHandler(ctx, request)
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: setup, info, setName, export, setLogging"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
 	}
 }
 
@@ -458,7 +463,7 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 
 // ConsolidatedRaceTestArgs is the union argument struct for the raceTest tool.
 type ConsolidatedRaceTestArgs struct {
-	Action   string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: parallel, parallelDifferent, h2SinglePacket, lastByteSync"`
+	Action   string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: parallel, parallelDifferent, h2SinglePacket, lastByteSync, firstSequenceSync"`
 	Host     string   `json:"host,omitempty" jsonschema_description:"Target hostname"`
 	Port     int      `json:"port,omitempty" jsonschema_description:"Target port"`
 	TLS      bool     `json:"tls,omitempty" jsonschema_description:"Use TLS"`
@@ -491,8 +496,12 @@ func (backend *Backend) raceTestHandler(ctx context.Context, request mcp.CallToo
 		// Delegate: LastByteSyncArgs uses json:"host", json:"port", json:"tls",
 		// json:"request", json:"count", json:"note" -- all match.
 		return backend.lastByteSyncHandler(ctx, request)
+	case "firstSequenceSync":
+		// Opens N connections in parallel, waits for all handshakes, then sends
+		// the full request simultaneously on all connections.
+		return backend.firstSequenceSyncHandler(ctx, request)
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: parallel, parallelDifferent, h2SinglePacket, lastByteSync"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: parallel, parallelDifferent, h2SinglePacket, lastByteSync, firstSequenceSync"), nil
 	}
 }
 
@@ -644,12 +653,12 @@ func (backend *Backend) analyzeHandler(ctx context.Context, request mcp.CallTool
 
 // ConsolidatedCompareArgs is the union argument struct for the compare tool.
 type ConsolidatedCompareArgs struct {
-	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: responses, byId"`
-	Response1     string   `json:"response1,omitempty" jsonschema_description:"First raw HTTP response (responses)"`
-	Response2     string   `json:"response2,omitempty" jsonschema_description:"Second raw HTTP response (responses)"`
+	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: responses, byId, structural, jsonDiff"`
+	Response1     string   `json:"response1,omitempty" jsonschema_description:"First raw HTTP response (responses, structural) or JSON string (jsonDiff)"`
+	Response2     string   `json:"response2,omitempty" jsonschema_description:"Second raw HTTP response (responses, structural) or JSON string (jsonDiff)"`
 	ID1           string   `json:"id1,omitempty" jsonschema_description:"First request ID from PocketBase (byId)"`
 	ID2           string   `json:"id2,omitempty" jsonschema_description:"Second request ID from PocketBase (byId)"`
-	IgnoreHeaders []string `json:"ignoreHeaders,omitempty" jsonschema_description:"Header names to ignore in comparison (responses, byId)"`
+	IgnoreHeaders []string `json:"ignoreHeaders,omitempty" jsonschema_description:"Header names to ignore in comparison (responses, byId, structural)"`
 }
 
 func (backend *Backend) compareHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -667,7 +676,13 @@ func (backend *Backend) compareHandler(ctx context.Context, request mcp.CallTool
 		// Delegate: CompareTrafficByIdArgs uses json:"id1", json:"id2",
 		// json:"ignoreHeaders" -- all match.
 		return backend.compareTrafficByIdHandler(ctx, request)
+	case "structural":
+		// Header-by-header + body structure diff
+		return backend.structuralDiffHandler(ctx, args.Response1, args.Response2, args.IgnoreHeaders)
+	case "jsonDiff":
+		// Standalone JSON tree diff (response1/response2 hold JSON strings)
+		return backend.jsonDiffHandler(ctx, args.Response1, args.Response2)
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: responses, byId"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: responses, byId, structural, jsonDiff"), nil
 	}
 }

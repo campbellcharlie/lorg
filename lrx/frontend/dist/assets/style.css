@@ -500,6 +500,16 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
   color: var(--text-tertiary);
   background: rgba(255, 255, 255, 0.04);
 }
+.source-repeater {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  background: rgba(96, 165, 250, 0.12);
+  color: var(--blue);
+}
 
 /* ============================================================
    Detail Pane
@@ -755,6 +765,17 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
   background: var(--bg);
   z-index: 1;
 }
+/* Must match .editor-input exactly for overlay alignment */
+.editor-highlight.editor-highlight {
+  font-family: var(--font);
+  font-size: var(--font-size);
+  line-height: 1.5;
+  white-space: pre;
+  word-break: normal;
+  tab-size: 4;
+  word-wrap: normal;
+  overflow-wrap: normal;
+}
 
 .editor-input {
   position: absolute;
@@ -773,6 +794,9 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
   font-size: var(--font-size);
   line-height: 1.5;
   white-space: pre;
+  word-break: normal;
+  word-wrap: normal;
+  overflow-wrap: normal;
   overflow: auto;
   tab-size: 4;
   z-index: 2;
@@ -1155,4 +1179,181 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
    ============================================================ */
 .noise-hidden {
   display: none !important;
+}
+
+/* ============================================================
+   Time Column
+   ============================================================ */
+.col-time { width: 72px; }
+td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-tertiary); }
+
+/* ============================================================
+   Response Format Toggle
+   ============================================================ */
+.detail-format-toggle {
+  display: inline-flex;
+  gap: 1px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 1px;
+  margin-left: 8px;
+}
+.fmt-btn {
+  background: none;
+  border: none;
+  color: var(--text-ghost);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background var(--transition), color var(--transition);
+}
+.fmt-btn:hover {
+  color: var(--text-secondary);
+}
+.fmt-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ============================================================
+   Repeater Tabs
+   ============================================================ */
+.repeater-tabs {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 8px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.repeater-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition);
+  user-select: none;
+}
+.repeater-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.repeater-tab.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.repeater-tab-close {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-ghost);
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color var(--transition);
+}
+.repeater-tab-close:hover {
+  color: var(--red);
+}
+.repeater-tab-add {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-ghost);
+  font-size: 14px;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  flex-shrink: 0;
+}
+.repeater-tab-add:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ============================================================
+   Intercept View
+   ============================================================ */
+.intercept-split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.intercept-queue {
+  width: 320px;
+  min-width: 240px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  background: var(--bg);
+}
+.intercept-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  transition: background var(--transition);
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.intercept-item:hover {
+  background: var(--bg-hover);
+}
+.intercept-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.intercept-editor.hidden {
+  display: none;
+}
+.intercept-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+/* ============================================================
+   Sidebar Tooltip
+   ============================================================ */
+.host-item {
+  position: relative;
+}
+.host-item[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text);
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }

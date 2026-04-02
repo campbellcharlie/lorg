@@ -71,7 +71,7 @@ func init() {
 
 			// sites
 
-			log.Println("[migration][init] Creating collectionasdf: ", db.Name)
+			log.Println("[migration][init] Creating collection: ", db.Name)
 		}
 
 		// Create indexes with proper error checking

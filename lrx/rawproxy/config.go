@@ -1,6 +1,7 @@
 package rawproxy
 
 import (
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -67,15 +68,5 @@ var requestIDCounter atomic.Uint64
 // generateRequestID creates a unique ID for each request
 func generateRequestID() string {
 	id := requestIDCounter.Add(1)
-	// Format as req-00000001, req-00000002, etc.
-	if id < 100000000 {
-		digits := make([]byte, 8)
-		tempID := id
-		for i := 7; i >= 0; i-- {
-			digits[i] = byte('0' + (tempID % 10))
-			tempID /= 10
-		}
-		return "req-" + string(digits)
-	}
-	return "req-99999999"
+	return fmt.Sprintf("req-%d", id)
 }

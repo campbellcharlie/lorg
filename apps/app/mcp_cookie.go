@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -12,7 +13,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type GetCookieJarArgs struct {
-	Domain  string `json:"domain,omitempty" jsonschema_description:"Filter cookies by domain (not implemented yet, returns all session cookies)"`
+	Domain  string `json:"domain,omitempty" jsonschema_description:"Filter cookies by domain (only returns cookies whose name contains the domain string)"`
 	Session string `json:"session,omitempty" jsonschema_description:"Session name (default: active session)"`
 }
 
@@ -41,6 +42,16 @@ func (backend *Backend) getCookieJarHandler(ctx context.Context, request mcp.Cal
 	cookieMap, ok := cookies.(map[string]any)
 	if !ok {
 		cookieMap = make(map[string]any)
+	}
+
+	if args.Domain != "" {
+		filtered := make(map[string]any)
+		for k, v := range cookieMap {
+			if strings.Contains(strings.ToLower(k), strings.ToLower(args.Domain)) {
+				filtered[k] = v
+			}
+		}
+		cookieMap = filtered
 	}
 
 	return mcpJSONResult(map[string]any{

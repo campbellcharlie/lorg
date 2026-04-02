@@ -10,6 +10,7 @@ import (
 
 	"github.com/campbellcharlie/lorg/apps/app"
 	"github.com/campbellcharlie/lorg/internal/process"
+	"github.com/campbellcharlie/lorg/internal/utils"
 	"github.com/glitchedgitz/pocketbase"
 	"github.com/glitchedgitz/pocketbase/core"
 	"github.com/glitchedgitz/pocketbase/plugins/migratecmd"
@@ -22,11 +23,10 @@ func serve(projectPath string) {
 
 	wappalyzerClient, err := wappalyzer.New()
 	if err != nil {
-		log.Println("Wappylyzer Error: ", err)
+		log.Println("Wappalyzer Error: ", err)
 	}
 
 	os.MkdirAll(projectPath, 0755)
-	os.Chdir(projectPath)
 
 	// Extract project ID from project path (the directory name)
 	projectID := filepath.Base(projectPath)
@@ -49,7 +49,37 @@ func serve(projectPath string) {
 		CmdChannel: make(chan process.RunCommandData),
 	}
 
-	// if !noProxy {
+	// Initialize audit logger
+	auditDir := filepath.Join(projectPath, "audit")
+	auditLogger, auditErr := app.NewAuditLogger(auditDir)
+	if auditErr != nil {
+		log.Printf("[Startup] Audit logger failed to initialize: %v", auditErr)
+	} else {
+		API.AuditLog = auditLogger
+		auditLogger.Log("server_start", map[string]string{
+			"project": projectID,
+			"host":    conf.HostAddr,
+		})
+	}
+
+	// Randomize admin password on every start for security
+	API.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+		admin, err := API.App.Dao().FindAdminByEmail("new@example.com")
+		if err != nil {
+			return nil // no default admin found, skip
+		}
+		pw := utils.RandomString(24)
+		if err := admin.SetPassword(pw); err != nil {
+			log.Printf("[Security] Failed to set admin password: %v", err)
+			return nil
+		}
+		if err := API.App.Dao().SaveAdmin(admin); err != nil {
+			log.Printf("[Security] Failed to save admin password: %v", err)
+			return nil
+		}
+		log.Printf("[Security] Admin password randomized: %s", pw)
+		return nil
+	})
 
 	migratecmd.MustRegister(API.App, API.App.RootCmd, migratecmd.Config{})
 
@@ -150,6 +180,12 @@ func serve(projectPath string) {
 	// Repeater
 	API.App.OnBeforeServe().Add(API.SendRepeater)
 
+	// Traffic detail (unified endpoint)
+	API.App.OnBeforeServe().Add(API.TrafficDetail)
+
+	// Scope REST endpoints
+	API.App.OnBeforeServe().Add(API.ScopeEndpoints)
+
 	// Modify
 	API.App.OnBeforeServe().Add(API.ModifyRequest)
 
@@ -162,8 +198,12 @@ func serve(projectPath string) {
 	// MCP
 	API.App.OnBeforeServe().Add(API.MCPEndpoint)
 
-	// Xterm (Terminal)
-	API.RegisterXtermRoutes()
+	// Xterm (Terminal) - only if explicitly enabled
+	if conf.EnableTerminal {
+		API.RegisterXtermRoutes()
+	} else {
+		log.Println("[Security] Terminal routes disabled (use --enable-terminal to enable)")
+	}
 
 	API.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
 		return API.InitializeProxy()

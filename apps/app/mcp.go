@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/campbellcharlie/lorg/lrx/version"
@@ -383,7 +384,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("project",
-			mcp.WithDescription("Manage project settings, SQLite DB, and traffic logging. Actions: setup, info, setName, export, setLogging"),
+			mcp.WithDescription("Manage project settings, SQLite DB, traffic logging, and privacy. Actions: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"),
 			mcp.WithInputSchema[ConsolidatedProjectArgs](),
 		),
 		backend.projectHandler,
@@ -391,7 +392,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("raceTest",
-			mcp.WithDescription("Race condition testing with simultaneous requests. Actions: parallel, parallelDifferent, h2SinglePacket, lastByteSync"),
+			mcp.WithDescription("Race condition testing with simultaneous requests. Actions: parallel, parallelDifferent, h2SinglePacket, lastByteSync, firstSequenceSync"),
 			mcp.WithInputSchema[ConsolidatedRaceTestArgs](),
 		),
 		backend.raceTestHandler,
@@ -414,6 +415,22 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
+		mcp.NewTool("openapi",
+			mcp.WithDescription("OpenAPI/Swagger spec import and request generation. Actions: import (parse JSON spec), listEndpoints (show routes), generateRequests (build raw HTTP requests)"),
+			mcp.WithInputSchema[OpenAPIArgs](),
+		),
+		backend.openapiHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("ja4",
+			mcp.WithDescription("JA4+ TLS fingerprint lookup from proxy traffic. Actions: lookup (by host), list (all cached)"),
+			mcp.WithInputSchema[JA4Args](),
+		),
+		backend.ja4Handler,
+	)
+
+	s.AddTool(
 		mcp.NewTool("extract",
 			mcp.WithDescription("Extract data from content. Actions: regex (with capture groups), jsonPath (dot-notation), between (delimiters)"),
 			mcp.WithInputSchema[ConsolidatedExtractArgs](),
@@ -430,11 +447,67 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
+		mcp.NewTool("oob",
+			mcp.WithDescription("Out-of-band callback server for blind vulnerability detection. Actions: start, stop, generatePayload, pollInteractions, clearInteractions"),
+			mcp.WithInputSchema[OOBArgs](),
+		),
+		backend.oobHandler,
+	)
+
+	s.AddTool(
 		mcp.NewTool("compare",
-			mcp.WithDescription("Diff HTTP responses. Actions: responses (raw strings), byId (PocketBase activeIDs)"),
+			mcp.WithDescription("Diff HTTP responses. Actions: responses (raw strings), byId (PocketBase activeIDs), structural (header-by-header + body), jsonDiff (JSON tree diff)"),
 			mcp.WithInputSchema[ConsolidatedCompareArgs](),
 		),
 		backend.compareHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("query",
+			mcp.WithDescription("Search traffic with HTTPQL-like queries. Actions: search (execute), explain (show SQL). Example: req.host.cont:\"example.com\" AND resp.status.eq:200"),
+			mcp.WithInputSchema[QueryArgs](),
+		),
+		backend.queryHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("websocket",
+			mcp.WithDescription("WebSocket traffic analysis. Actions: listMessages (by host/connection), search (content search), getConnection (upgrade details), listConnections (all WS connections)"),
+			mcp.WithInputSchema[WebSocketArgs](),
+		),
+		backend.websocketHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("sseClient",
+			mcp.WithDescription("SSE (Server-Sent Events) testing client. Actions: connect (open stream), listEvents (get captured events), disconnect (close), listConnections (show all)"),
+			mcp.WithInputSchema[SSEClientArgs](),
+		),
+		backend.sseClientHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("protobuf",
+			mcp.WithDescription("Decode protobuf wire format without .proto files. Actions: decode (base64), decodeHex (hex), decodeTraffic (decode gRPC response by request ID)"),
+			mcp.WithInputSchema[ProtobufArgs](),
+		),
+		backend.protobufHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("authzTest",
+			mcp.WithDescription("Automated authorization testing. Replay requests with different sessions to find access control issues. Actions: configure, run, results"),
+			mcp.WithInputSchema[AuthzTestArgs](),
+		),
+		backend.authzTestHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("gatherContext",
+			mcp.WithDescription("Gather structured intelligence about a target host from captured traffic: endpoints, parameters, tech stack, status distribution, error signatures"),
+			mcp.WithInputSchema[GatherContextArgs](),
+		),
+		backend.gatherContextHandler,
 	)
 
 	// =====================================================================
@@ -548,6 +621,18 @@ func (backend *Backend) mcpInit() {
 		backend.browserConfigHandler,
 	)
 
+	// =====================================================================
+	// FUZZING
+	// =====================================================================
+
+	s.AddTool(
+		mcp.NewTool("fuzz",
+			mcp.WithDescription("Grammar-based request fuzzing with marker substitution. Actions: configure (set target, request template, payloads), start (begin fuzzing), stop (halt), status (progress), results (get findings)"),
+			mcp.WithInputSchema[FuzzArgs](),
+		),
+		backend.fuzzHandler,
+	)
+
 	sseServer := mcpserver.NewSSEServer(s,
 		mcpserver.WithStaticBasePath("/mcp"),
 		mcpserver.WithKeepAlive(true),
@@ -566,6 +651,21 @@ func (backend *Backend) mcpInit() {
 
 func (backend *Backend) MCPEndpoint(e *core.ServeEvent) error {
 	backend.mcpInit()
+
+	// MCP token authentication middleware
+	requireMCPAuth := func(c echo.Context) error {
+		if backend.Config.MCPToken == "" {
+			return nil // no token configured, allow all
+		}
+		auth := c.Request().Header.Get("Authorization")
+		if auth == "" {
+			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header required"})
+		}
+		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != backend.Config.MCPToken {
+			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid bearer token"})
+		}
+		return nil
+	}
 
 	e.Router.AddRoute(echo.Route{
 		Method: http.MethodPost,
@@ -659,6 +759,9 @@ func (backend *Backend) MCPEndpoint(e *core.ServeEvent) error {
 			if err := requireLocalhost(c); err != nil {
 				return err
 			}
+			if err := requireMCPAuth(c); err != nil {
+				return err
+			}
 			if backend.MCP == nil || !backend.MCP.active {
 				return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
 			}
@@ -674,6 +777,9 @@ func (backend *Backend) MCPEndpoint(e *core.ServeEvent) error {
 		Path:   "/mcp/message",
 		Handler: func(c echo.Context) error {
 			if err := requireLocalhost(c); err != nil {
+				return err
+			}
+			if err := requireMCPAuth(c); err != nil {
 				return err
 			}
 			if backend.MCP == nil || !backend.MCP.active {

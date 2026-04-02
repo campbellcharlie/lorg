@@ -41,7 +41,9 @@ func NewScopeManager() *ScopeManager {
 	}
 }
 
-// Package-level instance so handlers can reach it without modifying Backend.
+// scopeManager is the package-level scope manager instance.
+// Package-level because action-dispatch handlers access it without Backend reference.
+// Thread-safe: ScopeManager uses an internal RWMutex for all operations.
 var scopeManager = NewScopeManager()
 
 // ---------------------------------------------------------------------------

@@ -495,6 +495,120 @@ func (backend *Backend) lastByteSyncHandler(ctx context.Context, request mcp.Cal
 	})
 }
 
+// firstSequenceSyncHandler opens N connections in parallel, waits for ALL
+// TCP/TLS handshakes to complete, then sends the full request simultaneously
+// on every connection. This differs from lastByteSync (which pre-sends all but
+// the last byte) and parallel (which dials and sends without strict handshake
+// synchronization).
+func (backend *Backend) firstSequenceSyncHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ConsolidatedRaceTestArgs
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	host := args.Host
+	port := args.Port
+	useTLS := args.TLS
+	rawReq := []byte(normalizeCRLF(args.Request))
+	count := args.Count
+	if count <= 0 || count > 50 {
+		count = 10
+	}
+
+	// Phase 1: Open all connections in parallel, collect after all handshakes.
+	type connResult struct {
+		index int
+		conn  net.Conn
+		err   error
+	}
+
+	connResults := make(chan connResult, count)
+	var connectWg sync.WaitGroup
+
+	for i := 0; i < count; i++ {
+		connectWg.Add(1)
+		go func(idx int) {
+			defer connectWg.Done()
+			conn, err := dialTarget(host, port, useTLS)
+			connResults <- connResult{index: idx, conn: conn, err: err}
+		}(i)
+	}
+	connectWg.Wait()
+	close(connResults)
+
+	conns := make([]net.Conn, count)
+	var connectErrors []string
+	for cr := range connResults {
+		if cr.err != nil {
+			connectErrors = append(connectErrors, fmt.Sprintf("[%d] %v", cr.index, cr.err))
+		} else {
+			conns[cr.index] = cr.conn
+		}
+	}
+
+	// Close all connections on exit.
+	defer func() {
+		for _, c := range conns {
+			if c != nil {
+				c.Close()
+			}
+		}
+	}()
+
+	if len(connectErrors) == count {
+		return mcp.NewToolResultError(fmt.Sprintf("all connections failed: %v", connectErrors)), nil
+	}
+
+	// Phase 2: Barrier -- send the full request simultaneously on all
+	// established connections.
+	var sendBarrier sync.WaitGroup
+	sendBarrier.Add(1) // single gate
+
+	results := make([]raceResult, count)
+	var wg sync.WaitGroup
+
+	for i := 0; i < count; i++ {
+		if conns[i] == nil {
+			results[i] = raceResult{Index: i, Error: "connection failed"}
+			continue
+		}
+		wg.Add(1)
+		go func(idx int, conn net.Conn) {
+			defer wg.Done()
+			sendBarrier.Wait() // block until gate opens
+
+			start := time.Now()
+			statusLine, bodyLen, err := sendAndRead(conn, rawReq)
+			elapsed := time.Since(start)
+
+			results[idx] = raceResult{
+				Index:      idx,
+				StatusLine: statusLine,
+				BodyLength: bodyLen,
+				TimeMs:     float64(elapsed.Microseconds()) / 1000.0,
+			}
+			if err != nil {
+				results[idx].Error = err.Error()
+			}
+		}(i, conns[i])
+	}
+
+	// Open the gate -- all goroutines send simultaneously.
+	sendBarrier.Done()
+	wg.Wait()
+
+	stats := computeTimingStats(results)
+
+	return mcpJSONResult(map[string]any{
+		"technique":     "firstSequenceSync",
+		"connections":   count,
+		"connectErrors": connectErrors,
+		"results":       results,
+		"timing":        stats,
+		"note":          args.Note,
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

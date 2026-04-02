@@ -27,7 +27,9 @@ import (
 // ProjectDB -- package-level singleton for live traffic recording
 // ---------------------------------------------------------------------------
 
-// projectDB is the package-level singleton. It is safe for concurrent use.
+// projectDB is the package-level singleton for live traffic recording.
+// Package-level because action-dispatch handlers access it without Backend reference.
+// Thread-safe: all methods on ProjectDB use internal mutex protection.
 var projectDB = &ProjectDB{}
 
 // trafficLoggingConfig controls which traffic sources are logged to the project DB.

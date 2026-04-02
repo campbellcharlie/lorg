@@ -78,6 +78,8 @@ func prodApp() {
 	flag.StringVar(&ProxyAddress, "proxy", "127.0.0.1:8888", "Proxy address to listen on")
 	flag.StringVar(&ProjectPath, "path", "", "Project directory path")
 	flag.BoolVar(&showLogs, "log", false, "Show debug logs")
+	flag.StringVar(&conf.MCPToken, "mcp-token", "", "Bearer token for MCP endpoint authentication")
+	flag.BoolVar(&conf.EnableTerminal, "enable-terminal", false, "Enable xterm terminal routes (disabled by default)")
 
 	flag.Parse()
 
@@ -106,6 +108,8 @@ func pocketbaseApp() {
 	app.RootCmd.PersistentFlags().StringVar(&ProxyAddress, "proxy", "127.0.0.1:8888", "")
 	app.RootCmd.PersistentFlags().StringVar(&ProjectPath, "path", "", "")
 	app.RootCmd.PersistentFlags().BoolVar(&showLogs, "log", false, "")
+	app.RootCmd.PersistentFlags().StringVar(&conf.MCPToken, "mcp-token", "", "Bearer token for MCP endpoint authentication")
+	app.RootCmd.PersistentFlags().BoolVar(&conf.EnableTerminal, "enable-terminal", false, "Enable xterm terminal routes")
 
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
 		// enable auto creation of migration files when making collection changes in the Admin UI

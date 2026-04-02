@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/campbellcharlie/lorg/lrx/version"
@@ -386,6 +387,16 @@ func (backend *Backend) sendRequestHandler(ctx context.Context, request mcp.Call
 
 	// Auto-inject missing headers for realistic traffic
 	rawReq = injectDefaultHeaders(rawReq)
+
+	// Update Content-Length based on actual body length after normalization.
+	// Handles the common case where the LLM omits Content-Length on POST requests.
+	if args.AutoUpdateContentLength {
+		headerSection, bodyPart := splitRequestHeadersAndBody(rawReq)
+		if bodyPart != "" {
+			headerSection = setHeaderInSection(headerSection, "Content-Length", fmt.Sprintf("%d", len(bodyPart)))
+			rawReq = headerSection + "\r\n\r\n" + bodyPart
+		}
+	}
 
 	resp, err := backend.sendRepeaterLogic(&RepeaterSendRequest{
 		Host:        host,
@@ -1295,13 +1306,15 @@ var userAgentPool = []string{
 	"Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0",
 }
 
-var uaIndex int
+// uaIndex is an atomic counter used to rotate through userAgentPool.
+// Must be atomic because nextUserAgent can be called from concurrent goroutines
+// (e.g. parallel sendRequest invocations).
+var uaIndex atomic.Uint64
 
 // nextUserAgent returns the next User-Agent from the pool, rotating sequentially.
 func nextUserAgent() string {
-	ua := userAgentPool[uaIndex%len(userAgentPool)]
-	uaIndex++
-	return ua
+	idx := uaIndex.Add(1) - 1 // Add returns the new value; subtract 1 to get the pre-increment index
+	return userAgentPool[idx%uint64(len(userAgentPool))]
 }
 
 // hasHeader checks if a raw HTTP request contains a header (case-insensitive).

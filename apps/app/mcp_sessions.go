@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,6 +12,30 @@ import (
 	"github.com/pocketbase/dbx"
 )
 
+// FlexibleStringMap is a map[string]string that accepts both a JSON object
+// and a JSON-encoded string (double-encoded). Some MCP clients serialize
+// map parameters as a JSON string rather than a nested object.
+type FlexibleStringMap map[string]string
+
+func (m *FlexibleStringMap) UnmarshalJSON(data []byte) error {
+	// Try direct object unmarshaling first
+	var direct map[string]string
+	if err := json.Unmarshal(data, &direct); err == nil {
+		*m = direct
+		return nil
+	}
+	// Fallback: value is a JSON-encoded string containing a JSON object
+	var encoded string
+	if err := json.Unmarshal(data, &encoded); err == nil {
+		var decoded map[string]string
+		if err2 := json.Unmarshal([]byte(encoded), &decoded); err2 == nil {
+			*m = decoded
+			return nil
+		}
+	}
+	return fmt.Errorf("headers: expected a JSON object or a JSON-encoded object string")
+}
+
 // ---------------------------------------------------------------------------
 // Input schemas
 // ---------------------------------------------------------------------------
@@ -18,7 +43,7 @@ import (
 type SessionCreateArgs struct {
 	Name    string            `json:"name" jsonschema:"required" jsonschema_description:"Unique session name (e.g. admin, user1)"`
 	Cookies map[string]string `json:"cookies,omitempty" jsonschema_description:"Initial cookies as name:value pairs"`
-	Headers map[string]string `json:"headers,omitempty" jsonschema_description:"Persistent headers (e.g. Authorization: Bearer ...)"`
+	Headers FlexibleStringMap `json:"headers,omitempty" jsonschema_description:"Persistent headers (e.g. Authorization: Bearer ...)"`
 }
 
 type SessionListArgs struct{}

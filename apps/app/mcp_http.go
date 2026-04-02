@@ -109,26 +109,32 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 		rawBuilder.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
 	}
 
+	// Normalize body line endings before calculating Content-Length.
+	// normalizeCRLF is applied to the full request later; pre-normalizing the
+	// body here ensures Content-Length matches the actual bytes transmitted when
+	// the body contains bare \n characters.
+	body := normalizeCRLF(args.Body)
+
 	// Add Content-Length if there is a body
-	if args.Body != "" {
+	if body != "" {
 		if !hasHeader(rawBuilder.String(), "Content-Length") {
-			rawBuilder.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(args.Body)))
+			rawBuilder.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
 		}
 	}
 
 	// Terminate headers
 	rawBuilder.WriteString("\r\n")
 
-	// Append body
-	if args.Body != "" {
-		rawBuilder.WriteString(args.Body)
+	// Append body (already CRLF-normalized)
+	if body != "" {
+		rawBuilder.WriteString(body)
 	}
 
 	rawReq := rawBuilder.String()
 
 	// 3. Session injection (if injectSession)
 	if args.InjectSession {
-		rawReq = backend.injectSessionAndCSRF(rawReq, args.Method, args.Body)
+		rawReq = backend.injectSessionAndCSRF(rawReq, args.Method, body)
 	}
 
 	// 4. CRLF normalize + default headers (UA, Accept, Connection: close)
@@ -172,7 +178,7 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 		currentResponse := rawResponse
 		currentURL := parsedURL
 		currentMethod := strings.ToUpper(args.Method)
-		currentBody := args.Body
+		currentBody := body
 		currentHost := host
 		currentPort := port
 		currentPortStr := portStr

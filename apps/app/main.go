@@ -24,6 +24,7 @@ type Backend struct {
 	CounterManager *CounterManager
 	XtermManager   *XtermManager
 	MCP            *MCP
+	AuditLog       *AuditLogger
 
 	mu          sync.Mutex
 	fileWatcher *fileWatcherState

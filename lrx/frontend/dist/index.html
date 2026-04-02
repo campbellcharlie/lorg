@@ -55,6 +55,7 @@
                 <th class="col-status sortable" data-sort="status">Status</th>
                 <th class="col-length sortable" data-sort="length">Length</th>
                 <th class="col-source sortable" data-sort="source">Source</th>
+                <th class="col-time sortable" data-sort="time">Time</th>
               </tr>
             </thead>
             <tbody id="traffic-body"></tbody>
@@ -71,7 +72,7 @@
               <pre id="detail-request-raw" class="raw-http"></pre>
             </div>
             <div class="detail-split-pane">
-              <div class="pane-header">Response</div>
+              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button></span></div>
               <pre id="detail-response-raw" class="raw-http"></pre>
             </div>
           </div>
@@ -81,6 +82,10 @@
       <!-- Repeater View -->
       <div id="view-repeater" class="view">
         <div class="repeater-layout">
+          <div class="repeater-tabs" id="repeater-tabs">
+            <div class="repeater-tab active" data-tab="0">#1</div>
+            <button class="repeater-tab-add" id="rep-tab-add" title="New tab">+</button>
+          </div>
           <div class="repeater-config">
             <div class="repeater-fields">
               <label>Host <input type="text" id="rep-host" placeholder="example.com" class="input-sm"></label>
@@ -112,9 +117,23 @@
         <div class="toolbar">
           <span id="intercept-status">Intercept is off</span>
           <button id="intercept-toggle" class="btn btn-sm">Enable</button>
+          <span id="intercept-count" class="count-badge" style="margin-left:auto;">0</span>
         </div>
-        <div id="intercept-list" class="table-container">
-          <p class="empty-state">No intercepted requests. Enable intercept on a proxy first.</p>
+        <div id="intercept-list" class="intercept-split">
+          <div id="intercept-queue" class="intercept-queue">
+            <p class="empty-state" id="intercept-empty">No intercepted requests. Enable intercept on a proxy first.</p>
+          </div>
+          <div id="intercept-editor" class="intercept-editor hidden">
+            <div class="pane-header">Intercepted Request <span id="intercept-req-id" class="time-badge"></span></div>
+            <div class="editor-wrap">
+              <pre id="intercept-highlight" class="editor-highlight raw-http"></pre>
+              <textarea id="intercept-request" class="editor-input" spellcheck="false"></textarea>
+            </div>
+            <div class="intercept-actions">
+              <button id="intercept-forward" class="btn btn-primary btn-sm">Forward</button>
+              <button id="intercept-drop" class="btn btn-sm" style="color:var(--red);">Drop</button>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -128,6 +128,18 @@ func (rt *UTLSRoundTripper) dialUTLS(ctx context.Context, network, addr string, 
 		return nil, fmt.Errorf("uTLS handshake failed for %s: %w", serverName, err)
 	}
 
+	// Cache JA4 fingerprint from the negotiated TLS parameters.
+	// utls.ConnectionState is its own type; convert relevant fields.
+	connState := utlsConn.ConnectionState()
+	fp := ComputeJA4(serverName, TLSStateSnapshot{
+		Version:            connState.Version,
+		CipherSuite:        connState.CipherSuite,
+		NegotiatedProtocol: connState.NegotiatedProtocol,
+		ServerName:         connState.ServerName,
+		PeerCertificates:   connState.PeerCertificates,
+	})
+	CacheJA4(serverName, fp)
+
 	return utlsConn, nil
 }
 

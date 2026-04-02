@@ -33,10 +33,11 @@ import (
 // for upstream connections, bypassing Cloudflare and other CDN bot detection.
 
 type MitmCA struct {
-	caCert *x509.Certificate
-	caKey  any
-	mu     sync.Mutex
-	cache  map[string]*tls.Certificate
+	caCert     *x509.Certificate
+	caKey      any
+	mu         sync.Mutex
+	cache      map[string]*tls.Certificate
+	cacheOrder []string // tracks insertion order for LRU eviction
 	// Reused leaf private key to keep SPKI stable across generated leaf certs
 	leafKey *rsa.PrivateKey
 }
@@ -129,7 +130,15 @@ func (m *MitmCA) CertForHost(host string) (*tls.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Evict oldest entries if cache exceeds limit
+	const maxCacheSize = 10000
+	for len(m.cache) >= maxCacheSize && len(m.cacheOrder) > 0 {
+		oldest := m.cacheOrder[0]
+		m.cacheOrder = m.cacheOrder[1:]
+		delete(m.cache, oldest)
+	}
 	m.cache[host] = &leaf
+	m.cacheOrder = append(m.cacheOrder, host)
 	return &leaf, nil
 }
 

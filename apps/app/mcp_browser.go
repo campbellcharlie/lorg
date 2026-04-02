@@ -23,9 +23,13 @@ import (
 // API rather than Chrome DevTools to ensure traffic visibility.
 // ---------------------------------------------------------------------------
 
-// Default CamoFox server URL and user ID. The URL can be reconfigured at
-// runtime via the browserConfig tool (setCamofoxUrl action).
+// camofoxURL is the CamoFox browser server endpoint.
+// Package-level because helper functions (camofoxGet, camofoxPost, etc.) are called
+// from multiple handlers without Backend reference. Configurable via browserConfig tool.
 var camofoxURL = "http://localhost:9377"
+
+// camofoxUserID identifies the CamoFox user/profile.
+// Package-level for the same reasons as camofoxURL.
 var camofoxUserID = "default"
 
 // camofoxRequest makes an HTTP request to the CamoFox server and returns
@@ -725,8 +729,19 @@ func (backend *Backend) browserXssHandler(ctx context.Context, request mcp.CallT
 			return mcp.NewToolResultError(fmt.Sprintf("failed to navigate to XSS URL: %v", err)), nil
 		}
 
-		// 2. Wait for page to load
-		time.Sleep(2 * time.Second)
+		// 2. Wait for page to load via readyState poll
+		for i := 0; i < 20; i++ {
+			time.Sleep(100 * time.Millisecond)
+			result, err := camofoxPost("/tabs/"+args.TabID+"/evaluate-extended", map[string]any{
+				"expression": "document.readyState",
+				"timeout":    2000,
+			})
+			if err == nil {
+				if rs, ok := result["result"].(string); ok && rs == "complete" {
+					break
+				}
+			}
+		}
 
 		// 3. Override alert/confirm/prompt and re-execute inline scripts
 		alertResult, err := camofoxPost("/tabs/"+args.TabID+"/evaluate-extended", map[string]any{
@@ -1015,7 +1030,18 @@ func (backend *Backend) browserXssHandler(ctx context.Context, request mcp.CallT
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("restoreDefaults failed: %v", err)), nil
 		}
-		time.Sleep(2 * time.Second) // Wait for page reload
+		for i := 0; i < 20; i++ {
+			time.Sleep(100 * time.Millisecond)
+			result, err := camofoxPost("/tabs/"+args.TabID+"/evaluate-extended", map[string]any{
+				"expression": "document.readyState",
+				"timeout":    2000,
+			})
+			if err == nil {
+				if rs, ok := result["result"].(string); ok && rs == "complete" {
+					break
+				}
+			}
+		}
 		return mcpJSONResult(map[string]any{
 			"success": true,
 			"action":  "restoreDefaults",
@@ -1064,7 +1090,18 @@ func (backend *Backend) browserAuthHandler(ctx context.Context, request mcp.Call
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to navigate to login page: %v", err)), nil
 		}
-		time.Sleep(2 * time.Second)
+		for i := 0; i < 20; i++ {
+			time.Sleep(100 * time.Millisecond)
+			result, err := camofoxPost("/tabs/"+args.TabID+"/evaluate-extended", map[string]any{
+				"expression": "document.readyState",
+				"timeout":    2000,
+			})
+			if err == nil {
+				if rs, ok := result["result"].(string); ok && rs == "complete" {
+					break
+				}
+			}
+		}
 
 		// 2. If no refs provided, auto-detect form fields
 		usernameRef := args.UsernameRef

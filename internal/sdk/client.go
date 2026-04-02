@@ -113,7 +113,7 @@ func (c *Client) Create(collection string, body any) (types.ResponseCreate, erro
 		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
-			fmt.Sprintf("%+v", body), // TODO remove that after debugging
+			"[body omitted]",
 			ErrInvalidResponse,
 		)
 	}
@@ -144,7 +144,7 @@ func (c *Client) CreateCollection(body any) (any, error) {
 		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
-			fmt.Sprintf("%+v", body), // TODO remove that after debugging
+			"[body omitted]",
 			ErrInvalidResponse,
 		)
 	}
@@ -177,7 +177,7 @@ func (c *Client) AddRequest(body types.AddRequestBodyType) (any, error) {
 		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
-			fmt.Sprintf("%+v", body), // TODO remove that after debugging
+			"[body omitted]",
 			ErrInvalidResponse,
 		)
 	}
@@ -211,7 +211,7 @@ func (c *Client) PlaygroundNew(body types.PlaygroundNew) (any, error) {
 		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
-			fmt.Sprintf("%+v", body), // TODO remove that after debugging
+			"[body omitted]",
 			ErrInvalidResponse,
 		)
 	}
@@ -244,7 +244,7 @@ func (c *Client) PlaygroundAddChild(body types.PlaygroundAdd) (any, error) {
 		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
-			fmt.Sprintf("%+v", body), // TODO remove that after debugging
+			"[body omitted]",
 			ErrInvalidResponse,
 		)
 	}

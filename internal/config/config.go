@@ -19,6 +19,9 @@ type Config struct {
 
 	ProjectID   string //  Active Project's ID
 	CWDirectory string //  Projects Directory + ProjectID
+
+	MCPToken       string // Bearer token for MCP endpoint authentication
+	EnableTerminal bool   // Whether xterm terminal routes are enabled
 }
 
 func (c *Config) Initiate() {

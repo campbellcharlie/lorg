@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -325,10 +326,21 @@ func DropReqResp(req *http.Request) *http.Response {
 // Call this periodically or on shutdown to free up space
 func (rp *RawProxyWrapper) CleanupTempCaptures() error {
 	if rp.config.OutputDir == "/tmp/lorg-captures" {
-		// Only cleanup if we're using the temp directory
 		log.Println("[RawProxy] Cleaning up temporary capture files...")
-		// Note: We don't delete the directory here to avoid race conditions
-		// The OS will clean up /tmp periodically
+		entries, err := os.ReadDir(rp.config.OutputDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to read temp captures dir: %w", err)
+		}
+		for _, entry := range entries {
+			path := rp.config.OutputDir + "/" + entry.Name()
+			if err := os.RemoveAll(path); err != nil {
+				log.Printf("[RawProxy] Failed to remove %s: %v", path, err)
+			}
+		}
+		log.Printf("[RawProxy] Cleaned up %d temp capture entries", len(entries))
 		return nil
 	}
 	return nil
@@ -413,6 +425,22 @@ func (rp *RawProxyWrapper) onRequest(reqData *rawproxy.RequestData, req *http.Re
 	// Skip our own lorg requests to avoid loops
 	if strings.Contains(req.URL.Host, "lorg") {
 		return req, nil
+	}
+
+	// Scope enforcement: if scope rules are loaded, check if this request is in scope
+	if includes, _ := scopeManager.GetRules(); len(includes) > 0 {
+		fullURL := req.URL.String()
+		if fullURL == "" || !strings.Contains(fullURL, "://") {
+			scheme := "http"
+			if req.TLS != nil {
+				scheme = "https"
+			}
+			fullURL = scheme + "://" + req.Host + req.URL.RequestURI()
+		}
+		if inScope, _ := scopeManager.IsInScope(fullURL); !inScope {
+			log.Printf("[RawProxy][SCOPE] Dropping out-of-scope request: %s", fullURL)
+			return req, fmt.Errorf("request blocked: URL is out of scope")
+		}
 	}
 
 	// Track total requests
