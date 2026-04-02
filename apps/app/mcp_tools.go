@@ -112,7 +112,8 @@ type HostNoteAction struct {
 // --- Proxy arg structs ---
 
 type ProxyStartArgs struct {
-	Name string `json:"name,omitempty" jsonschema_description:"Optional label for the proxy instance"`
+	Name    string `json:"name,omitempty" jsonschema_description:"Optional label for the proxy instance"`
+	Browser string `json:"browser,omitempty" jsonschema:"enum=chrome,enum=firefox,enum=none" jsonschema_description:"Browser to attach to the proxy instance: chrome, firefox, or none (default: none)"`
 }
 
 type ProxyStopArgs struct {
@@ -783,8 +784,12 @@ func (backend *Backend) proxyStartHandler(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	browser := args.Browser
+	if browser == "" {
+		browser = "none"
+	}
 	body := &ProxyBody{
-		Browser: "none",
+		Browser: browser,
 		Name:    args.Name,
 	}
 
