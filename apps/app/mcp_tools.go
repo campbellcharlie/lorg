@@ -57,7 +57,7 @@ type SendRequestArgs struct {
 	Request                 string   `json:"request" jsonschema:"required" jsonschema_description:"raw request"`
 	Note                    string   `json:"note" jsonschema:"required" jsonschema_description:"the note to attach to the request"`
 	Labels                  []string `json:"labels,omitempty" jsonschema_description:"the labels to attach to the request"`
-	AutoUpdateContentLength bool     `json:"autoUpdateContentLength" jsonschema:"required" jsonschema_description:"auto update content length, default: true"`
+	AutoUpdateContentLength *bool    `json:"autoUpdateContentLength,omitempty" jsonschema_description:"auto update content length (default: true). Set to false for raw byte-level control."`
 }
 
 type ListHostsArgs struct {
@@ -391,7 +391,7 @@ func (backend *Backend) sendRequestHandler(ctx context.Context, request mcp.Call
 
 	// Update Content-Length based on actual body length after normalization.
 	// Handles the common case where the LLM omits Content-Length on POST requests.
-	if args.AutoUpdateContentLength {
+	if args.AutoUpdateContentLength == nil || *args.AutoUpdateContentLength {
 		headerSection, bodyPart := splitRequestHeadersAndBody(rawReq)
 		if bodyPart != "" {
 			headerSection = setHeaderInSection(headerSection, "Content-Length", fmt.Sprintf("%d", len(bodyPart)))
