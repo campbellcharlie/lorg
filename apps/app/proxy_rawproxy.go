@@ -967,7 +967,89 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 	// Track success
 	rp.stats.ResponsesSaved.Add(1)
 
+	// Log to project SQLite DB (non-blocking) so proxy traffic appears in
+	// searchTraffic, analytics, and export alongside MCP tool traffic.
+	go func() {
+		typed := proxyUserdataToTyped(userdata, reqCtx)
+		projectDB.LogTraffic(typed, reqCtx.RawRequest, reqCtx.RawResponse)
+	}()
+
 	log.Printf("[RawProxy][DB][COMPLETE] Response ID=%s updated successfully in %v", userdata["id"].(string), elapsed)
+}
+
+// proxyUserdataToTyped converts the proxy's map[string]any userdata into the
+// types.UserData struct that LogTraffic expects. Fields that don't exist in
+// the map are left at zero value.
+func proxyUserdataToTyped(ud map[string]any, reqCtx *RequestContext) types.UserData {
+	// Helper closures for safe type assertion
+	str := func(key string) string {
+		if v, ok := ud[key].(string); ok {
+			return v
+		}
+		return ""
+	}
+	boolVal := func(key string) bool {
+		if v, ok := ud[key].(bool); ok {
+			return v
+		}
+		return false
+	}
+
+	typed := types.UserData{
+		ID:          str("id"),
+		Host:        str("host"),
+		Port:        str("port"),
+		IsHTTPS:     boolVal("is_https"),
+		Http:        str("http"),
+		HasResp:     boolVal("has_resp"),
+		HasParams:   boolVal("has_params"),
+		GeneratedBy: str("generated_by"),
+		ProxyId:     str("proxy_id"),
+	}
+	if idx, ok := ud["index"].(float64); ok {
+		typed.Index = idx
+	}
+
+	// Convert req_json map to typed RequestData
+	if rj, ok := ud["req_json"].(map[string]any); ok {
+		typed.ReqJson = types.RequestData{
+			Method: proxyMapStr(rj,"method"),
+			Path:   proxyMapStr(rj,"path"),
+			Query:  proxyMapStr(rj,"query"),
+			Ext:    proxyMapStr(rj,"ext"),
+		}
+	}
+
+	// Convert resp_json map to typed ResponseData
+	if rj, ok := ud["resp_json"].(map[string]any); ok {
+		typed.RespJson = types.ResponseData{
+			Title: proxyMapStr(rj,"title"),
+			Mime:  proxyMapStr(rj,"mime"),
+		}
+		if s, ok := rj["status"].(int); ok {
+			typed.RespJson.Status = s
+		}
+		if l, ok := rj["length"].(int64); ok {
+			typed.RespJson.Length = l
+		}
+		// Content-Length may be float64 from JSON or int from Go code
+		if l, ok := rj["length"].(float64); ok {
+			typed.RespJson.Length = int64(l)
+		}
+		if h, ok := rj["headers"].(map[string]string); ok {
+			typed.RespJson.Headers = h
+		}
+	}
+
+	return typed
+}
+
+// proxyMapStr safely extracts a string value from a map[string]any.
+func proxyMapStr(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // PrintStats logs the current proxy statistics
