@@ -163,6 +163,14 @@ func (backend *Backend) mcpInit() {
 		backend.replayFromDbHandler,
 	)
 
+	s.AddTool(
+		mcp.NewTool("exportCurl",
+			mcp.WithDescription("Export a stored request as a curl command for use in reports or manual testing"),
+			mcp.WithInputSchema[ExportCurlArgs](),
+		),
+		backend.exportCurlHandler,
+	)
+
 	// --- Intercept tools ---
 
 	s.AddTool(

@@ -662,6 +662,112 @@ func injectCSRFIntoBody(rawReq, field, token string) string {
 }
 
 // ---------------------------------------------------------------------------
+// exportCurl handler
+// ---------------------------------------------------------------------------
+
+// ExportCurlArgs defines the parameters for exporting a stored request as a curl command.
+type ExportCurlArgs struct {
+	RequestID  int  `json:"requestId" jsonschema:"required" jsonschema_description:"request_id from project SQLite DB"`
+	Compressed bool `json:"compressed,omitempty" jsonschema_description:"Add --compressed flag"`
+	Insecure   bool `json:"insecure,omitempty" jsonschema_description:"Add -k/--insecure flag for self-signed certs"`
+}
+
+func (backend *Backend) exportCurlHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ExportCurlArgs
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	dbReq, err := getRequestFromProjectDB(args.RequestID)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Parse the stored request headers to extract method, path, and headers
+	lines := strings.Split(dbReq.RequestHeaders, "\r\n")
+	if len(lines) == 0 {
+		lines = strings.Split(dbReq.RequestHeaders, "\n")
+	}
+	if len(lines) == 0 {
+		return mcp.NewToolResultError("empty request headers"), nil
+	}
+
+	// Parse request line
+	requestLine := lines[0]
+	parts := strings.SplitN(requestLine, " ", 3)
+	if len(parts) < 2 {
+		return mcp.NewToolResultError("malformed request line: " + requestLine), nil
+	}
+	method := parts[0]
+	path := parts[1]
+
+	// Build full URL
+	scheme := "http"
+	if strings.ToLower(dbReq.Protocol) == "https" {
+		scheme = "https"
+	}
+	portSuffix := ""
+	if (scheme == "https" && dbReq.Port != 443) || (scheme == "http" && dbReq.Port != 80) {
+		portSuffix = fmt.Sprintf(":%d", dbReq.Port)
+	}
+	fullURL := fmt.Sprintf("%s://%s%s%s", scheme, dbReq.Host, portSuffix, path)
+
+	// Build curl command
+	var curlParts []string
+	curlParts = append(curlParts, "curl")
+
+	if method != "GET" {
+		curlParts = append(curlParts, "-X", method)
+	}
+
+	// Add headers (skip Host, Content-Length, and request line)
+	for i := 1; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		colonIdx := strings.Index(line, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		headerName := strings.TrimSpace(line[:colonIdx])
+		headerNameLower := strings.ToLower(headerName)
+		// Skip headers curl sets automatically
+		if headerNameLower == "host" || headerNameLower == "content-length" {
+			continue
+		}
+		curlParts = append(curlParts, "-H", fmt.Sprintf("'%s'", line))
+	}
+
+	// Add body if present
+	body := string(dbReq.RequestBody)
+	if body != "" {
+		// Escape single quotes in body
+		escaped := strings.ReplaceAll(body, "'", "'\\''")
+		curlParts = append(curlParts, "-d", fmt.Sprintf("'%s'", escaped))
+	}
+
+	if args.Compressed {
+		curlParts = append(curlParts, "--compressed")
+	}
+	if args.Insecure {
+		curlParts = append(curlParts, "-k")
+	}
+
+	// Add URL last
+	curlParts = append(curlParts, fmt.Sprintf("'%s'", fullURL))
+
+	curlCommand := strings.Join(curlParts, " \\\n  ")
+
+	return mcpJSONResult(map[string]any{
+		"curl":      curlCommand,
+		"requestId": args.RequestID,
+		"method":    method,
+		"url":       fullURL,
+	})
+}
+
+// ---------------------------------------------------------------------------
 // HTTP parsing helpers
 // ---------------------------------------------------------------------------
 
