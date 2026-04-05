@@ -31,6 +31,8 @@ type SendHttpRequestArgs struct {
 	ExtractRegex    string            `json:"extractRegex,omitempty" jsonschema_description:"Regex to extract from response body"`
 	ExtractGroup    int               `json:"extractGroup,omitempty" jsonschema_description:"Capture group for extraction (default: 1)"`
 	BodyOnly        bool              `json:"bodyOnly,omitempty" jsonschema_description:"Return only response body, not headers"`
+	MaxBodyLength   int               `json:"maxBodyLength,omitempty" jsonschema_description:"Truncate response body to this many characters (0 = no limit). Useful for large HTML responses that would overwhelm agent context."`
+	HeadersOnly     bool              `json:"headersOnly,omitempty" jsonschema_description:"Return only response headers, no body. Overrides bodyOnly."`
 	Note            string            `json:"note,omitempty" jsonschema_description:"Note to attach to request"`
 }
 
@@ -321,8 +323,16 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 
 	// Build output response text
 	outputResponse := rawResponse
-	if args.BodyOnly {
+	if args.HeadersOnly {
+		outputResponse, _ = splitResponseHeaders(rawResponse)
+	} else if args.BodyOnly {
 		_, outputResponse = splitResponseHeaders(rawResponse)
+	} else if args.MaxBodyLength > 0 {
+		headerPart, bodyPart := splitResponseHeaders(rawResponse)
+		if len(bodyPart) > args.MaxBodyLength {
+			bodyPart = bodyPart[:args.MaxBodyLength] + fmt.Sprintf("\n...[truncated, showing %d of %d bytes]", args.MaxBodyLength, len(bodyPart))
+		}
+		outputResponse = headerPart + "\r\n\r\n" + bodyPart
 	}
 
 	result := map[string]any{
