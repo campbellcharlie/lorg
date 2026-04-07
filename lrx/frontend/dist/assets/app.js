@@ -679,7 +679,7 @@
 
   // --- HTTP Syntax Highlighting ---
   var MAX_HIGHLIGHT_LINES = 500;
-  var MAX_HIGHLIGHT_BYTES = 50000;
+  var MAX_HIGHLIGHT_BYTES = 2000000;
 
   function addLineNumbers(html) {
     var lines = html.split('\n');
@@ -748,7 +748,7 @@
 
     var output = result.join('\n');
     if (truncated) {
-      output += '\n<span class="hl-truncated">... response truncated (' + formatBytes(MAX_HIGHLIGHT_BYTES) + ' shown). Use "Copy raw request" for full content.</span>';
+      output += '\n<span class="hl-truncated">... response truncated (' + formatBytes(MAX_HIGHLIGHT_BYTES) + ' shown). Switch to "Raw" format for full content.</span>';
     }
 
     // Skip line numbers for very long output (DOM performance)
@@ -1243,6 +1243,29 @@
           applyClientFilter();
         }
       }
+      // Arrow up/down to navigate traffic list when a row is selected
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && currentView === 'traffic' && selectedTrafficId) {
+        // Don't hijack if user is actively typing in filter or textarea
+        var activeEl = document.activeElement;
+        var tag = activeEl && activeEl.tagName;
+        if (tag === 'TEXTAREA') return;
+        if (tag === 'INPUT' && activeEl.value !== '') return;
+        // Blur filter input so arrow keys navigate traffic rows
+        if (tag === 'INPUT') activeEl.blur();
+        e.preventDefault();
+        var idx = -1;
+        for (var i = 0; i < trafficData.length; i++) {
+          if (trafficData[i].id === selectedTrafficId) { idx = i; break; }
+        }
+        if (idx < 0) return;
+        var next = e.key === 'ArrowUp' ? idx - 1 : idx + 1;
+        if (next < 0 || next >= trafficData.length) return;
+        var nextId = trafficData[next].id;
+        selectTrafficRow(nextId);
+        // Scroll the selected row into view
+        var selectedTr = document.querySelector('#traffic-body tr[data-id="' + nextId + '"]');
+        if (selectedTr) selectedTr.scrollIntoView({ block: 'nearest' });
+      }
     });
 
     // Response format toggle
@@ -1309,6 +1332,61 @@
         handle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+      });
+    })();
+
+    // Resizable request/response split (horizontal drag handle)
+    (function() {
+      var handle = document.getElementById('detail-split-handle');
+      var reqPane = document.getElementById('detail-pane-request');
+      var respPane = document.getElementById('detail-pane-response');
+      if (!handle || !reqPane || !respPane) return;
+
+      var isDragging = false;
+      var startX = 0;
+      var startReqW = 0;
+      var startRespW = 0;
+
+      handle.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        startX = e.clientX;
+        startReqW = reqPane.offsetWidth;
+        startRespW = respPane.offsetWidth;
+        handle.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        var delta = e.clientX - startX;
+        var newReqW = startReqW + delta;
+        var newRespW = startRespW - delta;
+        if (newReqW < 80) newReqW = 80;
+        if (newRespW < 80) newRespW = 80;
+        var totalW = startReqW + startRespW;
+        if (newReqW + newRespW > totalW) return;
+        reqPane.style.flex = 'none';
+        reqPane.style.width = newReqW + 'px';
+        respPane.style.flex = 'none';
+        respPane.style.width = newRespW + 'px';
+      });
+
+      document.addEventListener('mouseup', function() {
+        if (!isDragging) return;
+        isDragging = false;
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      });
+
+      // Double-click to reset to 50/50
+      handle.addEventListener('dblclick', function() {
+        reqPane.style.flex = '1';
+        reqPane.style.width = '';
+        respPane.style.flex = '1';
+        respPane.style.width = '';
       });
     })();
 

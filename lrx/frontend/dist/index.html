@@ -67,11 +67,12 @@
             <button id="btn-send-to-repeater" class="btn btn-sm btn-primary">Send to Repeater</button>
           </div>
           <div class="detail-split">
-            <div class="detail-split-pane">
+            <div class="detail-split-pane" id="detail-pane-request">
               <div class="pane-header">Request</div>
               <pre id="detail-request-raw" class="raw-http"></pre>
             </div>
-            <div class="detail-split-pane">
+            <div id="detail-split-handle" class="detail-split-handle"></div>
+            <div class="detail-split-pane" id="detail-pane-response">
               <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button></span></div>
               <pre id="detail-response-raw" class="raw-http"></pre>
             </div>

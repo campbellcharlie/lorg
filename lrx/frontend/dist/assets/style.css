@@ -591,9 +591,33 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
   flex-direction: column;
   overflow: hidden;
 }
-/* Subtle divider between split panes */
-.detail-split-pane:first-child {
-  border-right: 1px solid var(--border);
+/* Draggable divider between request/response panes */
+.detail-split-handle {
+  width: 5px;
+  background: var(--border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  transition: background 150ms;
+}
+.detail-split-handle:hover,
+.detail-split-handle.dragging {
+  background: var(--accent);
+}
+.detail-split-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 32px;
+  border-radius: 2px;
+  background: var(--text-ghost);
+}
+.detail-split-handle:hover::after,
+.detail-split-handle.dragging::after {
+  background: var(--accent);
 }
 
 .detail-split-pane .raw-http {
