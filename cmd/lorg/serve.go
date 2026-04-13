@@ -180,6 +180,9 @@ func serve(projectPath string) {
 	// Repeater
 	API.App.OnBeforeServe().Add(API.SendRepeater)
 
+	// Traffic list (fast direct-SQL endpoint)
+	API.App.OnBeforeServe().Add(API.TrafficList)
+
 	// Traffic detail (unified endpoint)
 	API.App.OnBeforeServe().Add(API.TrafficDetail)
 
@@ -195,6 +198,9 @@ func serve(projectPath string) {
 	// Extractor
 	API.App.OnBeforeServe().Add(API.ExtractDataEndpoint)
 
+	// Project management
+	API.App.OnBeforeServe().Add(API.ProjectEndpoints)
+
 	// MCP
 	API.App.OnBeforeServe().Add(API.MCPEndpoint)
 
@@ -204,6 +210,9 @@ func serve(projectPath string) {
 	} else {
 		log.Println("[Security] Terminal routes disabled (use --enable-terminal to enable)")
 	}
+
+	// Ensure traffic indexes exist (fixes old databases missing them)
+	API.App.OnBeforeServe().Add(API.EnsureTrafficIndexes)
 
 	API.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
 		return API.InitializeProxy()

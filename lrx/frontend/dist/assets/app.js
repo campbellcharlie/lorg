@@ -10,6 +10,7 @@
   var hosts = [];
   var sortColumn = 'index';
   var sortAsc = false;
+  var activeProjectFilter = ''; // '' = show all traffic, 'APPLE-BB-001' = filter by project
 
   // --- DOM Helpers ---
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
@@ -94,13 +95,10 @@
   var allTrafficData = [];
 
   async function loadTraffic() {
-    // Fetch all traffic from backend (server-side filter only for host sidebar)
-    var serverFilter = '';
-    if (hostFilter) {
-      serverFilter = '&filter=' + encodeURIComponent('host~"' + hostFilter + '"');
-    }
+    var hostParam = hostFilter ? '&host=' + encodeURIComponent(hostFilter) : '';
+    var projectParam = activeProjectFilter ? '&project=' + encodeURIComponent(activeProjectFilter) : '';
+    var data = await api('/api/traffic/list?perPage=500' + hostParam + projectParam);
 
-    var data = await api('/api/collections/_data/records?perPage=500&sort=-index' + serverFilter);
     if (!data || !data.items) return;
 
     allTrafficData = data.items;
@@ -1166,6 +1164,86 @@
     }).join('');
   }
 
+  // --- Project Switcher ---
+  function loadProjectInfo() {
+    var projName = document.getElementById('project-name');
+    if (projName) projName.textContent = activeProjectFilter || 'All Traffic';
+  }
+
+  async function loadProjectList() {
+    var container = document.getElementById('project-list');
+    if (!container) return;
+
+    var data = await api('/api/project/active');
+    var projects = (data && data.projects) ? data.projects : [];
+
+    // "All Traffic" option
+    var allActive = !activeProjectFilter ? 'project-item active' : 'project-item';
+    var html = '<div class="' + allActive + '" data-project-name="__all__" title="Show all traffic">' +
+      '<span class="project-item-name">All Traffic</span>' +
+      '</div>';
+
+    // Per-project entries
+    html += projects.map(function(p) {
+      var activeClass = activeProjectFilter === p.name ? 'project-item active' : 'project-item';
+      var detail = p.addr + (p.count ? ' \u00b7 ' + p.count + ' reqs' : '');
+      return '<div class="' + activeClass + '" data-project-name="' + escapeAttr(p.name) + '" title="Proxy: ' + escapeAttr(p.addr) + '">' +
+        '<span class="project-item-name">' + escapeHtml(p.name) + '</span>' +
+        '<span class="project-item-size">' + escapeHtml(detail) + '</span>' +
+        '</div>';
+    }).join('');
+
+    container.innerHTML = html;
+
+    $$('.project-item', container).forEach(function(el) {
+      el.addEventListener('click', function() {
+        if (el.dataset.projectName === '__all__') {
+          switchToLive();
+        } else {
+          switchProject(el.dataset.projectName);
+        }
+      });
+    });
+  }
+
+  function closeProjectDropdown() {
+    var dropdown = document.getElementById('project-dropdown');
+    var toggle = document.getElementById('project-toggle');
+    if (dropdown) dropdown.classList.add('hidden');
+    if (toggle) toggle.classList.remove('dropdown-open');
+  }
+
+  function switchToLive() {
+    activeProjectFilter = '';
+    var projName = document.getElementById('project-name');
+    if (projName) projName.textContent = 'All Traffic';
+    closeProjectDropdown();
+    loadTraffic();
+  }
+
+  async function switchProject(name) {
+    activeProjectFilter = name;
+    var projName = document.getElementById('project-name');
+    if (projName) projName.textContent = name;
+    closeProjectDropdown();
+    loadTraffic();
+  }
+
+  function toggleProjectDropdown() {
+    var dropdown = document.getElementById('project-dropdown');
+    var toggle = document.getElementById('project-toggle');
+    if (!dropdown) return;
+    var isVisible = !dropdown.classList.contains('hidden');
+    if (isVisible) {
+      dropdown.classList.add('hidden');
+      if (toggle) toggle.classList.remove('dropdown-open');
+    } else {
+      dropdown.classList.remove('hidden');
+      if (toggle) toggle.classList.add('dropdown-open');
+      loadProjectList();
+    }
+  }
+
   // --- Event Listeners ---
   function init() {
     // Navigation
@@ -1522,11 +1600,27 @@
       }
     })();
 
+    // Project switcher
+    var projToggle = document.getElementById('project-toggle');
+    if (projToggle) {
+      projToggle.addEventListener('click', toggleProjectDropdown);
+    }
+
+    // Close project dropdown when clicking elsewhere
+    document.addEventListener('click', function(e) {
+      var dropdown = document.getElementById('project-dropdown');
+      var toggle = document.getElementById('project-toggle');
+      if (dropdown && !dropdown.contains(e.target) && toggle && !toggle.contains(e.target)) {
+        closeProjectDropdown();
+      }
+    });
+
     // Initial load
     initSettings();
     checkStatus();
     loadHosts();
     loadTraffic();
+    loadProjectInfo();
 
     // Check initial intercept state
     api('/api/proxy/list').then(function(data) {

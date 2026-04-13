@@ -86,6 +86,7 @@ html, body {
   flex-direction: column;
   padding: 0;
   z-index: 10;
+  overflow-y: auto;
 }
 
 .logo {
@@ -214,6 +215,80 @@ html, body {
   font-size: var(--font-size-xs);
   color: var(--text-ghost);
   padding-left: 14px;
+}
+
+/* Project switcher */
+.project-section {
+  border-top: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.project-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px 8px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: background var(--transition);
+}
+.project-toggle:hover {
+  background: var(--bg-hover);
+}
+.project-toggle.dropdown-open {
+  display: none;
+}
+.project-current-name {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--accent);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-arrow {
+  font-size: 8px;
+  color: var(--text-ghost);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.project-dropdown {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.project-list {
+  padding: 2px 0;
+}
+.project-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  transition: background var(--transition), color var(--transition);
+  border-left: 2px solid transparent;
+}
+.project-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.project-item.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+.project-item-name {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-item-size {
+  font-size: 9px;
+  color: var(--text-ghost);
+  margin-top: 1px;
 }
 
 /* ============================================================

@@ -24,6 +24,16 @@
         <div class="section-title">Hosts <span id="host-count" class="count-badge">0</span> <button id="clear-host-filter" class="btn-clear hidden">clear</button></div>
         <div id="hosts"></div>
       </div>
+      <div class="sidebar-section project-section">
+        <div class="section-title">Project</div>
+        <div id="project-toggle" class="project-toggle" title="Click to switch project">
+          <span id="project-name" class="project-current-name">Loading...</span>
+          <span class="project-arrow">&#9662;</span>
+        </div>
+        <div id="project-dropdown" class="project-dropdown hidden">
+          <div id="project-list" class="project-list"></div>
+        </div>
+      </div>
       <div class="sidebar-footer">
         <div><span id="status-indicator" class="status-dot"></span> <span id="status-text">Connecting...</span></div>
         <div id="project-status" class="project-status"></div>

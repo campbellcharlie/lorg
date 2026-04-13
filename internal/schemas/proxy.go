@@ -6,6 +6,10 @@ import (
 
 var Proxies = schema.NewSchema(
 	&schema.SchemaField{
+		Name: "project",
+		Type: schema.FieldTypeText,
+	},
+	&schema.SchemaField{
 		Name: "label",
 		Type: schema.FieldTypeText,
 	},

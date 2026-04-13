@@ -27,6 +27,7 @@ type ProxyInstance struct {
 	Browser    string // `json:"browser"`
 	BrowserCmd *exec.Cmd
 	Label      string // `json:"label"`
+	Project    string // Project name this proxy belongs to
 	Chrome     *browser.ChromeRemote
 }
 
@@ -439,7 +440,8 @@ func (backend *Backend) loadProxySettings(proxy *RawProxyWrapper, proxyRecord *m
 type ProxyBody struct {
 	HTTP    string `json:"http,omitempty"`
 	Browser string `json:"browser,omitempty"`
-	Name    string `json:"name,omitempty"` // Optional name for the proxy instance
+	Name    string `json:"name,omitempty"`    // Optional name for the proxy instance
+	Project string `json:"project,omitempty"` // Project name to tag traffic with
 }
 
 func (backend *Backend) InitializeProxy() error {
@@ -500,7 +502,7 @@ func (backend *Backend) startProxyLogic(body *ProxyBody) (map[string]any, error)
 	// Disable file captures by passing empty string (we save to database instead)
 	outputDir := "" // Empty = disabled
 
-	newProxy, err := NewRawProxyWrapper(body.HTTP, configDir, outputDir, backend, proxyID)
+	newProxy, err := NewRawProxyWrapper(body.HTTP, configDir, outputDir, backend, proxyID, body.Project)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxy: %w", err)
 	}
@@ -535,6 +537,7 @@ func (backend *Backend) startProxyLogic(body *ProxyBody) (map[string]any, error)
 		Browser:    body.Browser,
 		BrowserCmd: nil, // Will be set later if browser is launched
 		Label:      label,
+		Project:    body.Project,
 	}
 
 	// Add complete instance to manager using the formatted ID as key
@@ -582,6 +585,7 @@ func (backend *Backend) startProxyLogic(body *ProxyBody) (map[string]any, error)
 
 	proxyRecord := models.NewRecord(proxiesCollection)
 	proxyRecord.Set("id", proxyID)
+	proxyRecord.Set("project", body.Project)
 	proxyRecord.Set("label", label)
 	proxyRecord.Set("addr", body.HTTP)
 	proxyRecord.Set("browser", body.Browser)
@@ -809,7 +813,8 @@ func (backend *Backend) RestartProxy(e *core.ServeEvent) error {
 
 			listenAddr = availableHost
 
-			newProxy, err := NewRawProxyWrapper(listenAddr, configDir, outputDir, backend, proxyID)
+			existingProject := proxyRecord.GetString("project")
+			newProxy, err := NewRawProxyWrapper(listenAddr, configDir, outputDir, backend, proxyID, existingProject)
 			if err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 			}
@@ -914,6 +919,7 @@ func (backend *Backend) ListProxies(e *core.ServeEvent) error {
 						"label":      inst.Label,
 						"browser":    inst.Browser,
 						"browserPid": browserPid,
+						"project":    inst.Project,
 					})
 				}
 			}

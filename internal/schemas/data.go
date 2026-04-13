@@ -29,6 +29,10 @@ import (
 
 var Rows = schema.NewSchema(
 	&schema.SchemaField{
+		Name: "project",
+		Type: schema.FieldTypeText,
+	},
+	&schema.SchemaField{
 		Name: "index",
 		Type: schema.FieldTypeNumber,
 	},

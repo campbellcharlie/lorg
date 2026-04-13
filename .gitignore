@@ -61,3 +61,9 @@ Projects/
 KNOWN_ISSUES.md
 ARCHITECTURE.md
 docs/lorg-pentester-guide.md
+
+# Local dev config
+.mcp.json
+
+# Runtime audit logs
+audit/
