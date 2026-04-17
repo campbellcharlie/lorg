@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/glitchedgitz/dadql/dadql"
+	"github.com/campbellcharlie/lorg/internal/dadql/dadql"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"gopkg.in/fsnotify.v1"
+	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v2"
 )
 

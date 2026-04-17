@@ -3,9 +3,8 @@ package process
 import (
 	"log"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase"
-	"github.com/glitchedgitz/pocketbase/models"
 )
 
 // ProcessInput represents the input field structure for a process
@@ -26,48 +25,40 @@ type ProgressUpdate struct {
 	State     string
 }
 
-func RegisterInDB(app *pocketbase.PocketBase, input, data any, name, typz, state string) string {
-
-	collection, err := app.Dao().FindCollectionByNameOrId("_processes")
-	utils.CheckErr("[RunningCommand][FindCollection]:", err)
-
-	record := models.NewRecord(collection)
-
+func RegisterInDB(db *lorgdb.LorgDB, input, data any, name, typz, state string) string {
+	record := lorgdb.NewRecord("_processes")
 	id := utils.RandomString(15)
 
 	log.Println("id", id)
 	record.Set("id", id)
+	record.Id = id
 	log.Println("name", name)
-	record.Set("name", name) // Use command as name
+	record.Set("name", name)
 	log.Println("input", input)
 	record.Set("input", map[string]interface{}{
 		"command": input,
-	}) // Store the input data
+	})
 	log.Println("data", data)
-	record.Set("data", data) // Store full command data
+	record.Set("data", data)
 	log.Println("state", state)
 	record.Set("state", state)
 	log.Println("typz", typz)
-	record.Set("type", typz) // Store whether it saves to file or collection
+	record.Set("type", typz)
 
-	err = app.Dao().SaveRecord(record)
+	err := db.SaveRecord(record)
 	utils.CheckErr("[RegisterProcessInDB][SaveRecord]", err)
 	return id
 }
 
 // CreateProcess creates a new process with progress tracking
-func CreateProcess(app *pocketbase.PocketBase, name, description, typz, state string, data map[string]any, customID string) string {
-	collection, err := app.Dao().FindCollectionByNameOrId("_processes")
-	utils.CheckErr("[CreateProcess][FindCollection]:", err)
-
-	record := models.NewRecord(collection)
+func CreateProcess(db *lorgdb.LorgDB, name, description, typz, state string, data map[string]any, customID string) string {
+	record := lorgdb.NewRecord("_processes")
 
 	id := customID
 	if id == "" {
 		id = utils.RandomString(15)
 	}
 
-	// Set defaults
 	if state == "" {
 		state = "running"
 	}
@@ -76,6 +67,7 @@ func CreateProcess(app *pocketbase.PocketBase, name, description, typz, state st
 	}
 
 	record.Set("id", id)
+	record.Id = id
 	record.Set("name", name)
 	record.Set("description", description)
 	record.Set("type", typz)
@@ -90,35 +82,30 @@ func CreateProcess(app *pocketbase.PocketBase, name, description, typz, state st
 	})
 	record.Set("output", map[string]interface{}{})
 
-	err = app.Dao().SaveRecord(record)
+	err := db.SaveRecord(record)
 	utils.CheckErr("[CreateProcess][SaveRecord]", err)
 	return id
 }
 
-func GetProcess(app *pocketbase.PocketBase, id string) (*models.Record, error) {
-	record, err := app.Dao().FindRecordById("_processes", id)
-	if err != nil {
-		return nil, err
-	}
-	return record, nil
+func GetProcess(db *lorgdb.LorgDB, id string) (*lorgdb.Record, error) {
+	return db.FindRecordById("_processes", id)
 }
 
-func SetState(app *pocketbase.PocketBase, id, state string) {
-	record, err := app.Dao().FindRecordById("_processes", id)
+func SetState(db *lorgdb.LorgDB, id, state string) {
+	record, err := db.FindRecordById("_processes", id)
 	utils.CheckErr("", err)
 
 	record.Set("state", state)
 
-	err = app.Dao().SaveRecord(record)
+	err = db.SaveRecord(record)
 	utils.CheckErr("[RegisterProcessInDB][SaveRecord]", err)
 }
 
 // UpdateProgress updates the progress of a process
-func UpdateProgress(app *pocketbase.PocketBase, id string, progress ProgressUpdate) {
-	record, err := app.Dao().FindRecordById("_processes", id)
+func UpdateProgress(db *lorgdb.LorgDB, id string, progress ProgressUpdate) {
+	record, err := db.FindRecordById("_processes", id)
 	utils.CheckErr("[UpdateProgress][FindRecord]", err)
 
-	// Calculate progress percentage
 	percentage := 0
 	if progress.Total > 0 {
 		percentage = (progress.Completed * 100) / progress.Total
@@ -132,22 +119,21 @@ func UpdateProgress(app *pocketbase.PocketBase, id string, progress ProgressUpda
 		"error":     progress.Error,
 	})
 
-	// Update state if provided
 	if progress.State != "" {
 		record.Set("state", progress.State)
 	}
 
-	err = app.Dao().SaveRecord(record)
+	err = db.SaveRecord(record)
 	utils.CheckErr("[UpdateProgress][SaveRecord]", err)
 }
 
 // CompleteProcess marks a process as completed
-func CompleteProcess(app *pocketbase.PocketBase, id string, message string) {
+func CompleteProcess(db *lorgdb.LorgDB, id string, message string) {
 	if message == "" {
 		message = "Completed"
 	}
 
-	UpdateProgress(app, id, ProgressUpdate{
+	UpdateProgress(db, id, ProgressUpdate{
 		Completed: 100,
 		Total:     100,
 		Message:   message,
@@ -156,8 +142,8 @@ func CompleteProcess(app *pocketbase.PocketBase, id string, message string) {
 }
 
 // FailProcess marks a process as failed with an error message
-func FailProcess(app *pocketbase.PocketBase, id string, errorMsg string) {
-	UpdateProgress(app, id, ProgressUpdate{
+func FailProcess(db *lorgdb.LorgDB, id string, errorMsg string) {
+	UpdateProgress(db, id, ProgressUpdate{
 		Completed: 0,
 		Total:     100,
 		Message:   "Failed",

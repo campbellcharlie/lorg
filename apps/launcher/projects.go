@@ -9,116 +9,68 @@ import (
 	"path"
 	"strings"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
-	"github.com/pocketbase/dbx"
+	"github.com/labstack/echo/v4"
 	"github.com/rs/xid"
 )
 
-func (launcher *Launcher) API_ListProjects(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "GET",
-		Path:   "/api/project/list",
-		Handler: func(c echo.Context) error {
+func (launcher *Launcher) API_ListProjects(e *echo.Echo) {
+	e.GET("/api/project/list", func(c echo.Context) error {
+		records, err := launcher.DB.FindRecords("_projects", "1=1")
+		if err != nil {
+			fmt.Println("Error fetching projects:", err)
+			return c.String(http.StatusInternalServerError, "Error fetching projects")
+		}
 
-			collection, err := launcher.App.Dao().FindCollectionByNameOrId("_projects")
-
-			if err != nil {
-				fmt.Println("Error fetching projects:", err)
-				return c.String(http.StatusInternalServerError, "Error fetching projects")
-			}
-
-			if collection == nil {
-				fmt.Println("Projects collection not found")
-				return c.String(http.StatusInternalServerError, "Error fetching projects")
-			}
-
-			records, err := launcher.App.Dao().FindRecordsByExpr(collection.Name)
-			if err != nil {
-				fmt.Println("Error fetching projects:", err)
-				return c.String(http.StatusInternalServerError, "Error fetching projects")
-			}
-
-			return c.JSON(http.StatusOK, records)
-
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		return c.JSON(http.StatusOK, records)
 	})
-
-	return nil
 }
 
-func (launcher *Launcher) API_CreateNewProject(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "POST",
-		Path:   "/api/project/new",
-		Handler: func(c echo.Context) error {
+func (launcher *Launcher) API_CreateNewProject(e *echo.Echo) {
+	e.POST("/api/project/new", func(c echo.Context) error {
+		var data struct {
+			Name string `json:"name"`
+		}
 
-			var data struct {
-				Name string `json:"name"`
-			}
+		if err := c.Bind(&data); err != nil {
+			return c.String(http.StatusBadRequest, "Invalid request body")
+		}
 
-			if err := c.Bind(&data); err != nil {
-				return c.String(http.StatusBadRequest, "Invalid request body")
-			}
+		if data.Name == "" || strings.TrimSpace(data.Name) == "" {
+			return c.String(http.StatusBadRequest, "Project name cannot be empty or just whitespace")
+		}
 
-			if data.Name == "" || strings.TrimSpace(data.Name) == "" {
-				return c.String(http.StatusBadRequest, "Project name cannot be empty or just whitespace")
-			}
+		projectData, err := launcher.CreateNewProject(data.Name)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "Error creating project")
+		}
 
-			projectData, err := launcher.CreateNewProject(data.Name)
-			if err != nil {
-				return c.String(http.StatusInternalServerError, "Error creating project")
-			}
-
-			return c.JSON(http.StatusOK, projectData)
-
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		return c.JSON(http.StatusOK, projectData)
 	})
-
-	return nil
 }
 
-func (launcher *Launcher) API_OpenProject(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "POST",
-		Path:   "/api/project/open",
-		Handler: func(c echo.Context) error {
+func (launcher *Launcher) API_OpenProject(e *echo.Echo) {
+	e.POST("/api/project/open", func(c echo.Context) error {
+		var data struct {
+			Project string `json:"project"`
+		}
 
-			var data struct {
-				Project string `json:"project"`
-			}
+		if err := c.Bind(&data); err != nil {
+			return c.String(http.StatusBadRequest, "Invalid request body")
+		}
 
-			if err := c.Bind(&data); err != nil {
-				return c.String(http.StatusBadRequest, "Invalid request body")
-			}
+		if data.Project == "" || strings.TrimSpace(data.Project) == "" {
+			return c.String(http.StatusBadRequest, "Project can't be empty, send name or id")
+		}
 
-			if data.Project == "" || strings.TrimSpace(data.Project) == "" {
-				return c.String(http.StatusBadRequest, "Project can't be empty, send name or id")
-			}
+		projectData, err := launcher.OpenProjectFromNameOrId(data.Project)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, err.Error())
+		}
 
-			projectData, err := launcher.OpenProjectFromNameOrId(data.Project)
-			if err != nil {
-				return c.String(http.StatusInternalServerError, err.Error())
-			}
-
-			return c.JSON(http.StatusOK, projectData)
-
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		return c.JSON(http.StatusOK, projectData)
 	})
-
-	return nil
 }
 
 var ProjectState = struct {
@@ -144,21 +96,7 @@ type ProjectData struct {
 
 func (launcher *Launcher) ListProjects() {
 	fmt.Println("Listing projects")
-	collection, err := launcher.App.Dao().FindCollectionByNameOrId("_projects")
-
-	if err != nil {
-		fmt.Println("Error fetching projects:", err)
-		return
-	}
-
-	if collection == nil {
-		fmt.Println("Projects collection not found")
-		return
-	}
-
-	fmt.Println("Collection found")
-
-	records, err := launcher.App.Dao().FindRecordsByExpr(collection.Name)
+	records, err := launcher.DB.FindRecords("_projects", "1=1")
 	if err != nil {
 		fmt.Println("Error fetching projects:", err)
 		return
@@ -173,12 +111,6 @@ func (launcher *Launcher) ListProjects() {
 }
 
 func (launcher *Launcher) CreateNewProject(projectName string) (ProjectData, error) {
-	collection, err := launcher.App.Dao().FindCollectionByNameOrId("_projects")
-	if err != nil {
-		fmt.Println("Error fetching projects:", err)
-		return ProjectData{}, err
-	}
-
 	ProjectIP, err := utils.CheckAndFindAvailablePort("127.0.0.1:8091")
 	if err != nil {
 		fmt.Println("Error fetching project IP:", err)
@@ -199,13 +131,13 @@ func (launcher *Launcher) CreateNewProject(projectName string) (ProjectData, err
 		},
 	}
 
-	record := models.NewRecord(collection)
+	record := lorgdb.NewRecord("_projects")
 	record.Set("name", projectName)
 	record.Set("id", projectId)
 	record.Set("path", projectPath)
 	record.Set("data", projectData.Data)
 
-	err = launcher.App.Dao().SaveRecord(record)
+	err = launcher.DB.SaveRecord(record)
 	if err != nil {
 		fmt.Println("Error creating project:", err)
 		return ProjectData{}, err
@@ -220,7 +152,7 @@ func (launcher *Launcher) CreateNewProject(projectName string) (ProjectData, err
 }
 
 func (launcher *Launcher) setProjectStateClose(projectId string) {
-	record, err := launcher.App.Dao().FindRecordById("_projects", projectId)
+	record, err := launcher.DB.FindRecordById("_projects", projectId)
 	if err != nil {
 		fmt.Println("Error fetching project:", err)
 		return
@@ -232,7 +164,7 @@ func (launcher *Launcher) setProjectStateClose(projectId string) {
 	}
 	record.Set("data", stateData)
 
-	err = launcher.App.Dao().SaveRecord(record)
+	err = launcher.DB.SaveRecord(record)
 	if err != nil {
 		fmt.Println("Error saving project state:", err)
 		return
@@ -240,8 +172,7 @@ func (launcher *Launcher) setProjectStateClose(projectId string) {
 }
 
 func (launcher *Launcher) OpenProject(projectIndex int) (ProjectData, error) {
-	// get list of projects
-	records, err := launcher.App.Dao().FindRecordsByExpr("_projects")
+	records, err := launcher.DB.FindRecords("_projects", "1=1")
 	if err != nil {
 		fmt.Println("Error fetching projects:", err)
 		return ProjectData{}, err
@@ -249,7 +180,7 @@ func (launcher *Launcher) OpenProject(projectIndex int) (ProjectData, error) {
 
 	_record_id := records[projectIndex].Get("id")
 
-	record, err := launcher.App.Dao().FindRecordById("_projects", _record_id.(string))
+	record, err := launcher.DB.FindRecordById("_projects", _record_id.(string))
 	if err != nil {
 		fmt.Println("Error fetching project:", err)
 		return ProjectData{}, err
@@ -263,11 +194,10 @@ func (launcher *Launcher) OpenProject(projectIndex int) (ProjectData, error) {
 		if err == nil {
 			if err := json.Unmarshal(jsonData, &existingStateData); err == nil {
 				if existingStateData.State == ProjectState.Active && existingStateData.Ip != "" {
-					// Project is already running, return existing data
 					return ProjectData{
 						Id:   _record_id.(string),
-						Name: record.Get("name").(string),
-						Path: record.Get("path").(string),
+						Name: record.GetString("name"),
+						Path: record.GetString("path"),
 						Data: existingStateData,
 					}, nil
 				}
@@ -283,8 +213,8 @@ func (launcher *Launcher) OpenProject(projectIndex int) (ProjectData, error) {
 
 	projectData := ProjectData{
 		Id:   _record_id.(string),
-		Name: record.Get("name").(string),
-		Path: record.Get("path").(string),
+		Name: record.GetString("name"),
+		Path: record.GetString("path"),
 		Data: ProjectStateData{
 			Ip:    ProjectIP,
 			State: ProjectState.Active,
@@ -293,20 +223,20 @@ func (launcher *Launcher) OpenProject(projectIndex int) (ProjectData, error) {
 
 	record.Set("data", projectData.Data)
 
-	err = launcher.App.Dao().SaveRecord(record)
+	err = launcher.DB.SaveRecord(record)
 	if err != nil {
 		fmt.Printf("Error saving project state: %v\n", err)
 		return ProjectData{}, err
 	}
 
-	projectPath := fmt.Sprintf("%v", record.Get("path"))
+	projectPath := record.GetString("path")
 	if projectPath == "" {
 		fmt.Println("Error: Project path is empty")
-		return ProjectData{}, err
+		return ProjectData{}, fmt.Errorf("project path is empty")
 	}
 
 	go StartProject(projectPath, ProjectIP, "127.0.0.1:8888", func() {
-		launcher.setProjectStateClose(record.Get("id").(string))
+		launcher.setProjectStateClose(record.GetString("id"))
 	})
 
 	fmt.Println("Project opened successfully")
@@ -314,10 +244,7 @@ func (launcher *Launcher) OpenProject(projectIndex int) (ProjectData, error) {
 }
 
 func (launcher *Launcher) OpenProjectFromNameOrId(project string) (ProjectData, error) {
-	record, err := launcher.App.Dao().FindFirstRecordByFilter("_projects", "name={:project} OR id={:project}", dbx.Params{
-		"project": project,
-	})
-
+	record, err := launcher.DB.FindFirstRecord("_projects", "name = ? OR id = ?", project, project)
 	if record == nil || err != nil {
 		return ProjectData{}, err
 	}
@@ -330,11 +257,10 @@ func (launcher *Launcher) OpenProjectFromNameOrId(project string) (ProjectData, 
 		if err == nil {
 			if err := json.Unmarshal(jsonData, &existingStateData); err == nil {
 				if existingStateData.State == ProjectState.Active && existingStateData.Ip != "" {
-					// Project is already running, return existing data
 					return ProjectData{
-						Id:   record.Get("id").(string),
-						Name: record.Get("name").(string),
-						Path: record.Get("path").(string),
+						Id:   record.GetString("id"),
+						Name: record.GetString("name"),
+						Path: record.GetString("path"),
 						Data: existingStateData,
 					}, nil
 				}
@@ -354,28 +280,28 @@ func (launcher *Launcher) OpenProjectFromNameOrId(project string) (ProjectData, 
 	}
 
 	projectData := ProjectData{
-		Id:   record.Get("id").(string),
-		Name: record.Get("name").(string),
-		Path: record.Get("path").(string),
+		Id:   record.GetString("id"),
+		Name: record.GetString("name"),
+		Path: record.GetString("path"),
 		Data: projectStateData,
 	}
 
 	record.Set("data", projectStateData)
 
-	err = launcher.App.Dao().SaveRecord(record)
+	err = launcher.DB.SaveRecord(record)
 	if err != nil {
 		fmt.Printf("Error saving project state: %v\n", err)
 		return ProjectData{}, err
 	}
 
-	projectPath := fmt.Sprintf("%v", record.Get("path"))
+	projectPath := record.GetString("path")
 	if projectPath == "" {
 		fmt.Println("Error: Project path is empty")
-		return ProjectData{}, err
+		return ProjectData{}, fmt.Errorf("project path is empty")
 	}
 
 	go StartProject(projectPath, projectIp, "127.0.0.1:8888", func() {
-		launcher.setProjectStateClose(record.Get("id").(string))
+		launcher.setProjectStateClose(record.GetString("id"))
 	})
 
 	fmt.Println("Project opened successfully")
@@ -394,20 +320,18 @@ func StartProject(projectPath string, host string, proxy string, onClose func())
 	onClose()
 }
 
-func (launcher *Launcher) ResetToolsStates(e *core.ServeEvent) error {
-
-	records, err := launcher.App.Dao().FindRecordsByExpr("_tools")
+func (launcher *Launcher) ResetToolsStates() error {
+	records, err := launcher.DB.FindRecords("_tools", "1=1")
 	if err != nil {
 		fmt.Println("Error fetching tools:", err)
 		return err
 	}
 
 	for _, record := range records {
-
 		record.Set("host", "")
 		record.Set("state", "")
 
-		err = launcher.App.Dao().SaveRecord(record)
+		err = launcher.DB.SaveRecord(record)
 		if err != nil {
 			fmt.Println("Error saving tool state:", err)
 			return err
@@ -418,14 +342,8 @@ func (launcher *Launcher) ResetToolsStates(e *core.ServeEvent) error {
 	return nil
 }
 
-func (launcher *Launcher) ResetProjectStates(e *core.ServeEvent) error {
-	collection, err := launcher.App.Dao().FindCollectionByNameOrId("_projects")
-	if err != nil {
-		fmt.Println("Error fetching projects:", err)
-		return err
-	}
-
-	records, err := launcher.App.Dao().FindRecordsByExpr(collection.Name)
+func (launcher *Launcher) ResetProjectStates() error {
+	records, err := launcher.DB.FindRecords("_projects", "1=1")
 	if err != nil {
 		fmt.Println("Error fetching projects:", err)
 		return err
@@ -458,7 +376,7 @@ func (launcher *Launcher) ResetProjectStates(e *core.ServeEvent) error {
 			State: ProjectState.Unactive,
 		})
 
-		err = launcher.App.Dao().SaveRecord(record)
+		err = launcher.DB.SaveRecord(record)
 		if err != nil {
 			fmt.Println("Error saving project state:", err)
 			return err

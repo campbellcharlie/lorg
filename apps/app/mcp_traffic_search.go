@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 )
 
 // ---------------------------------------------------------------------------
@@ -65,32 +65,30 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 		args.Limit = 200
 	}
 
-	dao := backend.App.Dao()
-
-	// Build PocketBase filter and params
-	var filters []string
-	params := dbx.Params{}
+	// Build SQL WHERE clause with positional params
+	var conditions []string
+	var queryArgs []any
 
 	if args.Host != "" {
-		filters = append(filters, "host ~ {:host}")
-		params["host"] = args.Host
+		conditions = append(conditions, "host LIKE ?")
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
 	if args.Method != "" {
-		filters = append(filters, "req_json ~ {:method}")
-		params["method"] = args.Method
+		conditions = append(conditions, "req_json LIKE ?")
+		queryArgs = append(queryArgs, "%"+args.Method+"%")
 	}
 	if args.Path != "" {
-		filters = append(filters, "req_json ~ {:path}")
-		params["path"] = args.Path
+		conditions = append(conditions, "req_json LIKE ?")
+		queryArgs = append(queryArgs, "%"+args.Path+"%")
 	}
 	if args.Status != 0 {
-		filters = append(filters, "resp_json ~ {:status}")
-		params["status"] = fmt.Sprintf("%d", args.Status)
+		conditions = append(conditions, "resp_json LIKE ?")
+		queryArgs = append(queryArgs, "%"+fmt.Sprintf("%d", args.Status)+"%")
 	}
 
-	filter := ""
-	if len(filters) > 0 {
-		filter = strings.Join(filters, " && ")
+	where := "1=1"
+	if len(conditions) > 0 {
+		where = strings.Join(conditions, " AND ")
 	}
 
 	// Fetch records. When Query is set, fetch a larger batch to filter in-memory.
@@ -102,24 +100,12 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 		}
 	}
 
-	var records []trafficSearchRecord
-	if filter == "" {
-		recs, err := dao.FindRecordsByFilter("_data", "id != ''", "-index", fetchLimit, args.Offset)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to search traffic: %v", err)), nil
-		}
-		for _, r := range recs {
-			records = append(records, trafficSearchRecord{r})
-		}
-	} else {
-		recs, err := dao.FindRecordsByFilter("_data", filter, "-index", fetchLimit, args.Offset, params)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to search traffic: %v", err)), nil
-		}
-		for _, r := range recs {
-			records = append(records, trafficSearchRecord{r})
-		}
+	recs, err := backend.DB.FindRecordsSorted("_data", where, `"index" DESC`, fetchLimit, args.Offset, queryArgs...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to search traffic: %v", err)), nil
 	}
+
+	records := wrapRecords(recs)
 
 	// If Query is provided, filter by raw content match in _req/_resp
 	if args.Query != "" {
@@ -129,8 +115,8 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 				break
 			}
 			id := dr.GetString("id")
-			reqRec, _ := dao.FindRecordById("_req", id)
-			respRec, _ := dao.FindRecordById("_resp", id)
+			reqRec, _ := backend.DB.FindRecordById("_req", id)
+			respRec, _ := backend.DB.FindRecordById("_resp", id)
 
 			matched := false
 			if reqRec != nil && strings.Contains(reqRec.GetString("raw"), args.Query) {
@@ -193,14 +179,12 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 		return mcp.NewToolResultError(fmt.Sprintf("invalid regex pattern: %v", err)), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Fetch _data records, optionally filtered by host
-	filter := "id != ''"
-	params := dbx.Params{}
+	where := "1=1"
+	var queryArgs []any
 	if args.Host != "" {
-		filter = "host ~ {:host}"
-		params["host"] = args.Host
+		where = "host LIKE ?"
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
 
 	// Fetch a larger batch since not all records will match the regex.
@@ -209,7 +193,7 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 		fetchLimit = 2000
 	}
 
-	dataRecords, err := dao.FindRecordsByFilter("_data", filter, "-index", fetchLimit, 0, params)
+	dataRecords, err := backend.DB.FindRecordsSorted("_data", where, `"index" DESC`, fetchLimit, 0, queryArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch data records: %v", err)), nil
 	}
@@ -225,7 +209,7 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 		matchContext := ""
 
 		if args.Source == "request" || args.Source == "both" {
-			reqRec, _ := dao.FindRecordById("_req", id)
+			reqRec, _ := backend.DB.FindRecordById("_req", id)
 			if reqRec != nil {
 				raw := reqRec.GetString("raw")
 				loc := re.FindStringIndex(raw)
@@ -236,7 +220,7 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 		}
 
 		if matchContext == "" && (args.Source == "response" || args.Source == "both") {
-			respRec, _ := dao.FindRecordById("_resp", id)
+			respRec, _ := backend.DB.FindRecordById("_resp", id)
 			if respRec != nil {
 				raw := respRec.GetString("raw")
 				loc := re.FindStringIndex(raw)
@@ -262,9 +246,7 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 }
 
 func (backend *Backend) getTrafficStatsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	dao := backend.App.Dao()
-
-	allRecords, err := dao.FindRecordsByExpr("_data")
+	allRecords, err := backend.DB.FindRecords("_data", "1=1")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch data records: %v", err)), nil
 	}
@@ -307,26 +289,18 @@ func (backend *Backend) getStatusDistributionHandler(ctx context.Context, reques
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
-	var records []trafficSearchRecord
+	var recs []*lorgdb.Record
+	var err error
 	if args.Host != "" {
-		recs, err := dao.FindRecordsByFilter("_data", "host ~ {:host}", "-index", 0, 0, dbx.Params{"host": args.Host})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
-		}
-		for _, r := range recs {
-			records = append(records, trafficSearchRecord{r})
-		}
+		recs, err = backend.DB.FindRecordsSorted("_data", "host LIKE ?", `"index" DESC`, 0, 0, "%"+args.Host+"%")
 	} else {
-		recs, err := dao.FindRecordsByExpr("_data")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
-		}
-		for _, r := range recs {
-			records = append(records, trafficSearchRecord{r})
-		}
+		recs, err = backend.DB.FindRecords("_data", "1=1")
 	}
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
+	}
+
+	records := wrapRecords(recs)
 
 	statusCounts := map[int]int{}
 	for _, rec := range records {
@@ -363,24 +337,21 @@ func (backend *Backend) getEndpointsHandler(ctx context.Context, request mcp.Cal
 		args.Limit = 500
 	}
 
-	dao := backend.App.Dao()
-
 	var sql string
-	bindParams := dbx.Params{}
+	var queryArgs []any
 
 	if args.Host != "" {
-		sql = "SELECT req_json FROM _data WHERE host LIKE {:host} ORDER BY \"index\" DESC"
-		bindParams["host"] = "%" + args.Host + "%"
+		sql = `SELECT req_json FROM _data WHERE host LIKE ? ORDER BY "index" DESC`
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	} else {
-		sql = "SELECT req_json FROM _data ORDER BY \"index\" DESC"
+		sql = `SELECT req_json FROM _data ORDER BY "index" DESC`
 	}
 
-	var results []struct {
-		ReqJSON string `db:"req_json"`
-	}
-	if err := dao.DB().NewQuery(sql).Bind(bindParams).All(&results); err != nil {
+	rows, err := backend.DB.Query(sql, queryArgs...)
+	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to query endpoints: %v", err)), nil
 	}
+	defer rows.Close()
 
 	// Deduplicate by method+path and count occurrences
 	type endpointKey struct {
@@ -388,8 +359,12 @@ func (backend *Backend) getEndpointsHandler(ctx context.Context, request mcp.Cal
 		Path   string
 	}
 	counts := map[endpointKey]int{}
-	for _, row := range results {
-		parsed := parseReqJSONString(row.ReqJSON)
+	for rows.Next() {
+		var reqJSON string
+		if err := rows.Scan(&reqJSON); err != nil {
+			continue
+		}
+		parsed := parseReqJSONString(reqJSON)
 		if parsed == nil {
 			continue
 		}
@@ -430,24 +405,21 @@ func (backend *Backend) getParametersHandler(ctx context.Context, request mcp.Ca
 		args.Limit = 500
 	}
 
-	dao := backend.App.Dao()
-
 	var sql string
-	bindParams := dbx.Params{}
+	var queryArgs []any
 
 	if args.Host != "" {
-		sql = "SELECT req_json FROM _data WHERE has_params = 1 AND host LIKE {:host} ORDER BY \"index\" DESC"
-		bindParams["host"] = "%" + args.Host + "%"
+		sql = `SELECT req_json FROM _data WHERE has_params = 1 AND host LIKE ? ORDER BY "index" DESC`
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	} else {
-		sql = "SELECT req_json FROM _data WHERE has_params = 1 ORDER BY \"index\" DESC"
+		sql = `SELECT req_json FROM _data WHERE has_params = 1 ORDER BY "index" DESC`
 	}
 
-	var results []struct {
-		ReqJSON string `db:"req_json"`
-	}
-	if err := dao.DB().NewQuery(sql).Bind(bindParams).All(&results); err != nil {
+	rows, err := backend.DB.Query(sql, queryArgs...)
+	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to query parameters: %v", err)), nil
 	}
+	defer rows.Close()
 
 	type paramInfo struct {
 		Name         string
@@ -456,8 +428,12 @@ func (backend *Backend) getParametersHandler(ctx context.Context, request mcp.Ca
 	}
 	paramMap := map[string]*paramInfo{}
 
-	for _, row := range results {
-		parsed := parseReqJSONString(row.ReqJSON)
+	for rows.Next() {
+		var reqJSON string
+		if err := rows.Scan(&reqJSON); err != nil {
+			continue
+		}
+		parsed := parseReqJSONString(reqJSON)
 		if parsed == nil {
 			continue
 		}
@@ -509,7 +485,7 @@ func (backend *Backend) getParametersHandler(ctx context.Context, request mcp.Ca
 // Helpers
 // ---------------------------------------------------------------------------
 
-// trafficSearchRecord wraps a PocketBase record for use in search handlers.
+// trafficSearchRecord wraps a lorgdb.Record for use in search handlers.
 type trafficSearchRecord struct {
 	inner interface {
 		GetString(key string) string
@@ -521,6 +497,15 @@ type trafficSearchRecord struct {
 func (t trafficSearchRecord) GetString(key string) string { return t.inner.GetString(key) }
 func (t trafficSearchRecord) GetFloat(key string) float64  { return t.inner.GetFloat(key) }
 func (t trafficSearchRecord) Get(key string) any           { return t.inner.Get(key) }
+
+// wrapRecords converts a slice of *lorgdb.Record into []trafficSearchRecord.
+func wrapRecords(recs []*lorgdb.Record) []trafficSearchRecord {
+	out := make([]trafficSearchRecord, len(recs))
+	for i, r := range recs {
+		out[i] = trafficSearchRecord{r}
+	}
+	return out
+}
 
 // extractRegexMatchContext returns up to maxLen characters of context around the match position.
 func extractRegexMatchContext(raw string, matchStart int, maxLen int) string {
@@ -555,6 +540,13 @@ func asMap(v any) map[string]any {
 	}
 	if m, ok := v.(map[string]any); ok {
 		return m
+	}
+	// Handle JSON-encoded strings stored in the database.
+	if s, ok := v.(string); ok && len(s) > 0 && s[0] == '{' {
+		var m map[string]any
+		if json.Unmarshal([]byte(s), &m) == nil {
+			return m
+		}
 	}
 	return nil
 }
@@ -601,30 +593,30 @@ func (backend *Backend) generateWordlistHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError("source must be 'paths', 'parameters', or 'both'"), nil
 	}
 
-	dao := backend.App.Dao()
-
-	// Fetch _data records, optionally filtered by host
 	var sql string
-	bindParams := dbx.Params{}
+	var queryArgs []any
 
 	if args.HostFilter != "" {
-		sql = "SELECT req_json FROM _data WHERE host LIKE {:host} ORDER BY \"index\" DESC"
-		bindParams["host"] = "%" + args.HostFilter + "%"
+		sql = `SELECT req_json FROM _data WHERE host LIKE ? ORDER BY "index" DESC`
+		queryArgs = append(queryArgs, "%"+args.HostFilter+"%")
 	} else {
-		sql = "SELECT req_json FROM _data ORDER BY \"index\" DESC"
+		sql = `SELECT req_json FROM _data ORDER BY "index" DESC`
 	}
 
-	var results []struct {
-		ReqJSON string `db:"req_json"`
-	}
-	if err := dao.DB().NewQuery(sql).Bind(bindParams).All(&results); err != nil {
+	rows, err := backend.DB.Query(sql, queryArgs...)
+	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to query traffic: %v", err)), nil
 	}
+	defer rows.Close()
 
 	unique := make(map[string]bool)
 
-	for _, row := range results {
-		parsed := parseReqJSONString(row.ReqJSON)
+	for rows.Next() {
+		var reqJSON string
+		if err := rows.Scan(&reqJSON); err != nil {
+			continue
+		}
+		parsed := parseReqJSONString(reqJSON)
 		if parsed == nil {
 			continue
 		}

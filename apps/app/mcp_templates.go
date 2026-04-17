@@ -7,9 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 )
 
 // ---------------------------------------------------------------------------
@@ -69,20 +68,13 @@ func (backend *Backend) templateRegisterHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Check if a template with this name already exists
-	existing, _ := dao.FindFirstRecordByFilter("_mcp_templates", "name = {:name}", dbx.Params{"name": args.Name})
+	existing, _ := backend.DB.FindFirstRecord("_mcp_templates", "name = ?", args.Name)
 	if existing != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("template with name %q already exists", args.Name)), nil
 	}
 
-	collection, err := dao.FindCollectionByNameOrId("_mcp_templates")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to find _mcp_templates collection: %v", err)), nil
-	}
-
-	record := models.NewRecord(collection)
+	record := lorgdb.NewRecord("_mcp_templates")
 	record.Set("name", args.Name)
 	record.Set("tls", args.TLS)
 	record.Set("host", args.Host)
@@ -96,7 +88,7 @@ func (backend *Backend) templateRegisterHandler(ctx context.Context, request mcp
 	record.Set("extract_regex", args.ExtractRegex)
 	record.Set("extract_group", args.ExtractGroup)
 
-	if err := dao.SaveRecord(record); err != nil {
+	if err := backend.DB.SaveRecord(record); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to save template: %v", err)), nil
 	}
 
@@ -113,9 +105,7 @@ func (backend *Backend) templateSendFromHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
-	tmplRecord, err := dao.FindFirstRecordByFilter("_mcp_templates", "name = {:name}", dbx.Params{"name": args.TemplateName})
+	tmplRecord, err := backend.DB.FindFirstRecord("_mcp_templates", "name = ?", args.TemplateName)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("template not found: %s", args.TemplateName)), nil
 	}
@@ -143,9 +133,7 @@ func (backend *Backend) templateSendBatchHandler(ctx context.Context, request mc
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
-	tmplRecord, err := dao.FindFirstRecordByFilter("_mcp_templates", "name = {:name}", dbx.Params{"name": args.TemplateName})
+	tmplRecord, err := backend.DB.FindFirstRecord("_mcp_templates", "name = ?", args.TemplateName)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("template not found: %s", args.TemplateName)), nil
 	}
@@ -192,8 +180,6 @@ func (backend *Backend) templateSendSequenceHandler(ctx context.Context, request
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	results := make([]map[string]any, 0, len(args.Steps))
 	prevExtract := ""
 
@@ -203,7 +189,7 @@ func (backend *Backend) templateSendSequenceHandler(ctx context.Context, request
 			"templateName": step.TemplateName,
 		}
 
-		tmplRecord, err := dao.FindFirstRecordByFilter("_mcp_templates", "name = {:name}", dbx.Params{"name": step.TemplateName})
+		tmplRecord, err := backend.DB.FindFirstRecord("_mcp_templates", "name = ?", step.TemplateName)
 		if err != nil {
 			entry["error"] = fmt.Sprintf("template not found: %s", step.TemplateName)
 			results = append(results, entry)
@@ -241,9 +227,7 @@ func (backend *Backend) templateSendSequenceHandler(ctx context.Context, request
 }
 
 func (backend *Backend) templateListHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	dao := backend.App.Dao()
-
-	records, err := dao.FindRecordsByExpr("_mcp_templates")
+	records, err := backend.DB.FindRecords("_mcp_templates", "1=1")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list templates: %v", err)), nil
 	}
@@ -279,14 +263,12 @@ func (backend *Backend) templateDeleteHandler(ctx context.Context, request mcp.C
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
-	record, err := dao.FindFirstRecordByFilter("_mcp_templates", "name = {:name}", dbx.Params{"name": args.Name})
+	record, err := backend.DB.FindFirstRecord("_mcp_templates", "name = ?", args.Name)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("template not found: %s", args.Name)), nil
 	}
 
-	if err := dao.DeleteRecord(record); err != nil {
+	if err := backend.DB.DeleteRecord("_mcp_templates", record.Id); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to delete template: %v", err)), nil
 	}
 
@@ -303,7 +285,7 @@ func (backend *Backend) templateDeleteHandler(ctx context.Context, request mcp.C
 // executeTemplate loads default variables from a template record, merges with
 // overrides, substitutes placeholders, optionally injects session data, sends
 // the request, and optionally extracts a value from the response.
-func (backend *Backend) executeTemplate(tmplRecord *models.Record, overrideVars map[string]string, note string) (*RepeaterSendResponse, string, error) {
+func (backend *Backend) executeTemplate(tmplRecord *lorgdb.Record, overrideVars map[string]string, note string) (*RepeaterSendResponse, string, error) {
 	// Load default variables from template
 	defaultVars := map[string]string{}
 	if raw := tmplRecord.Get("variables"); raw != nil {

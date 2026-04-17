@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glitchedgitz/dadql/dadql"
+	"github.com/campbellcharlie/lorg/internal/dadql/dadql"
 	"github.com/campbellcharlie/lorg/lrx/rawhttp"
 	"github.com/spf13/cobra"
 )

@@ -11,20 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	pbTypes "github.com/glitchedgitz/pocketbase/tools/types"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // ExtractData extracts specified fields from database records matching the host
 // and saves them to a file. Returns the file path and any error.
 func (backend *Backend) ExtractData(host string, fields []string, outputFile string) (string, error) {
 	log.Printf("[ExtractData] Starting extraction for host: %s, fields: %v", host, fields)
-
-	dao := backend.App.Dao()
 
 	db := utils.ParseDatabaseName(host)
 
@@ -33,19 +28,9 @@ func (backend *Backend) ExtractData(host string, fields []string, outputFile str
 	log.Println("fields: ", fields)
 	log.Println("outputFile: ", outputFile)
 
-	collection, err := dao.FindCollectionByNameOrId(db)
+	records, err := backend.DB.FindRecords(db, "1=1")
 	if err != nil {
 		return "", fmt.Errorf("failed to find collection for host: %s: %w", host, err)
-	}
-
-	// Query records filtered by host
-	// Handle both http://host and https://host formats, and plain host
-	// Use LIKE pattern to match host with or without scheme
-	// hostFilter := fmt.Sprintf("host = '%s' || host = 'http://%s' || host = 'https://%s' || host ~ '://%s'", host, host, host, host)
-
-	records, err := dao.FindRecordsByExpr(collection.Id)
-	if err != nil {
-		return "", fmt.Errorf("failed to query records: %w", err)
 	}
 
 	log.Printf("[ExtractData] Found %d records for host: %s", len(records), host)
@@ -95,13 +80,11 @@ func (backend *Backend) ExtractData(host string, fields []string, outputFile str
 func extractFieldsFromRecord(backend *Backend, recordId string, fields []string) []string {
 	extracted := make([]string, 0)
 
-	dao := backend.App.Dao()
-
 	// Fetch related records using the same ID (they share the same ID)
-	reqRecord, _ := dao.FindRecordById("_req", recordId)
-	respRecord, _ := dao.FindRecordById("_resp", recordId)
-	reqEditedRecord, _ := dao.FindRecordById("_req_edited", recordId)
-	respEditedRecord, _ := dao.FindRecordById("_resp_edited", recordId)
+	reqRecord, _ := backend.DB.FindRecordById("_req", recordId)
+	respRecord, _ := backend.DB.FindRecordById("_resp", recordId)
+	reqEditedRecord, _ := backend.DB.FindRecordById("_req_edited", recordId)
+	respEditedRecord, _ := backend.DB.FindRecordById("_resp_edited", recordId)
 
 	// Extract each requested field
 	for _, field := range fields {
@@ -152,7 +135,7 @@ func convertValueToString(value interface{}) string {
 // extractFieldValue extracts a field value from records based on the field path
 // Supports nested fields like "req.method", "req.url", "req.params", etc.
 // Also supports req_edited.*, resp_edited.*, and req.raw, resp.raw
-func extractFieldValue(reqRecord *models.Record, respRecord *models.Record, reqEditedRecord *models.Record, respEditedRecord *models.Record, field string) interface{} {
+func extractFieldValue(reqRecord *lorgdb.Record, respRecord *lorgdb.Record, reqEditedRecord *lorgdb.Record, respEditedRecord *lorgdb.Record, field string) interface{} {
 	// Handle req.* fields - use _req record
 	if strings.HasPrefix(field, "req.") {
 		if reqRecord == nil {
@@ -172,28 +155,7 @@ func extractFieldValue(reqRecord *models.Record, respRecord *models.Record, reqE
 			return value
 		}
 
-		// Special handling for headers (JSON field)
-		if subField == "headers" {
-			headersValue := reqRecord.Get("headers")
-			if headersValue != nil {
-				// Handle PocketBase's JSON type
-				var headersData map[string]interface{}
-				if jsonRaw, ok := headersValue.(pbTypes.JsonRaw); ok {
-					if err := json.Unmarshal(jsonRaw, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if jsonBytes, ok := headersValue.([]byte); ok {
-					if err := json.Unmarshal(jsonBytes, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if m, ok := headersValue.(map[string]interface{}); ok {
-					return m
-				}
-			}
-		}
-
+		// lorgdb auto-parses JSON columns into maps, so no special handling needed
 		return nil
 	}
 
@@ -209,28 +171,6 @@ func extractFieldValue(reqRecord *models.Record, respRecord *models.Record, reqE
 		value := respRecord.Get(subField)
 		if value != nil {
 			return value
-		}
-
-		// Special handling for headers (JSON field)
-		if subField == "headers" {
-			headersValue := respRecord.Get("headers")
-			if headersValue != nil {
-				// Handle PocketBase's JSON type
-				var headersData map[string]interface{}
-				if jsonRaw, ok := headersValue.(pbTypes.JsonRaw); ok {
-					if err := json.Unmarshal(jsonRaw, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if jsonBytes, ok := headersValue.([]byte); ok {
-					if err := json.Unmarshal(jsonBytes, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if m, ok := headersValue.(map[string]interface{}); ok {
-					return m
-				}
-			}
 		}
 
 		return nil
@@ -255,28 +195,6 @@ func extractFieldValue(reqRecord *models.Record, respRecord *models.Record, reqE
 			return value
 		}
 
-		// Special handling for headers (JSON field)
-		if subField == "headers" {
-			headersValue := reqEditedRecord.Get("headers")
-			if headersValue != nil {
-				// Handle PocketBase's JSON type
-				var headersData map[string]interface{}
-				if jsonRaw, ok := headersValue.(pbTypes.JsonRaw); ok {
-					if err := json.Unmarshal(jsonRaw, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if jsonBytes, ok := headersValue.([]byte); ok {
-					if err := json.Unmarshal(jsonBytes, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if m, ok := headersValue.(map[string]interface{}); ok {
-					return m
-				}
-			}
-		}
-
 		return nil
 	}
 
@@ -294,28 +212,6 @@ func extractFieldValue(reqRecord *models.Record, respRecord *models.Record, reqE
 			return value
 		}
 
-		// Special handling for headers (JSON field)
-		if subField == "headers" {
-			headersValue := respEditedRecord.Get("headers")
-			if headersValue != nil {
-				// Handle PocketBase's JSON type
-				var headersData map[string]interface{}
-				if jsonRaw, ok := headersValue.(pbTypes.JsonRaw); ok {
-					if err := json.Unmarshal(jsonRaw, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if jsonBytes, ok := headersValue.([]byte); ok {
-					if err := json.Unmarshal(jsonBytes, &headersData); err != nil {
-						return nil
-					}
-					return headersData
-				} else if m, ok := headersValue.(map[string]interface{}); ok {
-					return m
-				}
-			}
-		}
-
 		return nil
 	}
 
@@ -324,86 +220,73 @@ func extractFieldValue(reqRecord *models.Record, respRecord *models.Record, reqE
 }
 
 // ExtractDataEndpoint creates an API endpoint for data extraction
-func (backend *Backend) ExtractDataEndpoint(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/extract",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) ExtractDataEndpoint(e *echo.Echo) {
+	e.POST("/api/extract", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			var data map[string]interface{}
-			if err := c.Bind(&data); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{
-					"error": "Invalid request body",
-				})
-			}
-
-			// Extract required fields
-			host, ok := data["host"].(string)
-			if !ok || host == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{
-					"error": "host is required",
-				})
-			}
-
-			// Get fields to extract
-			var fields []string
-			if fieldsInterface, ok := data["fields"].([]interface{}); ok {
-				for _, f := range fieldsInterface {
-					if fieldStr, ok := f.(string); ok {
-						fields = append(fields, fieldStr)
-					}
-				}
-			} else if fieldsStr, ok := data["fields"].(string); ok {
-				// Support comma-separated string
-				fields = strings.Split(fieldsStr, ",")
-				for i := range fields {
-					fields[i] = strings.TrimSpace(fields[i])
-				}
-			}
-
-			if len(fields) == 0 {
-				// Default fields if none specified
-				fields = []string{"req.method", "req.url", "req.path", "req.params"}
-			}
-
-			// Get output file path (optional, defaults to cache directory)
-			outputFile, ok := data["outputFile"].(string)
-			if !ok || outputFile == "" {
-				// Generate default filename based on host and timestamp
-				timestamp := time.Now().Format("20060102_150405")
-				safeHost := strings.ReplaceAll(strings.ReplaceAll(host, "://", "_"), "/", "_")
-				outputFile = filepath.Join(backend.Config.CacheDirectory, fmt.Sprintf("extract_%s_%s.jsonl", safeHost, timestamp))
-			}
-
-			// Perform extraction
-			filePath, err := backend.ExtractData(host, fields, outputFile)
-			if err != nil {
-				log.Printf("[ExtractDataEndpoint] Error: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"error":   "Failed to extract data",
-					"message": err.Error(),
-				})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success":     true,
-				"filePath":    filePath,
-				"host":        host,
-				"fields":      fields,
-				"extractedAt": time.Now().Format(time.RFC3339),
+		var data map[string]interface{}
+		if err := c.Bind(&data); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"error": "Invalid request body",
 			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		}
+
+		// Extract required fields
+		host, ok := data["host"].(string)
+		if !ok || host == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"error": "host is required",
+			})
+		}
+
+		// Get fields to extract
+		var fields []string
+		if fieldsInterface, ok := data["fields"].([]interface{}); ok {
+			for _, f := range fieldsInterface {
+				if fieldStr, ok := f.(string); ok {
+					fields = append(fields, fieldStr)
+				}
+			}
+		} else if fieldsStr, ok := data["fields"].(string); ok {
+			// Support comma-separated string
+			fields = strings.Split(fieldsStr, ",")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+		}
+
+		if len(fields) == 0 {
+			// Default fields if none specified
+			fields = []string{"req.method", "req.url", "req.path", "req.params"}
+		}
+
+		// Get output file path (optional, defaults to cache directory)
+		outputFile, ok := data["outputFile"].(string)
+		if !ok || outputFile == "" {
+			// Generate default filename based on host and timestamp
+			timestamp := time.Now().Format("20060102_150405")
+			safeHost := strings.ReplaceAll(strings.ReplaceAll(host, "://", "_"), "/", "_")
+			outputFile = filepath.Join(backend.Config.CacheDirectory, fmt.Sprintf("extract_%s_%s.jsonl", safeHost, timestamp))
+		}
+
+		// Perform extraction
+		filePath, err := backend.ExtractData(host, fields, outputFile)
+		if err != nil {
+			log.Printf("[ExtractDataEndpoint] Error: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"error":   "Failed to extract data",
+				"message": err.Error(),
+			})
+		}
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":     true,
+			"filePath":    filePath,
+			"host":        host,
+			"fields":      fields,
+			"extractedAt": time.Now().Format(time.RFC3339),
+		})
 	})
-	return nil
 }

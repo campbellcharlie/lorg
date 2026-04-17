@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 )
 
 // ---------------------------------------------------------------------------
@@ -139,14 +138,21 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 	}
 	mimeRows.Close()
 
-	// 6. Technology stack from PocketBase _hosts collection (if available)
+	// 6. Technology stack from _hosts collection (if available)
 	var technologies []string
-	dao := backend.App.Dao()
-	hostRecord, err := dao.FindFirstRecordByFilter("_hosts", "host = {:host}", dbx.Params{"host": args.Host})
+	hostRecord, err := backend.DB.FindFirstRecord("_hosts", "host = ?", args.Host)
 	if err == nil && hostRecord != nil {
-		dao.ExpandRecord(hostRecord, []string{"tech"}, nil)
-		for _, t := range hostRecord.ExpandedAll("tech") {
-			technologies = append(technologies, t.GetString("name"))
+		// tech is stored as a JSON array of record IDs; fetch each tech record by ID
+		if techRaw := hostRecord.Get("tech"); techRaw != nil {
+			if techIDs, ok := techRaw.([]any); ok {
+				for _, tid := range techIDs {
+					if idStr, ok := tid.(string); ok {
+						if techRec, techErr := backend.DB.FindRecordById("_tech", idStr); techErr == nil {
+							technologies = append(technologies, techRec.GetString("name"))
+						}
+					}
+				}
+			}
 		}
 	}
 

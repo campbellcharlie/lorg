@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
-	"github.com/duke-git/lancet/v2/convertor"
 	"github.com/campbellcharlie/lorg/internal/types"
 	"github.com/go-resty/resty/v2"
 )
@@ -292,10 +292,10 @@ func (c *Client) List(collection string, params types.ParamsList) (types.Respons
 		SetPathParam("collection", collection)
 
 	if params.Page > 0 {
-		request.SetQueryParam("page", convertor.ToString(params.Page))
+		request.SetQueryParam("page", strconv.Itoa(params.Page))
 	}
 	if params.Size > 0 {
-		request.SetQueryParam("perPage", convertor.ToString(params.Size))
+		request.SetQueryParam("perPage", strconv.Itoa(params.Size))
 	}
 	if params.Filters != "" {
 		request.SetQueryParam("filter", params.Filters)

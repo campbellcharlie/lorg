@@ -12,8 +12,7 @@ import (
 
 	"github.com/campbellcharlie/lorg/lrx/version"
 	"github.com/campbellcharlie/lorg/internal/save"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
@@ -203,6 +202,15 @@ func (backend *Backend) mcpInit() {
 			mcp.WithInputSchema[InterceptActionArgs](),
 		),
 		backend.interceptActionHandler,
+	)
+
+	// --- Match & Replace ---
+	s.AddTool(
+		mcp.NewTool("matchReplace",
+			mcp.WithDescription("Manage proxy match & replace rules. Auto-modify HTTP requests/responses as they pass through the proxy. Actions: add, list, remove, enable, disable, reload"),
+			mcp.WithInputSchema[MatchReplaceArgs](),
+		),
+		backend.matchReplaceHandler,
 	)
 
 	// --- Proxy tools ---
@@ -657,7 +665,7 @@ func (backend *Backend) mcpInit() {
 // HTTP endpoints
 // ---------------------------------------------------------------------------
 
-func (backend *Backend) MCPEndpoint(e *core.ServeEvent) error {
+func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 	backend.mcpInit()
 
 	// MCP token authentication middleware
@@ -675,169 +683,140 @@ func (backend *Backend) MCPEndpoint(e *core.ServeEvent) error {
 		return nil
 	}
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/mcp/start",
-		Handler: func(c echo.Context) error {
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
-			if backend.MCP != nil && backend.MCP.active {
-				return c.JSON(http.StatusOK, map[string]any{"message": "MCP server already active"})
-			}
-			backend.mcpInit()
-			log.Println("[MCP] Server started")
-			return c.JSON(http.StatusOK, map[string]any{"message": "MCP server started"})
-		},
+	e.POST("/mcp/start", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		if backend.MCP != nil && backend.MCP.active {
+			return c.JSON(http.StatusOK, map[string]any{"message": "MCP server already active"})
+		}
+		backend.mcpInit()
+		log.Println("[MCP] Server started")
+		return c.JSON(http.StatusOK, map[string]any{"message": "MCP server started"})
 	})
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/mcp/stop",
-		Handler: func(c echo.Context) error {
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
-			if backend.MCP == nil || !backend.MCP.active {
-				return c.JSON(http.StatusOK, map[string]any{"message": "MCP server already stopped"})
-			}
-			backend.MCP.active = false
-			log.Println("[MCP] Server stopped")
-			return c.JSON(http.StatusOK, map[string]any{"message": "MCP server stopped"})
-		},
+	e.POST("/mcp/stop", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		if backend.MCP == nil || !backend.MCP.active {
+			return c.JSON(http.StatusOK, map[string]any{"message": "MCP server already stopped"})
+		}
+		backend.MCP.active = false
+		log.Println("[MCP] Server stopped")
+		return c.JSON(http.StatusOK, map[string]any{"message": "MCP server stopped"})
 	})
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodGet,
-		Path:   "/mcp/health",
-		Handler: func(c echo.Context) error {
-			if backend.MCP == nil || !backend.MCP.active {
-				return c.JSON(http.StatusOK, map[string]any{"active": false})
-			}
+	e.GET("/mcp/health", func(c echo.Context) error {
+		if backend.MCP == nil || !backend.MCP.active {
+			return c.JSON(http.StatusOK, map[string]any{"active": false})
+		}
 
-			tools := backend.MCP.server.ListTools()
-			toolNames := make([]string, 0, len(tools))
-			for name := range tools {
-				toolNames = append(toolNames, name)
-			}
+		tools := backend.MCP.server.ListTools()
+		toolNames := make([]string, 0, len(tools))
+		for name := range tools {
+			toolNames = append(toolNames, name)
+		}
 
-			return c.JSON(http.StatusOK, map[string]any{
-				"active":      true,
-				"status":      "ok",
-				"server":      "lorg",
-				"version":     version.CURRENT_BACKEND_VERSION,
-				"tools":       toolNames,
-				"connections": backend.MCP.conns.Load(),
+		return c.JSON(http.StatusOK, map[string]any{
+			"active":      true,
+			"status":      "ok",
+			"server":      "lorg",
+			"version":     version.CURRENT_BACKEND_VERSION,
+			"tools":       toolNames,
+			"connections": backend.MCP.conns.Load(),
+		})
+	})
+
+	e.GET("/mcp/listtools", func(c echo.Context) error {
+		if backend.MCP == nil || !backend.MCP.active {
+			return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
+		}
+
+		tools := backend.MCP.server.ListTools()
+		type toolInfo struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		result := make([]toolInfo, 0, len(tools))
+		for name, t := range tools {
+			result = append(result, toolInfo{
+				Name:        name,
+				Description: t.Tool.Description,
 			})
-		},
+		}
+
+		return c.JSON(http.StatusOK, map[string]any{
+			"tools": result,
+			"count": len(result),
+		})
 	})
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodGet,
-		Path:   "/mcp/listtools",
-		Handler: func(c echo.Context) error {
-			if backend.MCP == nil || !backend.MCP.active {
-				return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
-			}
-
-			tools := backend.MCP.server.ListTools()
-			type toolInfo struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			}
-			result := make([]toolInfo, 0, len(tools))
-			for name, t := range tools {
-				result = append(result, toolInfo{
-					Name:        name,
-					Description: t.Tool.Description,
-				})
-			}
-
-			return c.JSON(http.StatusOK, map[string]any{
-				"tools": result,
-				"count": len(result),
-			})
-		},
+	e.GET("/mcp/sse", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		if err := requireMCPAuth(c); err != nil {
+			return err
+		}
+		if backend.MCP == nil || !backend.MCP.active {
+			return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
+		}
+		backend.MCP.conns.Add(1)
+		defer backend.MCP.conns.Add(-1)
+		backend.MCP.sseServer.SSEHandler().ServeHTTP(c.Response(), c.Request())
+		return nil
 	})
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodGet,
-		Path:   "/mcp/sse",
-		Handler: func(c echo.Context) error {
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
-			if err := requireMCPAuth(c); err != nil {
-				return err
-			}
-			if backend.MCP == nil || !backend.MCP.active {
-				return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
-			}
-			backend.MCP.conns.Add(1)
-			defer backend.MCP.conns.Add(-1)
-			backend.MCP.sseServer.SSEHandler().ServeHTTP(c.Response(), c.Request())
-			return nil
-		},
+	e.POST("/mcp/message", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		if err := requireMCPAuth(c); err != nil {
+			return err
+		}
+		if backend.MCP == nil || !backend.MCP.active {
+			return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
+		}
+		backend.MCP.sseServer.MessageHandler().ServeHTTP(c.Response(), c.Request())
+		return nil
 	})
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/mcp/message",
-		Handler: func(c echo.Context) error {
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
-			if err := requireMCPAuth(c); err != nil {
-				return err
-			}
-			if backend.MCP == nil || !backend.MCP.active {
-				return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
-			}
-			backend.MCP.sseServer.MessageHandler().ServeHTTP(c.Response(), c.Request())
-			return nil
-		},
-	})
+	e.POST("/mcp/setup/claude", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		var body struct {
+			ClaudeMD string `json:"claude_md"`
+		}
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]any{"error": "Invalid request body"})
+		}
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/mcp/setup/claude",
-		Handler: func(c echo.Context) error {
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
-			var body struct {
-				ClaudeMD string `json:"claude_md"`
-			}
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]any{"error": "Invalid request body"})
-			}
+		cwd, _ := os.Getwd()
+		mcpSseURL := fmt.Sprintf("http://%s/mcp/sse", backend.Config.HostAddr)
 
-			cwd, _ := os.Getwd()
-			mcpSseURL := fmt.Sprintf("http://%s/mcp/sse", backend.Config.HostAddr)
-
-			mcpSettings := map[string]any{
-				"mcpServers": map[string]any{
-					"lorg": map[string]any{
-						"type": "sse",
-						"url":  mcpSseURL,
-					},
+		mcpSettings := map[string]any{
+			"mcpServers": map[string]any{
+				"lorg": map[string]any{
+					"type": "sse",
+					"url":  mcpSseURL,
 				},
-			}
+			},
+		}
 
-			mcpJSON, _ := json.MarshalIndent(mcpSettings, "", "  ")
-			save.WriteFile(".mcp.json", mcpJSON)
+		mcpJSON, _ := json.MarshalIndent(mcpSettings, "", "  ")
+		save.WriteFile(".mcp.json", mcpJSON)
 
-			claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
-			claudeContent := body.ClaudeMD
-			save.WriteFile(claudeMDPath, []byte(claudeContent))
+		claudeMDPath := filepath.Join(cwd, "CLAUDE.md")
+		claudeContent := body.ClaudeMD
+		save.WriteFile(claudeMDPath, []byte(claudeContent))
 
-			return c.JSON(http.StatusOK, map[string]any{
-				"success": true,
-				"message": "Claude Code integration configured",
-			})
-		},
+		return c.JSON(http.StatusOK, map[string]any{
+			"success": true,
+			"message": "Claude Code integration configured",
+		})
 	})
 
 	log.Println("[MCP] Endpoints registered at /mcp/")
-	return nil
 }

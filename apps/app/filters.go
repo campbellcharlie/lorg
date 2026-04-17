@@ -4,11 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/glitchedgitz/dadql/dadql"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/campbellcharlie/lorg/internal/dadql/dadql"
+	"github.com/labstack/echo/v4"
 )
 
 type FilterCheckRequest struct {
@@ -18,48 +15,35 @@ type FilterCheckRequest struct {
 
 // FiltersCheck registers the /api/filter/check endpoint.
 // It evaluates the provided dadql filter against the given columns map.
-func (backend *Backend) FiltersCheck(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/filter/check",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) FiltersCheck(e *echo.Echo) {
+	e.POST("/api/filter/check", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		var req FilterCheckRequest
+		if err := c.Bind(&req); err != nil {
+			return err
+		}
 
-			var req FilterCheckRequest
-			if err := c.Bind(&req); err != nil {
-				return err
-			}
-
-			req.Filter = strings.TrimSpace(req.Filter)
-			if req.Filter == "" {
-				return c.JSON(http.StatusBadRequest, map[string]any{
-					"error": "filter is required",
-				})
-			}
-
-			ok, err := dadql.Filter(req.Columns, req.Filter)
-			if err != nil {
-				return c.JSON(http.StatusOK, map[string]any{
-					"ok":    false,
-					"error": err.Error(),
-				})
-			}
-
-			return c.JSON(http.StatusOK, map[string]any{
-				"ok":    true,
-				"match": ok,
+		req.Filter = strings.TrimSpace(req.Filter)
+		if req.Filter == "" {
+			return c.JSON(http.StatusBadRequest, map[string]any{
+				"error": "filter is required",
 			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
-	})
+		}
 
-	return nil
+		ok, err := dadql.Filter(req.Columns, req.Filter)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
+		}
+
+		return c.JSON(http.StatusOK, map[string]any{
+			"ok":    true,
+			"match": ok,
+		})
+	})
 }

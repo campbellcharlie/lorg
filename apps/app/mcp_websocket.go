@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 )
 
 // ---------------------------------------------------------------------------
@@ -51,31 +50,30 @@ func (backend *Backend) websocketHandler(ctx context.Context, request mcp.CallTo
 // ---------------------------------------------------------------------------
 
 func (backend *Backend) wsListMessagesHandler(args WebSocketArgs) (*mcp.CallToolResult, error) {
-	dao := backend.App.Dao()
 	limit := clampWSLimit(args.Limit, 100, 500)
 
-	var filters []string
-	params := dbx.Params{}
+	var conditions []string
+	var queryArgs []any
 
 	if args.Host != "" {
-		filters = append(filters, "host ~ {:host}")
-		params["host"] = args.Host
+		conditions = append(conditions, "host LIKE ?")
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
 	if args.RequestID != "" {
-		filters = append(filters, "proxy_id = {:pid}")
-		params["pid"] = args.RequestID
+		conditions = append(conditions, "proxy_id = ?")
+		queryArgs = append(queryArgs, args.RequestID)
 	}
 	if args.Direction != "" {
-		filters = append(filters, "direction = {:dir}")
-		params["dir"] = args.Direction
+		conditions = append(conditions, "direction = ?")
+		queryArgs = append(queryArgs, args.Direction)
 	}
 
-	filter := "id != ''"
-	if len(filters) > 0 {
-		filter = strings.Join(filters, " && ")
+	where := "1=1"
+	if len(conditions) > 0 {
+		where = strings.Join(conditions, " AND ")
 	}
 
-	records, err := dao.FindRecordsByFilter("_websockets", filter, "-timestamp", limit, 0, params)
+	records, err := backend.DB.FindRecordsSorted("_websockets", where, "timestamp DESC", limit, 0, queryArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to query websocket messages: %v", err)), nil
 	}
@@ -120,26 +118,25 @@ func (backend *Backend) wsSearchHandler(args WebSocketArgs) (*mcp.CallToolResult
 		return mcp.NewToolResultError("query is required for search"), nil
 	}
 
-	dao := backend.App.Dao()
 	limit := clampWSLimit(args.Limit, 100, 500)
 
-	var filters []string
-	params := dbx.Params{}
+	var conditions []string
+	var queryArgs []any
 
-	filters = append(filters, "payload ~ {:q}")
-	params["q"] = args.Query
+	conditions = append(conditions, "payload LIKE ?")
+	queryArgs = append(queryArgs, "%"+args.Query+"%")
 
 	if args.Host != "" {
-		filters = append(filters, "host ~ {:host}")
-		params["host"] = args.Host
+		conditions = append(conditions, "host LIKE ?")
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
 	if args.Direction != "" {
-		filters = append(filters, "direction = {:dir}")
-		params["dir"] = args.Direction
+		conditions = append(conditions, "direction = ?")
+		queryArgs = append(queryArgs, args.Direction)
 	}
 
-	filter := strings.Join(filters, " && ")
-	records, err := dao.FindRecordsByFilter("_websockets", filter, "-timestamp", limit, 0, params)
+	where := strings.Join(conditions, " AND ")
+	records, err := backend.DB.FindRecordsSorted("_websockets", where, "timestamp DESC", limit, 0, queryArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("search failed: %v", err)), nil
 	}
@@ -178,26 +175,22 @@ func (backend *Backend) wsGetConnectionHandler(args WebSocketArgs) (*mcp.CallToo
 		return mcp.NewToolResultError("requestId is required for getConnection"), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Find the HTTP upgrade request in _data
-	dataRecords, err := dao.FindRecordsByFilter("_data", "id = {:id}", "", 1, 0, dbx.Params{"id": args.RequestID})
-	if err != nil || len(dataRecords) == 0 {
+	r, err := backend.DB.FindRecordById("_data", args.RequestID)
+	if err != nil || r == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("connection %s not found in traffic data", args.RequestID)), nil
 	}
 
-	r := dataRecords[0]
-
 	// Get raw request/response
 	var rawReq, rawResp string
-	rawRecords, rawErr := dao.FindRecordsByFilter("_raw", "id = {:id}", "", 1, 0, dbx.Params{"id": args.RequestID})
-	if rawErr == nil && len(rawRecords) > 0 {
-		rawReq = rawRecords[0].GetString("request")
-		rawResp = rawRecords[0].GetString("response")
+	rawRecord, rawErr := backend.DB.FindRecordById("_raw", args.RequestID)
+	if rawErr == nil && rawRecord != nil {
+		rawReq = rawRecord.GetString("request")
+		rawResp = rawRecord.GetString("response")
 	}
 
 	// Count messages for this connection
-	wsRecords, _ := dao.FindRecordsByFilter("_websockets", "proxy_id = {:pid}", "", 0, 0, dbx.Params{"pid": args.RequestID})
+	wsRecords, _ := backend.DB.FindRecords("_websockets", "proxy_id = ?", args.RequestID)
 
 	return mcpJSONResult(map[string]any{
 		"requestId":    args.RequestID,
@@ -215,10 +208,9 @@ func (backend *Backend) wsGetConnectionHandler(args WebSocketArgs) (*mcp.CallToo
 // ---------------------------------------------------------------------------
 
 func (backend *Backend) wsListConnectionsHandler(args WebSocketArgs) (*mcp.CallToolResult, error) {
-	dao := backend.App.Dao()
 	limit := clampWSLimit(args.Limit, 50, 200)
 
-	query := dao.DB().NewQuery(`
+	rows, err := backend.DB.Query(`
 		SELECT proxy_id, host, path, url,
 		       MIN(timestamp) AS first_msg,
 		       MAX(timestamp) AS last_msg,
@@ -226,16 +218,14 @@ func (backend *Backend) wsListConnectionsHandler(args WebSocketArgs) (*mcp.CallT
 		FROM _websockets
 		GROUP BY proxy_id
 		ORDER BY first_msg DESC
-		LIMIT {:limit}
-	`).Bind(dbx.Params{"limit": limit})
-
-	var connections []map[string]any
-	rows, err := query.Rows()
+		LIMIT ?
+	`, limit)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
 	defer rows.Close()
 
+	var connections []map[string]any
 	for rows.Next() {
 		var proxyID, host, path, url, firstMsg, lastMsg string
 		var msgCount int

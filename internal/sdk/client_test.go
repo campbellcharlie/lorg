@@ -1,4 +1,4 @@
-// file: client.go
+// file: client_test.go
 
 package sdk
 
@@ -8,16 +8,24 @@ import (
 
 	"github.com/campbellcharlie/lorg/internal/types"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/r--w/pocketbase/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const (
 	defaultURL = "http://127.0.0.1:8090"
+
+	// Test collection names (previously from migrations package).
+	testPostsPublic = "posts_public"
+	testPostsAdmin  = "posts_admin"
+	testPostsUser   = "posts_user"
+	testAdminEmail  = "new@example.com"
+	testAdminPass   = "1234567890"
+	testUserEmail   = "user@example.com"
+	testUserPass    = "1234567890"
 )
 
-// REMEMBER to start the Pocketbase before running this example with `make serve` command
+// REMEMBER to start lorg before running these tests
 
 func TestAuthorizeAnonymous(t *testing.T) {
 	tests := []struct {
@@ -53,34 +61,32 @@ func TestListAccess(t *testing.T) {
 	}{
 		{
 			name:       "With admin credentials - posts_admin",
-			admin:      auth{email: migrations.AdminEmailPassword, password: migrations.AdminEmailPassword},
-			collection: migrations.PostsAdmin,
+			admin:      auth{email: testAdminEmail, password: testAdminPass},
+			collection: testPostsAdmin,
 			wantResult: true,
 			wantErr:    false,
 		},
 		{
 			name:       "Without credentials - posts_admin",
-			collection: migrations.PostsAdmin,
+			collection: testPostsAdmin,
 			wantErr:    true,
 		},
 		{
 			name:       "Without credentials - posts_public",
-			collection: migrations.PostsPublic,
+			collection: testPostsPublic,
 			wantResult: true,
 			wantErr:    false,
 		},
 		{
-			// For access rule @request.auth.id != ""
-			// no error is returned, but empty result
 			name:       "Without credentials - posts_user",
-			collection: migrations.PostsUser,
+			collection: testPostsUser,
 			wantResult: false,
 			wantErr:    false,
 		},
 		{
 			name:       "With user credentials - posts_user",
-			user:       auth{email: migrations.UserEmailPassword, password: migrations.UserEmailPassword},
-			collection: migrations.PostsUser,
+			user:       auth{email: testUserEmail, password: testUserPass},
+			collection: testPostsUser,
 			wantResult: true,
 			wantErr:    false,
 		},
@@ -113,22 +119,22 @@ func TestAuthorizeEmailPassword(t *testing.T) {
 	}{
 		{
 			name:    "Valid credentials admin",
-			admin:   args{email: migrations.AdminEmailPassword, password: migrations.AdminEmailPassword},
+			admin:   args{email: testAdminEmail, password: testAdminPass},
 			wantErr: false,
 		},
 		{
 			name:    "Invalid credentials admin",
-			admin:   args{email: "invalid_" + migrations.AdminEmailPassword, password: "no_admin@admin.com"},
+			admin:   args{email: "invalid_" + testAdminEmail, password: "no_admin@admin.com"},
 			wantErr: true,
 		},
 		{
 			name:    "Valid credentials user",
-			user:    args{email: migrations.UserEmailPassword, password: migrations.UserEmailPassword},
+			user:    args{email: testUserEmail, password: testUserPass},
 			wantErr: false,
 		},
 		{
 			name:    "Invalid credentials user",
-			user:    args{email: "invalid_" + migrations.UserEmailPassword, password: migrations.UserEmailPassword},
+			user:    args{email: "invalid_" + testUserEmail, password: testUserPass},
 			wantErr: true,
 		},
 	}
@@ -160,14 +166,14 @@ func TestClient_List(t *testing.T) {
 		{
 			name:       "List with no params",
 			client:     defaultClient,
-			collection: migrations.PostsPublic,
+			collection: testPostsPublic,
 			wantErr:    false,
 			wantResult: true,
 		},
 		{
 			name:       "List no results - query",
 			client:     defaultClient,
-			collection: migrations.PostsPublic,
+			collection: testPostsPublic,
 			params: types.ParamsList{
 				Filters: "field='some_random_value'",
 			},
@@ -177,7 +183,7 @@ func TestClient_List(t *testing.T) {
 		{
 			name:       "List no results - invalid query",
 			client:     defaultClient,
-			collection: migrations.PostsPublic,
+			collection: testPostsPublic,
 			params: types.ParamsList{
 				Filters: "field~~~some_random_value'",
 			},
@@ -205,28 +211,23 @@ func TestClient_Delete(t *testing.T) {
 	client := NewClient(defaultURL)
 	field := "value_" + time.Now().Format(time.StampMilli)
 
-	// delete non-existing item
-	err := client.Delete(migrations.PostsPublic, "non_existing_id")
+	err := client.Delete(testPostsPublic, "non_existing_id")
 	assert.Error(t, err)
 
-	// create temporary item
-	resultCreated, err := client.Create(migrations.PostsPublic, map[string]any{
+	resultCreated, err := client.Create(testPostsPublic, map[string]any{
 		"field": field,
 	})
 	assert.NoError(t, err)
 	assert.NotEmpty(t, resultCreated.ID)
 
-	// confirm item exists
-	resultList, err := client.List(migrations.PostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
+	resultList, err := client.List(testPostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
 	assert.NoError(t, err)
 	assert.Len(t, resultList.Items, 1)
 
-	// delete temporary item
-	err = client.Delete(migrations.PostsPublic, resultCreated.ID)
+	err = client.Delete(testPostsPublic, resultCreated.ID)
 	assert.NoError(t, err)
 
-	// confirm item does not exist
-	resultList, err = client.List(migrations.PostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
+	resultList, err = client.List(testPostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
 	assert.NoError(t, err)
 	assert.Len(t, resultList.Items, 0)
 }
@@ -235,33 +236,28 @@ func TestClient_Update(t *testing.T) {
 	client := NewClient(defaultURL)
 	field := "value_" + time.Now().Format(time.StampMilli)
 
-	// update non-existing item
-	err := client.Update(migrations.PostsPublic, "non_existing_id", map[string]any{
+	err := client.Update(testPostsPublic, "non_existing_id", map[string]any{
 		"field": field,
 	})
 	assert.Error(t, err)
 
-	// create temporary item
-	resultCreated, err := client.Create(migrations.PostsPublic, map[string]any{
+	resultCreated, err := client.Create(testPostsPublic, map[string]any{
 		"field": field,
 	})
 	assert.NoError(t, err)
 	assert.NotEmpty(t, resultCreated.ID)
 
-	// confirm item exists
-	resultList, err := client.List(migrations.PostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
+	resultList, err := client.List(testPostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
 	assert.NoError(t, err)
 	require.Len(t, resultList.Items, 1)
 	assert.Equal(t, field, resultList.Items[0]["field"])
 
-	// update temporary item
-	err = client.Update(migrations.PostsPublic, resultCreated.ID, map[string]any{
+	err = client.Update(testPostsPublic, resultCreated.ID, map[string]any{
 		"field": field + "_updated",
 	})
 	assert.NoError(t, err)
 
-	// confirm changes
-	resultList, err = client.List(migrations.PostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
+	resultList, err = client.List(testPostsPublic, types.ParamsList{Filters: "id='" + resultCreated.ID + "'"})
 	assert.NoError(t, err)
 	require.Len(t, resultList.Items, 1)
 	assert.Equal(t, field+"_updated", resultList.Items[0]["field"])
@@ -284,13 +280,13 @@ func TestClient_Create(t *testing.T) {
 		{
 			name:       "Create with no body",
 			client:     defaultClient,
-			collection: migrations.PostsPublic,
+			collection: testPostsPublic,
 			wantErr:    true,
 		},
 		{
 			name:       "Create with body",
 			client:     defaultClient,
-			collection: migrations.PostsPublic,
+			collection: testPostsPublic,
 			body:       defaultBody,
 			wantErr:    false,
 			wantID:     true,
@@ -305,7 +301,7 @@ func TestClient_Create(t *testing.T) {
 		{
 			name:       "Create no auth",
 			client:     defaultClient,
-			collection: migrations.PostsUser,
+			collection: testPostsUser,
 			body:       defaultBody,
 			wantErr:    true,
 		},
@@ -319,8 +315,6 @@ func TestClient_Create(t *testing.T) {
 	}
 }
 
-// Create test function for SitemapNew by suppling values of types.SitemapGet
-
 func TestClient_SitemapNew(t *testing.T) {
 	defaultClient := NewClient(defaultURL)
 	tests := []struct {
@@ -330,11 +324,6 @@ func TestClient_SitemapNew(t *testing.T) {
 		wantErr bool
 		wantID  bool
 	}{
-		// {
-		// 	name:       "Create with no body",
-		// 	client:     defaultClient,
-		// 	wantErr:    true,
-		// },
 		{
 			name:   "Create with body",
 			client: defaultClient,
@@ -349,28 +338,11 @@ func TestClient_SitemapNew(t *testing.T) {
 			wantErr: false,
 			wantID:  true,
 		},
-		// {
-		// 	name:       "Create invalid collections",
-		// 	client:     defaultClient,
-		// 	body: types.SitemapGet{
-		// 		Host: "",
-		// 	},
-		// 	wantErr: true,
-		// },
-		// {
-		// 	name:       "Create no auth",
-		// 	client:     defaultClient,
-		// 	body: types.SitemapGet{
-		// 		Host: "",
-		// 	},
-		// 	wantErr: true,
-		// },
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.client.SitemapNew(tt.body)
 			assert.Equal(t, tt.wantErr, err != nil, err)
-			// assert.Equal(t, tt.wantID, r.ID != "")
 		})
 	}
 }

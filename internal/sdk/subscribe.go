@@ -10,7 +10,6 @@ import (
 
 	"github.com/SierraSoftworks/multicast/v2"
 	"github.com/cenkalti/backoff/v4"
-	"github.com/donovanhide/eventsource"
 )
 
 type Event[T any] struct {
@@ -43,7 +42,7 @@ func (c Collection[T]) SubscribeWith(opts SubscribeOptions, targets ...string) (
 	ctx, cancel := context.WithCancel(context.Background())
 	stream.unsubscribe = func() { cancel() }
 
-	handleSSEEvent := func(ev eventsource.Event) {
+	handleSSEEvent := func(ev *sseEvent) {
 		var e Event[T]
 		e.Error = json.Unmarshal([]byte(ev.Data()), &e)
 		stream.channel.C <- e
@@ -60,7 +59,7 @@ func (c Collection[T]) SubscribeWith(opts SubscribeOptions, targets ...string) (
 				return
 			}
 
-			d := eventsource.NewDecoder(resp.RawBody())
+			d := newSSEDecoder(resp.RawBody())
 
 			ev, err := d.Decode()
 			if err != nil {

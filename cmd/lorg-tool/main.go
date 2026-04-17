@@ -1,27 +1,23 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"net/http"
+	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/campbellcharlie/lorg/apps/tools"
 	"github.com/campbellcharlie/lorg/internal/config"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase"
-	"github.com/glitchedgitz/pocketbase/apis"
-
-	_ "github.com/campbellcharlie/lorg/cmd/lorg-tool/migrations"
+	"github.com/labstack/echo/v4"
 )
 
 var conf config.Config
 
 func initialize() {
-
 	conf.Initiate()
 }
 
@@ -48,35 +44,45 @@ func main() {
 
 	fmt.Println("Working directory changed to:", projectPath)
 
+	// Open lorgdb for the tool's database
+	dbPath := filepath.Join(projectPath, name, "pb_data", "data.db")
+	db, err := lorgdb.Open(dbPath)
+	if err != nil {
+		log.Fatalf("[Startup] Failed to open LorgDB: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.RunMigrations(); err != nil {
+		log.Fatalf("[Startup] LorgDB migrations failed: %v", err)
+	}
+
 	backend := tools.Tools{
-		App: pocketbase.NewWithConfig(
-			pocketbase.Config{
-				ProjectDir:      projectPath,
-				DefaultDataDir:  name,
-				HideStartBanner: true,
-			},
-		),
+		DB:         db,
 		Config:     &conf,
 		CmdChannel: make(chan process.RunCommandData),
 	}
 
-	backend.App.OnBeforeServe().Add(backend.RunCommand)
-
-	// SDK Login
-	backend.App.OnBeforeServe().Add(backend.LoginSDKEndpoint)
-
-	// Fuzzer
-	backend.App.OnBeforeServe().Add(backend.StartFuzzer)
-	backend.App.OnBeforeServe().Add(backend.StopFuzzer)
-
-	backend.App.Bootstrap()
 	go backend.CommandManager()
 
-	_, err = apis.Serve(backend.App, apis.ServeConfig{
-		HttpAddr: host,
+	e := echo.New()
+
+	// Simple request logging middleware
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			err := next(c)
+			req := c.Request()
+			res := c.Response()
+			log.Printf("[HTTP] %s %s -> %d", req.Method, req.URL.Path, res.Status)
+			return err
+		}
 	})
 
-	if errors.Is(err, http.ErrServerClosed) {
-		panic(err)
+	// Register all routes
+	backend.RegisterRoutes(e)
+
+	fmt.Printf("\nlorg-tool listening on: http://%s\n\n", host)
+
+	if err := e.Start(host); err != nil {
+		log.Fatalf("[Server] %v", err)
 	}
 }

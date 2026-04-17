@@ -11,12 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/campbellcharlie/lorg/lrx/version"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/types"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/lrx/version"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 )
 
 // trimHost extracts scheme+host from a full URL (e.g. "https://example.com/path" → "https://example.com")
@@ -244,13 +243,11 @@ func (backend *Backend) getRequestResponseFromIDHandler(ctx context.Context, req
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Pad ID to 15 chars with leading underscores
 	id := utils.FormatStringID(args.ActiveID, 15)
 
-	reqRecord, _ := dao.FindRecordById("_req", id)
-	respRecord, _ := dao.FindRecordById("_resp", id)
+	reqRecord, _ := backend.DB.FindRecordById("_req", id)
+	respRecord, _ := backend.DB.FindRecordById("_resp", id)
 
 	if reqRecord == nil && respRecord == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("no record found for ID: %s", id)), nil
@@ -296,11 +293,11 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 	}
 
 	host := trimHost(args.Host)
-	dao := backend.App.Dao()
 	siteDB := utils.ParseDatabaseName(host)
 
-	collection, err := dao.FindCollectionByNameOrId(siteDB)
-	if err != nil {
+	// Verify the table exists
+	exists, err := backend.DB.TableExists(siteDB)
+	if err != nil || !exists {
 		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
 	}
 
@@ -310,50 +307,54 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 		offset = (args.Page - 1) * perPage
 	}
 
-	var records []*models.Record
+	var records []*lorgdb.Record
 	if args.Filter == "" {
-		records, err = dao.FindRecordsByExpr(collection.Id)
+		records, err = backend.DB.FindRecordsSorted(siteDB, "1=1", "rowid DESC", perPage, offset)
 	} else {
-		records, err = dao.FindRecordsByFilter(collection.Id, args.Filter, "-created", perPage, offset)
+		// NOTE: args.Filter is now expected to be a valid SQL WHERE clause
+		records, err = backend.DB.FindRecordsSorted(siteDB, args.Filter, "created DESC", perPage, offset)
 	}
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
 	}
 
-	// Expand the "data" relation to get _data records
-	for _, record := range records {
-		dao.ExpandRecord(record, []string{"data"}, nil)
-	}
-
+	// Manually resolve the "data" relation: each site record has a "data" field
+	// containing a _data record ID.
 	rows := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		expanded := record.ExpandedAll("data")
-		for _, dataRecord := range expanded {
-			reqJSON := dataRecord.Get("req_json")
-			respJSON := dataRecord.Get("resp_json")
-
-			// Remove headers from req/resp to keep response compact
-			if req, ok := reqJSON.(map[string]any); ok {
-				delete(req, "headers")
-			}
-			if resp, ok := respJSON.(map[string]any); ok {
-				delete(resp, "headers")
-			}
-
-			rows = append(rows, map[string]any{
-				"id":           dataRecord.GetString("id"),
-				"index":        dataRecord.GetFloat("index"),
-				"index_minor":  dataRecord.GetFloat("index_minor"),
-				"host":         dataRecord.GetString("host"),
-				"port":         dataRecord.GetString("port"),
-				"generated_by": dataRecord.GetString("generated_by"),
-				"has_params":   dataRecord.GetBool("has_params"),
-				"has_resp":     dataRecord.GetBool("has_resp"),
-				"http":         dataRecord.GetString("http"),
-				"req":          reqJSON,
-				"resp":         respJSON,
-			})
+		dataID := record.GetString("data")
+		if dataID == "" {
+			continue
 		}
+		dataRecord, err := backend.DB.FindRecordById("_data", dataID)
+		if err != nil || dataRecord == nil {
+			continue
+		}
+
+		reqJSON := dataRecord.Get("req_json")
+		respJSON := dataRecord.Get("resp_json")
+
+		// Remove headers from req/resp to keep response compact
+		if req, ok := reqJSON.(map[string]any); ok {
+			delete(req, "headers")
+		}
+		if resp, ok := respJSON.(map[string]any); ok {
+			delete(resp, "headers")
+		}
+
+		rows = append(rows, map[string]any{
+			"id":           dataRecord.GetString("id"),
+			"index":        dataRecord.GetFloat("index"),
+			"index_minor":  dataRecord.GetFloat("index_minor"),
+			"host":         dataRecord.GetString("host"),
+			"port":         dataRecord.GetString("port"),
+			"generated_by": dataRecord.GetString("generated_by"),
+			"has_params":   dataRecord.GetBool("has_params"),
+			"has_resp":     dataRecord.GetBool("has_resp"),
+			"http":         dataRecord.GetString("http"),
+			"req":          reqJSON,
+			"resp":         respJSON,
+		})
 	}
 
 	result := map[string]any{
@@ -424,50 +425,30 @@ func (backend *Backend) listHostsHandler(ctx context.Context, request mcp.CallTo
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	perPage := 50
 	offset := 0
 	if args.Page > 1 {
 		offset = (args.Page - 1) * perPage
 	}
 
-	filter := ""
+	where := "1=1"
+	var whereArgs []any
 	if args.Search != "" {
-		filter = fmt.Sprintf("host ~ '%s' || title ~ '%s' || domain ~ '%s'", args.Search, args.Search, args.Search)
+		where = "host LIKE ? OR title LIKE ? OR domain LIKE ?"
+		pat := "%" + args.Search + "%"
+		whereArgs = []any{pat, pat, pat}
 	}
 
-	var records []*models.Record
-	var err error
-
-	if filter == "" {
-		records, err = dao.FindRecordsByExpr("_hosts")
-	} else {
-		records, err = dao.FindRecordsByFilter("_hosts", filter, "-created", perPage, offset)
-	}
-
+	records, err := backend.DB.FindRecordsSorted("_hosts", where, "created DESC", perPage, offset, whereArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch hosts: %v", err)), nil
 	}
 
-	// Expand tech and labels relations
-	for _, record := range records {
-		dao.ExpandRecord(record, []string{"tech", "labels"}, nil)
-	}
-
+	// Manually resolve tech and labels relations
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		// Resolve tech names
-		techNames := []string{}
-		for _, t := range record.ExpandedAll("tech") {
-			techNames = append(techNames, t.GetString("name"))
-		}
-
-		// Resolve label names
-		labelNames := []string{}
-		for _, l := range record.ExpandedAll("labels") {
-			labelNames = append(labelNames, l.GetString("name"))
-		}
+		techNames := resolveRelationNames(backend, "_tech", record.Get("tech"))
+		labelNames := resolveRelationNames(backend, "_labels", record.Get("labels"))
 
 		items = append(items, map[string]any{
 			"id":     record.GetString("id"),
@@ -480,12 +461,7 @@ func (backend *Backend) listHostsHandler(ctx context.Context, request mcp.CallTo
 	}
 
 	// Get total count
-	var total []*models.Record
-	if filter == "" {
-		total, _ = dao.FindRecordsByExpr("_hosts")
-	} else {
-		total, _ = dao.FindRecordsByFilter("_hosts", filter, "", 0, 0)
-	}
+	total, _ := backend.DB.FindRecords("_hosts", where, whereArgs...)
 
 	result := map[string]any{
 		"page":       args.Page,
@@ -508,25 +484,15 @@ func (backend *Backend) getHostInfoHandler(ctx context.Context, request mcp.Call
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
 	host := trimHost(args.Host)
 
-	record, err := dao.FindFirstRecordByFilter("_hosts", "host = {:host}", dbx.Params{"host": host})
+	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
 	}
 
-	dao.ExpandRecord(record, []string{"tech", "labels"}, nil)
-
-	techNames := []string{}
-	for _, t := range record.ExpandedAll("tech") {
-		techNames = append(techNames, t.GetString("name"))
-	}
-
-	labelNames := []string{}
-	for _, l := range record.ExpandedAll("labels") {
-		labelNames = append(labelNames, l.GetString("name"))
-	}
+	techNames := resolveRelationNames(backend, "_tech", record.Get("tech"))
+	labelNames := resolveRelationNames(backend, "_labels", record.Get("labels"))
 
 	return mcpJSONResult(map[string]any{
 		"id":     record.GetString("id"),
@@ -546,10 +512,9 @@ func (backend *Backend) getNoteForHostHandler(ctx context.Context, request mcp.C
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
 	host := trimHost(args.Host)
 
-	record, err := dao.FindFirstRecordByFilter("_hosts", "host = {:host}", dbx.Params{"host": host})
+	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
 	}
@@ -566,10 +531,9 @@ func (backend *Backend) setNoteForHostHandler(ctx context.Context, request mcp.C
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
 	host := trimHost(args.Host)
 
-	record, err := dao.FindFirstRecordByFilter("_hosts", "host = {:host}", dbx.Params{"host": host})
+	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
 	}
@@ -597,7 +561,7 @@ func (backend *Backend) setNoteForHostHandler(ctx context.Context, request mcp.C
 	}
 
 	record.Set("notes", noteLines)
-	if err := dao.SaveRecord(record); err != nil {
+	if err := backend.DB.SaveRecord(record); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to save notes: %v", err)), nil
 	}
 
@@ -614,32 +578,27 @@ func (backend *Backend) modifyHostLabelsHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
 	host := trimHost(args.Host)
 
-	hostRecord, err := dao.FindFirstRecordByFilter("_hosts", "host = {:host}", dbx.Params{"host": host})
+	hostRecord, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
 	}
 
-	currentLabelIDs := hostRecord.GetStringSlice("labels")
+	currentLabelIDs := getStringSlice(hostRecord.Get("labels"))
 
 	for _, labelAction := range args.Labels {
 		// Find or create the label
-		labelRecord, err := dao.FindFirstRecordByFilter("_labels", "name = {:name}", dbx.Params{"name": labelAction.Name})
+		labelRecord, err := backend.DB.FindFirstRecord("_labels", "name = ?", labelAction.Name)
 
 		if labelAction.Action == "add" || labelAction.Action == "toggle" {
 			if err != nil {
 				// Label doesn't exist, create it
-				labelsCollection, cerr := dao.FindCollectionByNameOrId("_labels")
-				if cerr != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("failed to find _labels collection: %v", cerr)), nil
-				}
-				labelRecord = models.NewRecord(labelsCollection)
+				labelRecord = lorgdb.NewRecord("_labels")
 				labelRecord.Set("name", labelAction.Name)
 				labelRecord.Set("color", labelAction.Color)
 				labelRecord.Set("type", labelAction.Type)
-				if serr := dao.SaveRecord(labelRecord); serr != nil {
+				if serr := backend.DB.SaveRecord(labelRecord); serr != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("failed to create label: %v", serr)), nil
 				}
 			}
@@ -681,7 +640,7 @@ func (backend *Backend) modifyHostLabelsHandler(ctx context.Context, request mcp
 	}
 
 	hostRecord.Set("labels", currentLabelIDs)
-	if err := dao.SaveRecord(hostRecord); err != nil {
+	if err := backend.DB.SaveRecord(hostRecord); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to save labels: %v", err)), nil
 	}
 
@@ -698,10 +657,9 @@ func (backend *Backend) modifyHostNotesHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
 	host := trimHost(args.Host)
 
-	record, err := dao.FindFirstRecordByFilter("_hosts", "host = {:host}", dbx.Params{"host": host})
+	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
 	}
@@ -736,7 +694,7 @@ func (backend *Backend) modifyHostNotesHandler(ctx context.Context, request mcp.
 	}
 
 	record.Set("notes", notes)
-	if err := dao.SaveRecord(record); err != nil {
+	if err := backend.DB.SaveRecord(record); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to save notes: %v", err)), nil
 	}
 
@@ -1075,18 +1033,17 @@ func (backend *Backend) interceptToggleHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-	proxyRecord, err := dao.FindRecordById("_proxies", args.ID)
+	proxyRecord, err := backend.DB.FindRecordById("_proxies", args.ID)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("proxy not found: %s", args.ID)), nil
 	}
 
 	proxyRecord.Set("intercept", args.Enable)
-	if err := dao.SaveRecord(proxyRecord); err != nil {
+	if err := backend.DB.SaveRecord(proxyRecord); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to update intercept setting: %v", err)), nil
 	}
 
-	// dao.SaveRecord doesn't trigger OnRecordAfterUpdateRequest hooks,
+	// backend.DB.SaveRecord doesn't trigger OnRecordAfterUpdateRequest hooks,
 	// so update the in-memory proxy state directly
 	ProxyMgr.mu.RLock()
 	inst := ProxyMgr.instances[args.ID]
@@ -1148,10 +1105,8 @@ func (backend *Backend) interceptReadHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	generatedBy := fmt.Sprintf("proxy/%s", args.ProxyID)
-	records, err := dao.FindRecordsByFilter("_intercept", "generated_by ~ {:gb}", "-created", 100, 0, dbx.Params{"gb": generatedBy})
+	records, err := backend.DB.FindRecordsSorted("_intercept", "generated_by LIKE ?", "created DESC", 100, 0, "%"+generatedBy+"%")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to read intercepted rows: %v", err)), nil
 	}
@@ -1183,16 +1138,14 @@ func (backend *Backend) interceptGetRawHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	result := map[string]any{"id": args.ID}
 
-	reqRecord, _ := dao.FindRecordById("_req", args.ID)
+	reqRecord, _ := backend.DB.FindRecordById("_req", args.ID)
 	if reqRecord != nil {
 		result["raw_request"] = reqRecord.GetString("raw")
 	}
 
-	respRecord, _ := dao.FindRecordById("_resp", args.ID)
+	respRecord, _ := backend.DB.FindRecordById("_resp", args.ID)
 	if respRecord != nil {
 		result["raw_response"] = respRecord.GetString("raw")
 	}
@@ -1277,6 +1230,46 @@ func (backend *Backend) proxyWaitForSelectorHandler(ctx context.Context, request
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// getStringSlice extracts a []string from a value that may be a JSON-decoded
+// []any (each element a string) or already a []string. Returns nil for other types.
+func getStringSlice(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		// Might be a single ID stored as a plain string
+		if t != "" {
+			return []string{t}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// resolveRelationNames looks up related records by their IDs and returns
+// the "name" field from each. The raw value should come from record.Get()
+// and may be a JSON-decoded []any, a []string, or a single ID string.
+func resolveRelationNames(backend *Backend, table string, raw any) []string {
+	ids := getStringSlice(raw)
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		rec, err := backend.DB.FindRecordById(table, id)
+		if err == nil && rec != nil {
+			names = append(names, rec.GetString("name"))
+		}
+	}
+	return names
+}
 
 func mcpJSONResult(v any) (*mcp.CallToolResult, error) {
 	jsonBytes, err := json.Marshal(v)

@@ -6,76 +6,59 @@ import (
 	"strings"
 	"time"
 
-	"github.com/campbellcharlie/lorg/lrx/rawhttp"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/campbellcharlie/lorg/lrx/rawhttp"
+	"github.com/labstack/echo/v4"
 )
 
-func (backend *Backend) SendHttpRaw(e *core.ServeEvent) error {
+func (backend *Backend) SendHttpRaw(e *echo.Echo) {
+	e.POST("/api/http/raw", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/http/raw",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+		var data map[string]interface{}
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		// Parse request data
+		host := data["host"].(string)
+		port := data["port"].(string)
+		tls := data["tls"].(bool)
+		request := data["req"].(string)
+		timeout := time.Duration(data["timeout"].(float64)) * time.Second
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		// Check if HTTP/2 is requested
+		useHTTP2 := false
+		if http2Val, ok := data["http2"].(bool); ok {
+			useHTTP2 = http2Val
+		}
 
-			var data map[string]interface{}
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
+		log.Println("RawRequest TLS: ", tls)
+		log.Println("RawRequest Hostname: ", host)
+		log.Println("RawRequest Port: ", port)
+		log.Println("RawRequest Timeout: ", timeout)
+		log.Println("RawRequest HTTP/2: ", useHTTP2)
 
-			// Parse request data
-			host := data["host"].(string)
-			port := data["port"].(string)
-			tls := data["tls"].(bool)
-			request := data["req"].(string)
-			timeout := time.Duration(data["timeout"].(float64)) * time.Second
+		// Use SendRawHTTPRequest function
+		respString, timeTaken, err := SendRawHTTPRequest(host, port, tls, request, timeout, useHTTP2)
 
-			// Check if HTTP/2 is requested
-			useHTTP2 := false
-			if http2Val, ok := data["http2"].(bool); ok {
-				useHTTP2 = http2Val
-			}
+		if err != nil {
+			log.Printf("Error sending raw request: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"error": err.Error(),
+				"time":  timeTaken,
+			})
+		}
 
-			log.Println("RawRequest TLS: ", tls)
-			log.Println("RawRequest Hostname: ", host)
-			log.Println("RawRequest Port: ", port)
-			log.Println("RawRequest Timeout: ", timeout)
-			log.Println("RawRequest HTTP/2: ", useHTTP2)
+		response := map[string]any{
+			"resp": respString,
+			"time": timeTaken,
+		}
 
-			// Use SendRawHTTPRequest function
-			respString, timeTaken, err := SendRawHTTPRequest(host, port, tls, request, timeout, useHTTP2)
-
-			if err != nil {
-				log.Printf("Error sending raw request: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"error": err.Error(),
-					"time":  timeTaken,
-				})
-			}
-
-			response := map[string]any{
-				"resp": respString,
-				"time": timeTaken,
-			}
-
-			return c.JSON(http.StatusOK, response)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, response)
 	})
-	return nil
 }
 
 // SendRawHTTPRequest sends a raw HTTP request using the rawhttp client and returns response, time taken, and error

@@ -502,8 +502,6 @@ func (backend *Backend) captureSessionFromResponse(rawResponse string) {
 		return
 	}
 
-	dao := backend.App.Dao()
-
 	// Parse Set-Cookie headers
 	headerSection, _ := splitResponseHeaders(rawResponse)
 	for _, line := range strings.Split(headerSection, "\r\n") {
@@ -554,7 +552,7 @@ func (backend *Backend) captureSessionFromResponse(rawResponse string) {
 		break
 	}
 
-	_ = dao.SaveRecord(session)
+	_ = backend.DB.SaveRecord(session)
 }
 
 // ---------------------------------------------------------------------------

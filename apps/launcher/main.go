@@ -1,66 +1,48 @@
 package launcher
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
+	"log"
 
 	"github.com/campbellcharlie/lorg/internal/config"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
-	"github.com/glitchedgitz/pocketbase"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/glitchedgitz/pocketbase/models/schema"
-	pbTypes "github.com/glitchedgitz/pocketbase/tools/types"
+	"github.com/labstack/echo/v4"
 )
 
 type Launcher struct {
-	App        *pocketbase.PocketBase
+	DB         *lorgdb.LorgDB
 	Config     *config.Config
 	CmdChannel chan process.RunCommandData
 }
 
 func (launcher *Launcher) Serve() {
-	launcher.App.Bootstrap()
+	e := echo.New()
+
+	// Simple request logging middleware
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			err := next(c)
+			req := c.Request()
+			res := c.Response()
+			log.Printf("[HTTP] %s %s -> %d", req.Method, req.URL.Path, res.Status)
+			return err
+		}
+	})
+
+	// Register all routes
+	launcher.RegisterRoutes(e)
 
 	fmt.Printf(`
 Application:        http://%s
-Database:           http://%s/_/
 API:                http://%s/api/
 Cert:               http://%s/cacert.crt
 
-Proxy Listening On: %s
+	`, launcher.Config.HostAddr, launcher.Config.HostAddr, launcher.Config.HostAddr)
 
-	`, launcher.Config.HostAddr, launcher.Config.HostAddr, launcher.Config.HostAddr, launcher.Config.HostAddr)
+	go launcher.CommandManager()
 
-	// var httpsAddr string
-
-	var httpAddr = launcher.Config.HostAddr
-	_, err := apis.Serve(launcher.App, apis.ServeConfig{
-		HttpAddr: httpAddr,
-	})
-
-	if errors.Is(err, http.ErrServerClosed) {
-		panic(err)
+	if err := e.Start(launcher.Config.HostAddr); err != nil {
+		log.Fatalf("[Server] %v", err)
 	}
-}
-
-// Create Collection with schema in params
-func (launcher *Launcher) CreateCollection(collectionName string, dbSchema schema.Schema) error {
-	collection := &models.Collection{
-		Name:       collectionName,
-		Type:       models.CollectionTypeBase,
-		ListRule:   nil,
-		ViewRule:   pbTypes.Pointer(""),
-		CreateRule: pbTypes.Pointer(""),
-		UpdateRule: pbTypes.Pointer(""),
-		DeleteRule: nil,
-		Schema:     dbSchema,
-	}
-
-	if err := launcher.App.Dao().SaveCollection(collection); err != nil {
-		return err
-	}
-
-	return nil
 }

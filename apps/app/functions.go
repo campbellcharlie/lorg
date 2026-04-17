@@ -3,32 +3,28 @@ package app
 import (
 	"log"
 
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 )
 
-func (backend *Backend) GetRecord(collectionName string, filter string) (*models.Record, error) {
-	r, err := backend.App.Dao().FindFirstRecordByFilter(collectionName, filter)
+func (backend *Backend) GetRecord(collectionName string, filter string) (*lorgdb.Record, error) {
+	r, err := backend.DB.FindFirstRecord(collectionName, filter)
 	return r, err
 }
 
-func (backend *Backend) SaveRecordToCollection(collectionName string, data map[string]any) (*models.Record, error) {
+func (backend *Backend) SaveRecordToCollection(collectionName string, data map[string]any) (*lorgdb.Record, error) {
 
 	log.Println("SaveRecordToCollection: ", collectionName, data)
 
-	collection, err := backend.App.Dao().FindCollectionByNameOrId(collectionName)
-	if err != nil {
-		return nil, err
-	}
-
-	record := models.NewRecord(collection)
+	record := lorgdb.NewRecord(collectionName)
 
 	for key, value := range data {
 		record.Set(key, value)
 	}
 
-	err = backend.App.Dao().Save(record)
+	err := backend.DB.SaveRecord(record)
 
 	if err != nil {
+		log.Printf("[SaveRecordToCollection] Error saving to %s: %v", collectionName, err)
 		return nil, err
 	}
 

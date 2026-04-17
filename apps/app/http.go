@@ -12,12 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/campbellcharlie/lorg/lrx/rawhttp"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/campbellcharlie/lorg/lrx/rawhttp"
+	"github.com/labstack/echo/v4"
 	"golang.org/x/net/http2"
 )
 
@@ -200,82 +197,68 @@ func SendHTTP2RawRequest(data RawRequest) (string, string, error) {
 	return rawhttp.DumpResponse(resp), timeTaken, nil
 }
 
-func (backend *Backend) SendRawRequest(e *core.ServeEvent) error {
+func (backend *Backend) SendRawRequest(e *echo.Echo) {
+	e.POST("/api/sendrawrequest", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/sendrawrequest",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+		var data map[string]interface{}
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		host := data["host"].(string)
+		host = strings.TrimPrefix(host, "http://")
+		host = strings.TrimPrefix(host, "https://")
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		request := data["req"].(string)
+		// replace \n with \r\n
 
-			var data map[string]interface{}
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
+		// request = strings.ReplaceAll(request, "\n", "\r\n") + "\r\n\r\n"
 
-			host := data["host"].(string)
-			host = strings.TrimPrefix(host, "http://")
-			host = strings.TrimPrefix(host, "https://")
+		log.Println("RawRequest TLS: ", data["tls"].(bool))
+		log.Println("RawRequest Hostname: ", data["host"].(string))
+		log.Println("RawRequest Port: ", data["port"].(string))
+		log.Println("RawRequest Timeout: ", time.Duration(data["timeout"].(float64))*time.Second)
+		log.Println("RawRequest Request: ", request)
 
-			request := data["req"].(string)
-			// replace \n with \r\n
+		mappedData := RawRequest{
+			TLS:      data["tls"].(bool),
+			Hostname: host,
+			Port:     data["port"].(string),
+			Request:  request,
+			Timeout:  time.Duration(data["timeout"].(float64)) * time.Second,
+		}
 
-			// request = strings.ReplaceAll(request, "\n", "\r\n") + "\r\n\r\n"
+		// respString, err := sendRawRequest2(mappedData)
+		var respString = ""
+		var err error
 
-			log.Println("RawRequest TLS: ", data["tls"].(bool))
-			log.Println("RawRequest Hostname: ", data["host"].(string))
-			log.Println("RawRequest Port: ", data["port"].(string))
-			log.Println("RawRequest Timeout: ", time.Duration(data["timeout"].(float64))*time.Second)
-			log.Println("RawRequest Request: ", request)
+		log.Println("httpversion: ", data["httpversion"])
 
-			mappedData := RawRequest{
-				TLS:      data["tls"].(bool),
-				Hostname: host,
-				Port:     data["port"].(string),
-				Request:  request,
-				Timeout:  time.Duration(data["timeout"].(float64)) * time.Second,
-			}
+		// Get the current time
 
-			// respString, err := sendRawRequest2(mappedData)
-			var respString = ""
-			var err error
+		// Create another time instance, for example, 1 hour ahead
 
-			log.Println("httpversion: ", data["httpversion"])
+		// Calculate the time difference
+		var timeTaken = ""
 
-			// Get the current time
+		if data["httpversion"].(float64) == 1 {
+			respString, timeTaken, err = SendHTTPRawRequest(mappedData)
+		} else {
+			respString, timeTaken, err = SendHTTP2RawRequest(mappedData)
+		}
 
-			// Create another time instance, for example, 1 hour ahead
+		if err != nil {
+			return err
+		}
 
-			// Calculate the time difference
-			var timeTaken = ""
+		response := map[string]interface{}{
+			"resp": respString,
+			"time": timeTaken,
+		}
 
-			if data["httpversion"].(float64) == 1 {
-				respString, timeTaken, err = SendHTTPRawRequest(mappedData)
-			} else {
-				respString, timeTaken, err = SendHTTP2RawRequest(mappedData)
-			}
-
-			if err != nil {
-				return err
-			}
-
-			response := map[string]interface{}{
-				"resp": respString,
-				"time": timeTaken,
-			}
-
-			return c.JSON(http.StatusOK, response)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, response)
 	})
-	return nil
 }

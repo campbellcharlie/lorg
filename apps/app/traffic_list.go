@@ -8,10 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models/schema"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // TrafficListItem is a lightweight row returned by /api/traffic/list
@@ -29,24 +26,16 @@ type TrafficListItem struct {
 	Created     string          `json:"created"`
 }
 
-// TrafficList registers GET /api/traffic/list — a fast, direct-SQL endpoint
+// TrafficList registers GET /api/traffic/list -- a fast, direct-SQL endpoint
 // that bypasses PocketBase's generic records API for performance.
 // Supports ?perPage, ?page, ?host, and ?project filters.
-func (backend *Backend) TrafficList(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodGet,
-		Path:   "/api/traffic/list",
-		Handler: func(c echo.Context) error {
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
-			return servePocketBaseTraffic(c, backend)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+func (backend *Backend) TrafficList(e *echo.Echo) {
+	e.GET("/api/traffic/list", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		return servePocketBaseTraffic(c, backend)
 	})
-	return nil
 }
 
 // servePocketBaseTraffic queries the PocketBase _data collection.
@@ -55,18 +44,16 @@ func servePocketBaseTraffic(c echo.Context, backend *Backend) error {
 	projectFilter := c.QueryParam("project")
 	offset := (page - 1) * perPage
 
-	db := backend.App.Dao().DB()
-
-	// Build WHERE clause
+	// Build WHERE clause with positional params
 	var conditions []string
-	binds := map[string]interface{}{"limit": perPage, "offset": offset}
+	var args []any
 	if hostFilter != "" {
-		conditions = append(conditions, `host LIKE {:host}`)
-		binds["host"] = "%" + hostFilter + "%"
+		conditions = append(conditions, `host LIKE ?`)
+		args = append(args, "%"+hostFilter+"%")
 	}
 	if projectFilter != "" {
-		conditions = append(conditions, `project = {:project}`)
-		binds["project"] = projectFilter
+		conditions = append(conditions, `project = ?`)
+		args = append(args, projectFilter)
 	}
 
 	whereClause := ""
@@ -75,21 +62,19 @@ func servePocketBaseTraffic(c echo.Context, backend *Backend) error {
 	}
 
 	var totalItems int
-	q := db.NewQuery(`SELECT COUNT(*) FROM _data` + whereClause)
-	q.Bind(binds)
-	if err := q.Row(&totalItems); err != nil {
+	countArgs := append([]any{}, args...)
+	if err := backend.DB.QueryRow(`SELECT COUNT(*) FROM _data`+whereClause, countArgs...).Scan(&totalItems); err != nil {
 		log.Printf("[TrafficList] Count error: %v", err)
 		totalItems = 0
 	}
 
 	selectQuery := `SELECT id, "index", COALESCE(project,'') as project, host, port, is_https, has_resp, generated_by, req_json, resp_json, created
-		FROM _data` + whereClause + ` ORDER BY "index" DESC LIMIT {:limit} OFFSET {:offset}`
+		FROM _data` + whereClause + ` ORDER BY "index" DESC LIMIT ? OFFSET ?`
 
-	q2 := db.NewQuery(selectQuery)
-	q2.Bind(binds)
+	selectArgs := append(append([]any{}, args...), perPage, offset)
 
 	var items []TrafficListItem
-	rows, err := q2.Rows()
+	rows, err := backend.DB.Query(selectQuery, selectArgs...)
 	if err != nil {
 		log.Printf("[TrafficList] Query error: %v", err)
 		return c.JSON(http.StatusOK, emptyTrafficResponse(page, perPage))
@@ -163,75 +148,15 @@ func trafficResponse(items []TrafficListItem, page, perPage, totalItems int) map
 	}
 }
 
-// EnsureTrafficIndexes creates indexes and adds missing columns on the _data table.
-func (backend *Backend) EnsureTrafficIndexes(e *core.ServeEvent) error {
-	db := backend.App.Dao().DB()
-
-	// Ensure project field exists on _data and _proxies collections (for existing databases)
-	ensureProjectField(backend, "_data")
-	ensureProjectField(backend, "_proxies")
-
-	indexes := []string{
-		`CREATE INDEX IF NOT EXISTS idx_data_index ON _data ("index" DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_data_host ON _data (host)`,
-		`CREATE INDEX IF NOT EXISTS idx_data_generated_by ON _data (generated_by)`,
-		`CREATE INDEX IF NOT EXISTS idx_data_project ON _data (project)`,
-	}
-
-	for _, idx := range indexes {
-		if _, err := db.NewQuery(idx).Execute(); err != nil {
-			log.Printf("[EnsureTrafficIndexes] Error creating index: %v", err)
-		}
-	}
-
-	log.Println("[Startup] Traffic indexes ensured")
-	return nil
-}
-
-// ensureProjectField adds the "project" text field to a PocketBase collection
-// if it doesn't already exist. This upgrades existing databases that were
-// created before project tagging was added.
-func ensureProjectField(backend *Backend, collectionName string) {
-	dao := backend.App.Dao()
-	db := dao.DB()
-	collection, err := dao.FindCollectionByNameOrId(collectionName)
-	if err != nil {
-		return
-	}
-
-	// Check if field already exists in PocketBase schema
-	for _, f := range collection.Schema.Fields() {
-		if f.Name == "project" {
-			return // already exists in schema
-		}
-	}
-
-	// Ensure the SQLite column exists first (idempotent — duplicate column error is expected)
-	if _, err := db.NewQuery(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN project TEXT DEFAULT ''`, collectionName)).Execute(); err != nil {
+// ensureProjectColumn adds the "project" TEXT column to a table if it doesn't
+// already exist. This upgrades existing databases that were created before
+// project tagging was added.
+func ensureProjectColumn(backend *Backend, tableName string) {
+	// ALTER TABLE ADD COLUMN is idempotent in practice: if the column already
+	// exists, SQLite returns a "duplicate column" error which we ignore.
+	if _, err := backend.DB.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN project TEXT DEFAULT ''`, tableName)); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column") {
-			log.Printf("[EnsureProjectField] ALTER TABLE %s error: %v", collectionName, err)
+			log.Printf("[EnsureProjectColumn] ALTER TABLE %s error: %v", tableName, err)
 		}
-	}
-
-	// Update PocketBase's schema metadata by adding the field and saving
-	// the collection record directly (bypassing table sync which would fail
-	// since the column already exists).
-	collection.Schema.AddField(&schema.SchemaField{
-		Name: "project",
-		Type: schema.FieldTypeText,
-	})
-
-	// Save the collection metadata directly to _collections table
-	encodedSchema, _ := collection.Schema.MarshalJSON()
-	_, err = db.NewQuery(`UPDATE _collections SET schema = {:schema} WHERE id = {:id}`).Bind(map[string]interface{}{
-		"schema": string(encodedSchema),
-		"id":     collection.Id,
-	}).Execute()
-	if err != nil {
-		log.Printf("[EnsureProjectField] Error updating schema for %s: %v", collectionName, err)
-	} else {
-		log.Printf("[EnsureProjectField] Added project field to %s schema", collectionName)
-		// Refresh the cached collection
-		dao.FindCollectionByNameOrId(collectionName)
 	}
 }

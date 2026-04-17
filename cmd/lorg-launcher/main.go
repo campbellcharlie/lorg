@@ -7,27 +7,20 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
-
-	// "github.com/pocketbase/dbx"
+	"path/filepath"
 
 	"runtime"
 
 	"github.com/campbellcharlie/lorg/apps/launcher"
-	"github.com/campbellcharlie/lorg/lrx/rawproxy"
-	"github.com/campbellcharlie/lorg/lrx/version"
 	"github.com/campbellcharlie/lorg/internal/config"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	_ "github.com/campbellcharlie/lorg/internal/logflags"
 	"github.com/campbellcharlie/lorg/internal/process"
 	"github.com/campbellcharlie/lorg/internal/updater"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/plugins/migratecmd"
+	"github.com/campbellcharlie/lorg/lrx/rawproxy"
+	"github.com/campbellcharlie/lorg/lrx/version"
 	"github.com/spf13/cobra"
-
-	// "github.com/glitchedgitz/pocketbase/tools/list"
-	_ "github.com/campbellcharlie/lorg/cmd/lorg-launcher/migrations"
 )
 
 var noProxy bool
@@ -48,8 +41,8 @@ func setConfig() {
 
 	conf.Initiate()
 
-	caCrtPath := path.Join(conf.ConfigDirectory, "ca.crt")
-	caKeyPath := path.Join(conf.ConfigDirectory, "ca.key")
+	caCrtPath := filepath.Join(conf.ConfigDirectory, "ca.crt")
+	caKeyPath := filepath.Join(conf.ConfigDirectory, "ca.key")
 
 	// If certificates don't exist, generate them using rawproxy
 	if !fileExists(caCrtPath) || !fileExists(caKeyPath) {
@@ -216,51 +209,16 @@ G R R R . . . O X Y           v%s
 }
 
 func startCore() {
-
-	launch = &launcher.Launcher{
-		App: pocketbase.NewWithConfig(
-			pocketbase.Config{
-				ProjectDir:      path.Join(conf.ProjectsDirectory),
-				DefaultDataDir:  "lorg-main",
-				HideStartBanner: true,
-				// DefaultDev: true,
-				// DefaultEncryptionEnv: "hJH#GRJ#HG$JH$54h5kjhHJG#JHG#*&Y&EG#F&GIG@JKGH$JHRGJ##JKJH#JHG",
-			},
-		),
-		Config:     &conf,
-		CmdChannel: make(chan process.RunCommandData),
+	// Open the launcher's own database
+	dbPath := filepath.Join(conf.ProjectsDirectory, "lorg", "pb_data", "data.db")
+	db, err := lorgdb.Open(dbPath)
+	if err != nil {
+		log.Fatalf("[Launcher] Failed to open database: %v", err)
 	}
 
-	migratecmd.MustRegister(launch.App, launch.App.RootCmd, migratecmd.Config{})
-
-	go launch.CommandManager()
-	launch.App.Bootstrap()
-
-	// Reset project states when the app is terminated
-	launch.App.OnBeforeServe().Add(launch.ResetProjectStates)
-	launch.App.OnBeforeServe().Add(launch.ResetToolsStates)
-
-	// Adding custom endpoints
-	launch.App.OnBeforeServe().Add(launch.API_ListProjects)
-	launch.App.OnBeforeServe().Add(launch.API_CreateNewProject)
-	launch.App.OnBeforeServe().Add(launch.API_OpenProject)
-	launch.App.OnBeforeServe().Add(launch.BindFrontend)
-	launch.App.OnBeforeServe().Add(launch.RunCommand)
-	launch.App.OnBeforeServe().Add(launch.TextSQL)
-	launch.App.OnBeforeServe().Add(launch.SaveFile)
-	launch.App.OnBeforeServe().Add(launch.ReadFile)
-	launch.App.OnBeforeServe().Add(launch.DownloadCert)
-	launch.App.OnBeforeServe().Add(launch.CookSearch)
-	launch.App.OnBeforeServe().Add(launch.SearchRegex)
-	launch.App.OnBeforeServe().Add(launch.FileWatcher)
-	launch.App.OnBeforeServe().Add(launch.TemplatesList)
-	launch.App.OnBeforeServe().Add(launch.TemplatesNew)
-	launch.App.OnBeforeServe().Add(launch.TemplatesDelete)
-	launch.App.OnBeforeServe().Add(launch.Tools)
-	launch.App.OnBeforeServe().Add(launch.ToolsServer)
-	launch.App.OnBeforeServe().Add(launch.API_CheckUpdate)
-	launch.App.OnBeforeServe().Add(launch.API_DoUpdate)
-	launch.App.OnBeforeServe().Add(launch.Version)
+	if err := db.RunMigrations(); err != nil {
+		log.Fatalf("[Launcher] Failed to run migrations: %v", err)
+	}
 
 	host := MainHostAddress
 	if !hostFixed {
@@ -271,14 +229,24 @@ func startCore() {
 		}
 	}
 
+	conf.HostAddr = host
+
+	launch = &launcher.Launcher{
+		DB:         db,
+		Config:     &conf,
+		CmdChannel: make(chan process.RunCommandData),
+	}
+
+	// Reset project and tool states on startup
+	launch.ResetProjectStates()
+	launch.ResetToolsStates()
+
 	// Signal that initialization is complete before starting the server
 	fmt.Println("Starting main app at: ", host)
 
-	_, err := apis.Serve(launch.App, apis.ServeConfig{
-		HttpAddr: host,
-	})
+	// Serve blocks until the server is stopped
+	launch.Serve()
 
-	if errors.Is(err, http.ErrServerClosed) {
-		panic(err)
-	}
+	// If we reach here, check for ErrServerClosed
+	_ = errors.Is(err, http.ErrServerClosed)
 }

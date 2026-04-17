@@ -13,9 +13,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 	"github.com/rs/xid"
 	"golang.org/x/net/websocket"
 )
@@ -471,99 +469,83 @@ func (m *XtermManager) HandleWebSocket(ws *websocket.Conn, sessionID string) {
 }
 
 // RegisterXtermRoutes registers all xterm-related routes
-func (backend *Backend) RegisterXtermRoutes() {
+func (backend *Backend) RegisterXtermRoutes(e *echo.Echo) {
 	// Initialize xterm manager if not exists
 	if backend.XtermManager == nil {
 		backend.XtermManager = NewXtermManager()
 	}
 
 	// POST /api/xterm/start - Start a new terminal session
-	backend.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		e.Router.POST("/api/xterm/start", func(c echo.Context) error {
-			if err := requireAuth(c); err != nil {
-				return err
-			}
-			var req XtermStartRequest
-			if err := c.Bind(&req); err != nil {
-				return apis.NewBadRequestError("Invalid request body", err)
-			}
+	e.POST("/api/xterm/start", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
+		var req XtermStartRequest
+		if err := c.Bind(&req); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid request body")
+		}
 
-			session, err := backend.XtermManager.CreateSession(req.Shell, req.WorkDir, req.Env)
-			if err != nil {
-				return apis.NewBadRequestError("Failed to create terminal session", err)
-			}
+		session, err := backend.XtermManager.CreateSession(req.Shell, req.WorkDir, req.Env)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Failed to create terminal session")
+		}
 
-			return c.JSON(http.StatusOK, XtermStartResponse{
-				SessionID: session.ID,
-				Shell:     session.Shell,
-				WorkDir:   session.WorkDir,
-			})
+		return c.JSON(http.StatusOK, XtermStartResponse{
+			SessionID: session.ID,
+			Shell:     session.Shell,
+			WorkDir:   session.WorkDir,
 		})
-
-		return nil
 	})
 
 	// GET /api/xterm/sessions - List all terminal sessions
-	backend.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		e.Router.GET("/api/xterm/sessions", func(c echo.Context) error {
-			if err := requireAuth(c); err != nil {
-				return err
-			}
-			sessions := backend.XtermManager.ListSessions()
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"sessions": sessions,
-			})
+	e.GET("/api/xterm/sessions", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
+		sessions := backend.XtermManager.ListSessions()
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"sessions": sessions,
 		})
-
-		return nil
 	})
 
 	// DELETE /api/xterm/sessions/:id - Close a terminal session
-	backend.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		e.Router.DELETE("/api/xterm/sessions/:id", func(c echo.Context) error {
-			if err := requireAuth(c); err != nil {
-				return err
-			}
-			sessionID := c.PathParam("id")
-			if sessionID == "" {
-				return apis.NewBadRequestError("Session ID required", nil)
-			}
+	e.DELETE("/api/xterm/sessions/:id", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
+		sessionID := c.Param("id")
+		if sessionID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Session ID required")
+		}
 
-			if err := backend.XtermManager.CloseSession(sessionID); err != nil {
-				return apis.NewNotFoundError("Session not found", err)
-			}
+		if err := backend.XtermManager.CloseSession(sessionID); err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Session not found")
+		}
 
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"message": "Session closed successfully",
-			})
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"message": "Session closed successfully",
 		})
-
-		return nil
 	})
 
 	// GET /api/xterm/ws/:id - WebSocket endpoint for terminal I/O
-	backend.App.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		e.Router.GET("/api/xterm/ws/:id", func(c echo.Context) error {
-			if err := requireAuth(c); err != nil {
-				return err
-			}
-			sessionID := c.PathParam("id")
-			if sessionID == "" {
-				return apis.NewBadRequestError("Session ID required", nil)
-			}
+	e.GET("/api/xterm/ws/:id", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
+		sessionID := c.Param("id")
+		if sessionID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Session ID required")
+		}
 
-			// Verify session exists before upgrading to WebSocket
-			if _, err := backend.XtermManager.GetSession(sessionID); err != nil {
-				return apis.NewNotFoundError("Session not found", err)
-			}
+		// Verify session exists before upgrading to WebSocket
+		if _, err := backend.XtermManager.GetSession(sessionID); err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Session not found")
+		}
 
-			// Upgrade to WebSocket
-			websocket.Handler(func(ws *websocket.Conn) {
-				backend.XtermManager.HandleWebSocket(ws, sessionID)
-			}).ServeHTTP(c.Response(), c.Request())
-
-			return nil
-		})
+		// Upgrade to WebSocket
+		websocket.Handler(func(ws *websocket.Conn) {
+			backend.XtermManager.HandleWebSocket(ws, sessionID)
+		}).ServeHTTP(c.Response(), c.Request())
 
 		return nil
 	})

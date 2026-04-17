@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 )
 
 // InterceptUpdate represents an update to an intercept request
@@ -30,15 +30,13 @@ type InterceptUpdate struct {
 func (rp *RawProxyWrapper) interceptWait(userdata map[string]any, field string, contentLength int64, rawData string) (string, bool) {
 	id := userdata["id"].(string)
 
-	dao := rp.backend.App.Dao()
-
 	log.Printf("[InterceptWait][%s] Creating intercept record for field: %s\n", id, field)
 
 	// Create intercept record in database
-	interceptRecord := models.NewRecord(rp.interceptCollection)
+	interceptRecord := lorgdb.NewRecord("_intercept")
 	interceptRecord.Load(userdata)
 
-	if err := dao.SaveRecord(interceptRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(interceptRecord); err != nil {
 		log.Printf("[InterceptWait][%s][ERROR] Failed to save intercept record: %v", id, err)
 		return "", false
 	}
@@ -80,7 +78,7 @@ func (rp *RawProxyWrapper) interceptWait(userdata map[string]any, field string, 
 
 	// Delete intercept record
 	defer func() {
-		if err := dao.DeleteRecord(interceptRecord); err != nil {
+		if err := rp.backend.DB.DeleteRecord("_intercept", interceptRecord.Id); err != nil {
 			log.Printf("[InterceptWait][%s][ERROR] Failed to delete intercept record: %v", id, err)
 		}
 	}()

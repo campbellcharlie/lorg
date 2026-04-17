@@ -106,7 +106,7 @@ func ProxyHandler(w http.ResponseWriter, r *http.Request, config *Config) {
 
 	// Get transport with browser TLS fingerprint for HTTPS (bypasses Cloudflare)
 	// For HTTP, uses standard transport
-	transport := GetTransportForHost(rUpstream.URL.Scheme, rUpstream.URL.Hostname())
+	transport := GetTransportForHostWithConfig(rUpstream.URL.Scheme, rUpstream.URL.Hostname(), config)
 
 	// Make the request with browser-like TLS fingerprint
 	resp, err := transport.RoundTrip(rUpstream)

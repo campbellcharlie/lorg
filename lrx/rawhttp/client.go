@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -629,6 +630,13 @@ func decompressBodyByEncoding(bodyBytes []byte, contentEncoding string) ([]byte,
 		}
 		defer zlibReader.Close()
 		reader = zlibReader
+	case "zstd":
+		zstdReader, err := zstd.NewReader(bytes.NewReader(bodyBytes))
+		if err != nil {
+			return bodyBytes, err
+		}
+		defer zstdReader.Close()
+		reader = zstdReader
 	default:
 		// Unknown encoding, return original
 		return bodyBytes, nil

@@ -8,13 +8,10 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
-	"github.com/campbellcharlie/lorg/internal/schemas"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // loop over commandChannel
@@ -31,55 +28,42 @@ func (backend *Backend) CommandManager() {
 }
 
 func (backend *Backend) SetProcess(id, state string) {
-	process.SetState(backend.App, id, state)
+	process.SetState(backend.DB, id, state)
 }
 
 func (backend *Backend) RegisterProcessInDB(input, data any, name, typz, state string) string {
-	return process.RegisterInDB(backend.App, input, data, name, typz, state)
+	return process.RegisterInDB(backend.DB, input, data, name, typz, state)
 }
 
-func (backend *Backend) RunCommand(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/runcommand",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) RunCommand(e *echo.Echo) {
+	e.POST("/api/runcommand", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data process.RunCommandData
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		log.Println("[RunCommand]: ", data)
 
-			var data process.RunCommandData
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
+		id := backend.RegisterProcessInDB(data.Data, data, data.Command, "command", "In Queue")
 
-			log.Println("[RunCommand]: ", data)
+		data.ID = id
 
-			id := backend.RegisterProcessInDB(data.Data, data, data.Command, "command", schemas.ProcessState.Inqueue)
+		// send to channel
+		backend.CmdChannel <- data
 
-			data.ID = id
-
-			// send to channel
-			backend.CmdChannel <- data
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id": id,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id": id,
+		})
 	})
-	return nil
 }
 
 func (backend *Backend) RunningCommand(id string, command string, filename string) {
 
-	backend.SetProcess(id, schemas.ProcessState.Running)
+	backend.SetProcess(id, "Running")
 	var cmd *exec.Cmd
 	saveToFile := filename != ""
 
@@ -127,12 +111,12 @@ func (backend *Backend) RunningCommand(id string, command string, filename strin
 		return
 	}
 
-	backend.SetProcess(id, schemas.ProcessState.Completed)
+	backend.SetProcess(id, "Completed")
 }
 
 func (backend *Backend) RunningCommandSaveToCollection(id, command, collectionName string) {
 
-	backend.SetProcess(id, schemas.ProcessState.Running)
+	backend.SetProcess(id, "Running")
 
 	log.Println("RunningCommand: ", command)
 	var cmd *exec.Cmd
@@ -164,17 +148,14 @@ func (backend *Backend) RunningCommandSaveToCollection(id, command, collectionNa
 	// Create a scanner to read the output line by line
 	scanner := bufio.NewScanner(stdout)
 
-	collection, err := backend.App.Dao().FindCollectionByNameOrId(collectionName)
-	utils.CheckErr("[RunningCommand][FindCollection]:", err)
-
 	// Read the output in real-time
 	for scanner.Scan() {
 		jsonrow := scanner.Text()
 		log.Println("[RunningCommand][Scanner]: ", jsonrow)
 
-		record := models.NewRecord(collection)
+		record := lorgdb.NewRecord(collectionName)
 		record.Set("data", jsonrow)
-		err = backend.App.Dao().SaveRecord(record)
+		err = backend.DB.SaveRecord(record)
 		utils.CheckErr("[RunningCommand][SaveRecord]:", err)
 	}
 
@@ -187,6 +168,6 @@ func (backend *Backend) RunningCommandSaveToCollection(id, command, collectionNa
 		return
 	}
 
-	backend.SetProcess(id, schemas.ProcessState.Completed)
+	backend.SetProcess(id, "Completed")
 
 }

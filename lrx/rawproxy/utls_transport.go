@@ -36,20 +36,38 @@ var hostProtoCache sync.Map // map[string]string  (host:port → "h2" | "http/1.
 type UTLSRoundTripper struct {
 	fingerprint    BrowserFingerprint
 	serverName     string
-	dialer         *net.Dialer
+	dialer         ContextDialer // supports SOCKS5 upstream
+	clientCert     *tls.Certificate // mTLS client certificate (optional)
 	http2Transport *http2.Transport
 	http1Transport *http.Transport
 }
 
+// ContextDialer is the interface for dialers that support context.
+type ContextDialer interface {
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
 // NewUTLSRoundTripper creates a new round tripper with browser fingerprint spoofing
 func NewUTLSRoundTripper(serverName string, fingerprint BrowserFingerprint) *UTLSRoundTripper {
+	return NewUTLSRoundTripperWithOptions(serverName, fingerprint, nil, nil)
+}
+
+// NewUTLSRoundTripperWithOptions creates a round tripper with optional upstream dialer and client cert.
+func NewUTLSRoundTripperWithOptions(serverName string, fingerprint BrowserFingerprint, customDialer ContextDialer, clientCert *tls.Certificate) *UTLSRoundTripper {
+	var dialer ContextDialer
+	if customDialer != nil {
+		dialer = customDialer
+	} else {
+		dialer = &net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+	}
 	rt := &UTLSRoundTripper{
 		fingerprint: fingerprint,
 		serverName:  serverName,
-		dialer: &net.Dialer{
-			Timeout:   15 * time.Second,
-			KeepAlive: 30 * time.Second,
-		},
+		dialer:      dialer,
+		clientCert:  clientCert,
 	}
 
 	// HTTP/1.1 transport with custom TLS dialer
@@ -117,6 +135,17 @@ func (rt *UTLSRoundTripper) dialUTLS(ctx context.Context, network, addr string, 
 		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         tls.VersionTLS13,
 		NextProtos:         alpnProtos,
+	}
+	// mTLS: inject client certificate if configured
+	if rt.clientCert != nil {
+		utlsCert := utls.Certificate{
+			Certificate:                 rt.clientCert.Certificate,
+			PrivateKey:                  rt.clientCert.PrivateKey,
+			OCSPStaple:                  rt.clientCert.OCSPStaple,
+			SignedCertificateTimestamps: rt.clientCert.SignedCertificateTimestamps,
+			Leaf:                        rt.clientCert.Leaf,
+		}
+		config.Certificates = []utls.Certificate{utlsCert}
 	}
 
 	// Create uTLS connection with browser fingerprint

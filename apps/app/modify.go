@@ -10,10 +10,7 @@ import (
 	"github.com/campbellcharlie/lorg/lrx/rawhttp"
 	"github.com/campbellcharlie/lorg/lrx/templates"
 	"github.com/campbellcharlie/lorg/lrx/templates/actions"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 type ModifyRequestRequest struct {
@@ -22,94 +19,79 @@ type ModifyRequestRequest struct {
 	Tasks   []map[string]map[string]any `json:"tasks"`
 }
 
-func (backend *Backend) ModifyRequest(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/request/modify",
-		Handler: func(c echo.Context) error {
-			log.Println("[Modify Request] Handler called")
+func (backend *Backend) ModifyRequest(e *echo.Echo) {
+	e.POST("/api/request/modify", func(c echo.Context) error {
+		log.Println("[Modify Request] Handler called")
 
-			// Check authentication
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		// Bind request body
+		var reqData ModifyRequestRequest
+		if err := c.Bind(&reqData); err != nil {
+			log.Printf("[Modify request] Error binding body: %v", err)
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		parsedRequest := rawhttp.ParseRequest([]byte(reqData.Request))
 
-			// Bind request body
-			var reqData ModifyRequestRequest
-			if err := c.Bind(&reqData); err != nil {
-				log.Printf("[Modify request] Error binding body: %v", err)
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
-			}
+		parsedURL, err := url.Parse(parsedRequest.URL)
+		if err != nil {
+			log.Printf("[Modify request] Error parsing URL: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error parsing URL", "message": err.Error()})
+		}
 
-			parsedRequest := rawhttp.ParseRequest([]byte(reqData.Request))
-
-			parsedURL, err := url.Parse(parsedRequest.URL)
-			if err != nil {
-				log.Printf("[Modify request] Error parsing URL: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error parsing URL", "message": err.Error()})
-			}
-
-			hasCookies := false
-			if len(parsedRequest.Headers) > 0 {
-				for _, header := range parsedRequest.Headers {
-					if header[0] == "Cookie" {
-						hasCookies = true
-					}
+		hasCookies := false
+		if len(parsedRequest.Headers) > 0 {
+			for _, header := range parsedRequest.Headers {
+				if header[0] == "Cookie" {
+					hasCookies = true
 				}
 			}
+		}
 
-			reqRecord := make(map[string]any)
-			reqRecord["method"] = parsedRequest.Method
-			reqRecord["url"] = parsedRequest.URL
-			reqRecord["path"] = parsedURL.Path
-			reqRecord["query"] = parsedURL.RawQuery
-			reqRecord["fragment"] = parsedURL.RawFragment
-			reqRecord["ext"] = strings.TrimPrefix(parsedURL.Path, ".")
-			reqRecord["has_cookies"] = hasCookies
-			reqRecord["length"] = len(reqData.Request)
-			reqRecord["headers"] = parsedRequest.Headers
-			reqRecord["raw"] = reqData.Request
+		reqRecord := make(map[string]any)
+		reqRecord["method"] = parsedRequest.Method
+		reqRecord["url"] = parsedRequest.URL
+		reqRecord["path"] = parsedURL.Path
+		reqRecord["query"] = parsedURL.RawQuery
+		reqRecord["fragment"] = parsedURL.RawFragment
+		reqRecord["ext"] = strings.TrimPrefix(parsedURL.Path, ".")
+		reqRecord["has_cookies"] = hasCookies
+		reqRecord["length"] = len(reqData.Request)
+		reqRecord["headers"] = parsedRequest.Headers
+		reqRecord["raw"] = reqData.Request
 
-			actions, err := templates.ParseTemplateActions([]templates.Actions{{
-				Id:        "",
-				Condition: "",
-				Todo:      reqData.Tasks,
-			},
-			}, map[string]any{
-				"req": reqRecord,
-			}, "all")
-
-			if err != nil {
-				log.Printf("[Modify request] Error parsing template: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error parsing template"})
-			}
-
-			var modifiedRequest = ""
-
-			log.Printf("[Modify request] Actions: %+v", actions)
-			modifiedRequest, err = runActions(actions, reqRecord)
-			if err != nil {
-				log.Printf("[Modify request] Error running actions: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error running actions", "message": err.Error()})
-			}
-
-			log.Printf("[Modify request] Request data: %+v", reqData)
-
-			return c.JSON(http.StatusOK, map[string]string{"success": "true",
-				"request": modifiedRequest,
-			})
+		actions, err := templates.ParseTemplateActions([]templates.Actions{{
+			Id:        "",
+			Condition: "",
+			Todo:      reqData.Tasks,
 		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		}, map[string]any{
+			"req": reqRecord,
+		}, "all")
+
+		if err != nil {
+			log.Printf("[Modify request] Error parsing template: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error parsing template"})
+		}
+
+		var modifiedRequest = ""
+
+		log.Printf("[Modify request] Actions: %+v", actions)
+		modifiedRequest, err = runActions(actions, reqRecord)
+		if err != nil {
+			log.Printf("[Modify request] Error running actions: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error running actions", "message": err.Error()})
+		}
+
+		log.Printf("[Modify request] Request data: %+v", reqData)
+
+		return c.JSON(http.StatusOK, map[string]string{"success": "true",
+			"request": modifiedRequest,
+		})
 	})
-
-	return nil
 }
 
 func runActions(tasks []templates.Action, requestData map[string]any) (string, error) {

@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/campbellcharlie/lorg/internal/types"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 type RepeaterSendRequest struct {
@@ -73,38 +71,29 @@ func (backend *Backend) sendRepeaterLogic(reqData *RepeaterSendRequest) (*Repeat
 }
 
 // SendRepeater handles the /api/repeater/send endpoint
-func (backend *Backend) SendRepeater(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/repeater/send",
-		Handler: func(c echo.Context) error {
-			log.Println("[SendRepeater] Handler called")
+func (backend *Backend) SendRepeater(e *echo.Echo) {
+	e.POST("/api/repeater/send", func(c echo.Context) error {
+		log.Println("[SendRepeater] Handler called")
 
-			if err := requireLocalhost(c); err != nil {
-				return err
-			}
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			var reqData RepeaterSendRequest
-			if err := c.Bind(&reqData); err != nil {
-				log.Printf("[SendRepeater] Error binding body: %v", err)
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
-			}
+		var reqData RepeaterSendRequest
+		if err := c.Bind(&reqData); err != nil {
+			log.Printf("[SendRepeater] Error binding body: %v", err)
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		}
 
-			log.Printf("[SendRepeater] Request data: %+v", reqData)
+		log.Printf("[SendRepeater] Request data: %+v", reqData)
 
-			resp, err := backend.sendRepeaterLogic(&reqData)
-			if err != nil {
-				log.Printf("[SendRepeater] Error sending request: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			}
+		resp, err := backend.sendRepeaterLogic(&reqData)
+		if err != nil {
+			log.Printf("[SendRepeater] Error sending request: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		}
 
-			log.Printf("[SendRepeater] Successfully processed request")
-			return c.JSON(http.StatusOK, resp)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		log.Printf("[SendRepeater] Successfully processed request")
+		return c.JSON(http.StatusOK, resp)
 	})
-
-	return nil
 }

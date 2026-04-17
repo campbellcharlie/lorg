@@ -72,8 +72,6 @@ func (backend *Backend) setCookieHandler(ctx context.Context, request mcp.CallTo
 		return mcp.NewToolResultError("no session found: create one with sessionCreate and activate with sessionSwitch"), nil
 	}
 
-	dao := backend.App.Dao()
-
 	cookies := session.Get("cookies")
 	cookieMap, ok := cookies.(map[string]any)
 	if !ok {
@@ -83,7 +81,7 @@ func (backend *Backend) setCookieHandler(ctx context.Context, request mcp.CallTo
 	cookieMap[args.Name] = args.Value
 	session.Set("cookies", cookieMap)
 
-	if err := dao.SaveRecord(session); err != nil {
+	if err := backend.DB.SaveRecord(session); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to save cookie: %v", err)), nil
 	}
 

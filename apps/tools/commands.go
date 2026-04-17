@@ -9,13 +9,10 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
-	"github.com/campbellcharlie/lorg/internal/schemas"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // loop over commandChannel
@@ -32,11 +29,11 @@ func (backend *Tools) CommandManager() {
 }
 
 func (backend *Tools) SetProcess(id, state string) {
-	process.SetState(backend.App, id, state)
+	process.SetState(backend.DB, id, state)
 }
 
 func (backend *Tools) RegisterProcessInDB(input, data any, name, typz, state string) string {
-	return process.RegisterInDB(backend.App, input, data, name, typz, state)
+	return process.RegisterInDB(backend.DB, input, data, name, typz, state)
 }
 
 type RunCommandData struct {
@@ -63,57 +60,44 @@ func (d *RunCommandData) Scan(value interface{}) error {
 	}
 }
 
-func (backend *Tools) RunCommand(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/runcommand",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+// processStateInqueue matches the old schemas.ProcessState.Inqueue constant.
+const processStateInqueue = "In Queue"
+const processStateRunning = "Running"
+const processStateCompleted = "Completed"
 
-			isGuest := admin == nil && recordd == nil
+func (backend *Tools) RunCommand(e *echo.Echo) {
+	e.POST("/api/runcommand", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		var data process.RunCommandData
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			var data process.RunCommandData
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
+		log.Println("[RunCommand]: ", data)
 
-			log.Println("[RunCommand]: ", data)
+		// Pass both input data and full command data
+		id := backend.RegisterProcessInDB(data.Data, data, data.Command, "command", processStateInqueue)
 
-			// Pass both input data and full command data
-			id := backend.RegisterProcessInDB(data.Data, data, data.Command, "command", schemas.ProcessState.Inqueue)
+		data.ID = id
 
-			data.ID = id
+		// send to channel
+		backend.CmdChannel <- data
 
-			// send to channel
-			backend.CmdChannel <- data
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id": id,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id": id,
+		})
 	})
-	return nil
 }
 
 func (backend *Tools) RunningCommand(id string, command string, filename string) {
-	backend.SetProcess(id, schemas.ProcessState.Running)
+	backend.SetProcess(id, processStateRunning)
 	var cmd *exec.Cmd
 	saveToFile := filename != ""
 
 	var useBash = runtime.GOOS != "windows"
-
-	// if saveToFile {
-	// 	command = command + " > " + c.Filename
-	// }
-	// cmd = exec.Command("cmd", "/C", command)
 
 	if saveToFile {
 		command = command + " > " + filename
@@ -152,11 +136,11 @@ func (backend *Tools) RunningCommand(id string, command string, filename string)
 		return
 	}
 
-	backend.SetProcess(id, schemas.ProcessState.Completed)
+	backend.SetProcess(id, processStateCompleted)
 }
 
 func (backend *Tools) RunningCommandSaveToCollection(id, command, collectionName string) {
-	backend.SetProcess(id, schemas.ProcessState.Running)
+	backend.SetProcess(id, processStateRunning)
 
 	log.Println("RunningCommand: ", command)
 	var cmd *exec.Cmd
@@ -188,17 +172,14 @@ func (backend *Tools) RunningCommandSaveToCollection(id, command, collectionName
 	// Create a scanner to read the output line by line
 	scanner := bufio.NewScanner(stdout)
 
-	collection, err := backend.App.Dao().FindCollectionByNameOrId(collectionName)
-	utils.CheckErr("[RunningCommand][FindCollection]:", err)
-
 	// Read the output in real-time
 	for scanner.Scan() {
 		jsonrow := scanner.Text()
 		log.Println("[RunningCommand][Scanner]: ", jsonrow)
 
-		record := models.NewRecord(collection)
+		record := lorgdb.NewRecord(collectionName)
 		record.Set("data", jsonrow)
-		err = backend.App.Dao().SaveRecord(record)
+		err = backend.DB.SaveRecord(record)
 		utils.CheckErr("[RunningCommand][SaveRecord]:", err)
 	}
 
@@ -211,5 +192,5 @@ func (backend *Tools) RunningCommandSaveToCollection(id, command, collectionName
 		return
 	}
 
-	backend.SetProcess(id, schemas.ProcessState.Completed)
+	backend.SetProcess(id, processStateCompleted)
 }

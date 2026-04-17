@@ -6,12 +6,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/campbellcharlie/lorg/internal/schemas"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 	"github.com/rs/xid"
 )
 
@@ -86,61 +82,56 @@ type login struct {
 	Password string `json:"password"`
 }
 
-func (backend *Backend) ToolsServer(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "GET",
-		Path:   "/api/tool/server",
-		Handler: func(c echo.Context) error {
-			path := backend.Config.ProjectsDirectory
-			hostAddress, err := utils.CheckAndFindAvailablePort("127.0.0.1:8090")
-			name := xid.New().String()
+func (backend *Backend) ToolsServer(e *echo.Echo) {
+	e.GET("/api/tool/server", func(c echo.Context) error {
+		path := backend.Config.ProjectsDirectory
+		hostAddress, err := utils.CheckAndFindAvailablePort("127.0.0.1:8090")
+		name := xid.New().String()
 
-			fmt.Println("name", name)
-			fmt.Println("path", path)
-			fmt.Println("hostAddress", hostAddress)
-			fmt.Println("err", err)
+		fmt.Println("name", name)
+		fmt.Println("path", path)
+		fmt.Println("hostAddress", hostAddress)
+		fmt.Println("err", err)
 
-			if err != nil {
-				return c.String(http.StatusInternalServerError, err.Error())
-			}
+		if err != nil {
+			return c.String(http.StatusInternalServerError, err.Error())
+		}
 
-			_c := "lorg-tool -path " + path + " -host " + hostAddress + " -name " + name
+		_c := "lorg-tool -path " + path + " -host " + hostAddress + " -name " + name
 
-			id := backend.RegisterProcessInDB(
-				_c,
-				map[string]any{
-					"path":        path,
-					"hostAddress": hostAddress,
-					"name":        name,
-					"username":    "new@example.com",
-					"password":    "1234567890",
-				},
-				"lorg-tool",
-				"tool-server",
-				schemas.ProcessState.Inqueue,
-			)
+		id := backend.RegisterProcessInDB(
+			_c,
+			map[string]any{
+				"path":        path,
+				"hostAddress": hostAddress,
+				"name":        name,
+				"username":    "new@example.com",
+				"password":    "1234567890",
+			},
+			"lorg-tool",
+			"tool-server",
+			"In Queue",
+		)
 
-			go backend.toolsServerStart(hostAddress, path, name, func() {
-				fmt.Println("toolsServerStart closed")
-			})
+		go backend.toolsServerStart(hostAddress, path, name, func() {
+			fmt.Println("toolsServerStart closed")
+		})
 
-			// backend.ToolLoginAndSubscribe(id, login{
-			// 	Host:     hostAddress,
-			// 	Username: "new@example.com",
-			// 	Password: "1234567890",
-			// })
+		// backend.ToolLoginAndSubscribe(id, login{
+		// 	Host:     hostAddress,
+		// 	Username: "new@example.com",
+		// 	Password: "1234567890",
+		// })
 
-			return c.JSON(http.StatusOK, ToolsServerResponse{
-				Path:        path,
-				HostAddress: hostAddress,
-				ID:          id,
-				Name:        name,
-				Username:    "new@example.com",
-				Password:    "1234567890",
-			})
-		},
+		return c.JSON(http.StatusOK, ToolsServerResponse{
+			Path:        path,
+			HostAddress: hostAddress,
+			ID:          id,
+			Name:        name,
+			Username:    "new@example.com",
+			Password:    "1234567890",
+		})
 	})
-	return nil
 }
 
 func (backend *Backend) toolsServerStart(hostAddress, path, name string, onClose func()) {
@@ -155,47 +146,9 @@ func (backend *Backend) toolsServerStart(hostAddress, path, name string, onClose
 	onClose()
 }
 
-func (backend *Backend) Tools(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "GET",
-		Path:   "/api/tool",
-		Handler: func(c echo.Context) error {
-			path := c.QueryParam("path")
-			// backend.App.Bootstrap()
-			hostAddress, err := utils.CheckAndFindAvailablePort("127.0.0.1:8090")
-
-			fmt.Println("path", path)
-			fmt.Println("hostAddress", hostAddress)
-			fmt.Println("err", err)
-
-			var NewApp = pocketbase.NewWithConfig(
-				pocketbase.Config{
-					ProjectDir:      path,
-					DefaultDataDir:  "weird",
-					HideStartBanner: true,
-					// DefaultDev: true,
-					// DefaultEncryptionEnv: "hJH#GRJ#HG$JH$54h5kjhHJG#JHG#*&Y&EG#F&GIG@JKGH$JHRGJ##JKJH#JHG",
-				},
-			)
-
-			NewApp.Bootstrap()
-
-			if err != nil {
-				return c.String(http.StatusInternalServerError, err.Error())
-			}
-
-			_, err = apis.Serve(NewApp, apis.ServeConfig{
-				HttpAddr: hostAddress,
-			})
-
-			fmt.Println("err", err)
-
-			if err != nil {
-				return c.String(http.StatusInternalServerError, err.Error())
-			}
-
-			return c.String(http.StatusOK, fmt.Sprintf("Path parameter: %s", path))
-		},
+// Tools endpoint (PocketBase sub-instance removed — no longer supported)
+func (backend *Backend) Tools(e *echo.Echo) {
+	e.GET("/api/tool", func(c echo.Context) error {
+		return echo.NewHTTPError(http.StatusGone, "tool sub-instances are no longer supported")
 	})
-	return nil
 }

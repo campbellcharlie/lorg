@@ -30,12 +30,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/campbellcharlie/lorg/lrx/rawhttp"
-	"github.com/campbellcharlie/lorg/lrx/rawproxy"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/types"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/daos"
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/lrx/rawhttp"
+	"github.com/campbellcharlie/lorg/lrx/rawproxy"
 )
 
 // RawProxyWrapper wraps the rawproxy.Proxy to match our interface
@@ -54,16 +53,6 @@ type RawProxyWrapper struct {
 
 	// Statistics
 	stats ProxyStats
-
-	// Cached collections for performance
-	reqCollection        *models.Collection
-	respCollection       *models.Collection
-	reqEditedCollection  *models.Collection
-	respEditedCollection *models.Collection
-	dataCollection       *models.Collection
-	attachedCollection   *models.Collection
-	interceptCollection  *models.Collection
-	wsCollection         *models.Collection // WebSocket messages collection
 
 	Intercept bool
 	Filters   string
@@ -88,7 +77,7 @@ type RequestContext struct {
 	RawRequest   string
 	RawResponse  string // Set in onResponse
 	RequestStart time.Time
-	DataRecord   *models.Record // Single record shared across all operations
+	DataRecord   *lorgdb.Record // Single record shared across all operations
 }
 
 // NewRawProxyWrapper creates a new rawproxy wrapper with the given configuration
@@ -124,6 +113,21 @@ func NewRawProxyWrapper(listenAddr, configDir, outputDir string, backend *Backen
 		IdleTimeout:  10 * time.Minute,
 	}
 
+	// Load upstream proxy and mTLS settings from the proxy DB record
+	if backend != nil && backend.DB != nil {
+		if proxyRec, err := backend.DB.FindRecordById("_proxies", proxyID); err == nil {
+			if up := proxyRec.GetString("upstream_proxy"); up != "" {
+				config.UpstreamProxy = up
+				log.Printf("[RawProxy] Upstream proxy configured: %s", up)
+			}
+			if cert := proxyRec.GetString("client_cert"); cert != "" {
+				config.ClientCertFile = cert
+				config.ClientKeyFile = proxyRec.GetString("client_key")
+				log.Printf("[RawProxy] mTLS client cert configured: %s", cert)
+			}
+		}
+	}
+
 	// Create the proxy instance
 	// This will generate ca.crt and ca.key in ConfigFolder if they don't exist
 	proxy, err := rawproxy.New(config)
@@ -136,71 +140,18 @@ func NewRawProxyWrapper(listenAddr, configDir, outputDir string, backend *Backen
 
 	log.Printf("[RawProxy] Using certificates at: %s", config.CertPath)
 
-	// Cache collection references for performance
-	if err := wrapper.cacheCollections(); err != nil {
-		return nil, fmt.Errorf("failed to cache collections: %w", err)
-	}
-
-	// Set up request and response handlers
-	proxy.SetRequestHandler(wrapper.onRequest)
-	proxy.SetResponseHandler(wrapper.onResponse)
+	// Set up request and response handlers with match/replace middleware
+	proxy.SetRequestHandler(func(reqData *rawproxy.RequestData, req *http.Request) (*http.Request, error) {
+		matchReplaceMgr.ApplyToRequest(req)
+		return wrapper.onRequest(reqData, req)
+	})
+	proxy.SetResponseHandler(func(reqData *rawproxy.RequestData, resp *http.Response, req *http.Request) (*http.Response, error) {
+		matchReplaceMgr.ApplyToResponse(resp)
+		return wrapper.onResponse(reqData, resp, req)
+	})
 	proxy.SetWebSocketMessageHandler(wrapper.onWebSocketMessage)
 
 	return wrapper, nil
-}
-
-// cacheCollections caches collection references for performance
-func (rp *RawProxyWrapper) cacheCollections() error {
-	if rp.backend == nil || rp.backend.App == nil {
-		return fmt.Errorf("backend not available")
-	}
-
-	dao := rp.backend.App.Dao()
-	var err error
-
-	rp.reqCollection, err = dao.FindCollectionByNameOrId("_req")
-	if err != nil {
-		return fmt.Errorf("failed to find _req collection: %w", err)
-	}
-
-	rp.respCollection, err = dao.FindCollectionByNameOrId("_resp")
-	if err != nil {
-		return fmt.Errorf("failed to find _resp collection: %w", err)
-	}
-
-	rp.reqEditedCollection, err = dao.FindCollectionByNameOrId("_req_edited")
-	if err != nil {
-		return fmt.Errorf("failed to find _req_edited collection: %w", err)
-	}
-
-	rp.respEditedCollection, err = dao.FindCollectionByNameOrId("_resp_edited")
-	if err != nil {
-		return fmt.Errorf("failed to find _resp_edited collection: %w", err)
-	}
-
-	rp.dataCollection, err = dao.FindCollectionByNameOrId("_data")
-	if err != nil {
-		return fmt.Errorf("failed to find _data collection: %w", err)
-	}
-
-	rp.attachedCollection, err = dao.FindCollectionByNameOrId("_attached")
-	if err != nil {
-		return fmt.Errorf("failed to find _attached collection: %w", err)
-	}
-
-	rp.interceptCollection, err = dao.FindCollectionByNameOrId("_intercept")
-	if err != nil {
-		return fmt.Errorf("failed to find _intercept collection: %w", err)
-	}
-
-	// WebSocket collection is optional - log warning if not found
-	rp.wsCollection, err = dao.FindCollectionByNameOrId("_websockets")
-	if err != nil {
-		return fmt.Errorf("failed to find _websockets collection: %w", err)
-	}
-
-	log.Println("[RawProxy] Successfully cached all collection references")
-	return nil
 }
 
 // initializeIndex is now handled globally by ProxyManager
@@ -564,7 +515,7 @@ func (rp *RawProxyWrapper) onRequest(reqData *rawproxy.RequestData, req *http.Re
 
 	// Create the dataRecord once and store it in RequestContext
 	// This single record will be reused throughout the request lifecycle
-	dataRecord := models.NewRecord(rp.dataCollection)
+	dataRecord := lorgdb.NewRecord("_data")
 	dataRecord.Load(userdata)
 	dataRecord.Set("attached", userdata["id"].(string))
 
@@ -798,13 +749,12 @@ func (rp *RawProxyWrapper) onResponse(reqData *rawproxy.RequestData, resp *http.
 
 // saveRequestToDB saves the request data to the database collections
 func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData map[string]any) {
-	if rp.backend == nil || rp.backend.App == nil {
-		log.Println("[RawProxy][DB][ERROR] Backend or App is nil")
+	if rp.backend == nil || rp.backend.DB == nil {
+		log.Println("[RawProxy][DB][ERROR] Backend or DB is nil")
 		return
 	}
 
 	startTime := time.Now()
-	dao := rp.backend.App.Dao()
 	userdata := reqCtx.UserData
 	rawRequest := reqCtx.RawRequest
 	dataRecord := reqCtx.DataRecord
@@ -813,13 +763,13 @@ func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData m
 		userdata["id"].(string), int(userdata["index"].(float64)), requestData["method"].(string), userdata["host"].(string), requestData["path"].(string))
 
 	// Create _attached record
-	attachedRecord := models.NewRecord(rp.attachedCollection)
+	attachedRecord := lorgdb.NewRecord("_attached")
 	attachedRecord.Set("id", userdata["id"].(string))
 	attachedRecord.Set("labels", []string{})
 	attachedRecord.Set("note", "")
 
 	// Create _req record with raw request data
-	reqRecord := models.NewRecord(rp.reqCollection)
+	reqRecord := lorgdb.NewRecord("_req")
 	reqRecord.Load(requestData)
 	reqRecord.Set("id", userdata["id"].(string))
 	reqRecord.Set("raw", rawRequest)
@@ -831,20 +781,15 @@ func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData m
 	}
 
 	handleReqRecordError := func(err error) error {
-		log.Printf("[RawProxy][DB][ERROR] Failed to save _req record ID=%s: %v", userdata["id"].(string), err)
-		if err := dao.SaveRecord(reqRecord); err != nil {
-			log.Printf("[RawProxy][DB][ERROR] ============================================")
-			log.Printf("[RawProxy][DB][ERROR] FAILED TO SAVE _req RECORD!")
-			log.Printf("[RawProxy][DB][ERROR] ID: %s", userdata["id"].(string))
-			log.Printf("[RawProxy][DB][ERROR] Error: %v", err)
-			log.Printf("[RawProxy][DB][ERROR] Error Type: %T", err)
-			log.Printf("[RawProxy][DB][ERROR] Raw request size: %d bytes", len(rawRequest))
-			log.Printf("[RawProxy][DB][ERROR] Method: %s", requestData["method"].(string))
-			log.Printf("[RawProxy][DB][ERROR] URL: %s", requestData["url"].(string))
-			log.Printf("[RawProxy][DB][ERROR] ============================================")
-			rp.stats.RequestsFailed.Add(1)
-			return err
-		}
+		log.Printf("[RawProxy][DB][ERROR] ============================================")
+		log.Printf("[RawProxy][DB][ERROR] FAILED TO SAVE _req RECORD!")
+		log.Printf("[RawProxy][DB][ERROR] ID: %s", userdata["id"].(string))
+		log.Printf("[RawProxy][DB][ERROR] Error: %v", err)
+		log.Printf("[RawProxy][DB][ERROR] Error Type: %T", err)
+		log.Printf("[RawProxy][DB][ERROR] Raw request size: %d bytes", len(rawRequest))
+		log.Printf("[RawProxy][DB][ERROR] Method: %s", requestData["method"].(string))
+		log.Printf("[RawProxy][DB][ERROR] URL: %s", requestData["url"].(string))
+		log.Printf("[RawProxy][DB][ERROR] ============================================")
 		rp.stats.RequestsFailed.Add(1)
 		return err
 	}
@@ -862,14 +807,14 @@ func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData m
 		return err
 	}
 
-	err := dao.RunInTransaction(func(txDao *daos.Dao) error {
-		if err := txDao.SaveRecord(attachedRecord); err != nil {
+	err := rp.backend.DB.RunInTransaction(func(tx *lorgdb.LorgTx) error {
+		if err := tx.SaveRecord(attachedRecord); err != nil {
 			return handleAttachRecordError(err)
 		}
-		if err := txDao.SaveRecord(reqRecord); err != nil {
+		if err := tx.SaveRecord(reqRecord); err != nil {
 			return handleReqRecordError(err)
 		}
-		if err := txDao.SaveRecord(dataRecord); err != nil {
+		if err := tx.SaveRecord(dataRecord); err != nil {
 			return handleDataRecordError(err)
 		}
 		return nil
@@ -909,13 +854,12 @@ func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData m
 
 // saveResponseToDB updates the database with response data
 func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData map[string]any) {
-	if rp.backend == nil || rp.backend.App == nil {
-		log.Println("[RawProxy][DB][ERROR] Backend or App is nil")
+	if rp.backend == nil || rp.backend.DB == nil {
+		log.Println("[RawProxy][DB][ERROR] Backend or DB is nil")
 		return
 	}
 
 	startTime := time.Now()
-	dao := rp.backend.App.Dao()
 	userdata := reqCtx.UserData
 	rawResponse := reqCtx.RawResponse
 	dataRecord := reqCtx.DataRecord
@@ -924,12 +868,12 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 		userdata["id"].(string), responseData["status"].(int), responseData["mime"].(string), responseData["title"].(string), len(rawResponse))
 
 	// Create _resp record with raw response data
-	respRecord := models.NewRecord(rp.respCollection)
+	respRecord := lorgdb.NewRecord("_resp")
 	respRecord.Load(responseData)
 	respRecord.Set("id", userdata["id"].(string))
 	respRecord.Set("raw", rawResponse)
 
-	if err := dao.SaveRecord(respRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(respRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] ============================================")
 		log.Printf("[RawProxy][DB][ERROR] FAILED TO SAVE _resp RECORD!")
 		log.Printf("[RawProxy][DB][ERROR] ID: %s", userdata["id"].(string))
@@ -959,7 +903,7 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 	dataRecord.Set("http", userdata["http"].(string))
 	dataRecord.Set("has_resp", userdata["has_resp"].(bool))
 	dataRecord.Set("resp_json", responseData)
-	if err := dao.SaveRecord(dataRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(dataRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to update _data record ID=%s: %v", userdata["id"].(string), err)
 	} else {
 		log.Printf("[RawProxy][DB][SUCCESS] Updated _data record ID=%s with response metadata", userdata["id"].(string))
@@ -1097,12 +1041,11 @@ func formatBytes(bytes uint64) string {
 
 // saveEditedRequest saves the edited request to the database
 func (rp *RawProxyWrapper) saveEditedRequest(reqCtx *RequestContext, requestData map[string]any, editedRequest string) {
-	if rp.backend == nil || rp.backend.App == nil {
-		log.Println("[RawProxy][DB][ERROR] Backend or App is nil")
+	if rp.backend == nil || rp.backend.DB == nil {
+		log.Println("[RawProxy][DB][ERROR] Backend or DB is nil")
 		return
 	}
 
-	dao := rp.backend.App.Dao()
 	userdata := reqCtx.UserData
 	dataRecord := reqCtx.DataRecord
 	id := userdata["id"].(string)
@@ -1110,12 +1053,12 @@ func (rp *RawProxyWrapper) saveEditedRequest(reqCtx *RequestContext, requestData
 	log.Printf("[RawProxy][DB][EDIT] Saving edited request for ID=%s", id)
 
 	// Create _req_edited record with edited request data
-	reqEditedRecord := models.NewRecord(rp.reqEditedCollection)
+	reqEditedRecord := lorgdb.NewRecord("_req_edited")
 	reqEditedRecord.Set("id", id)
 	reqEditedRecord.Load(requestData)
 	reqEditedRecord.Set("raw", editedRequest)
 
-	if err := dao.SaveRecord(reqEditedRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(reqEditedRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to save edited request to _req_edited ID=%s: %v", id, err)
 		return
 	}
@@ -1125,7 +1068,7 @@ func (rp *RawProxyWrapper) saveEditedRequest(reqCtx *RequestContext, requestData
 	dataRecord.Set("is_req_edited", true)
 	dataRecord.Set("req_edited", id)
 	dataRecord.Set("req_edited_json", requestData)
-	if err := dao.SaveRecord(dataRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(dataRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to update is_req_edited flag ID=%s: %v", id, err)
 		return
 	}
@@ -1134,12 +1077,11 @@ func (rp *RawProxyWrapper) saveEditedRequest(reqCtx *RequestContext, requestData
 
 // saveEditedResponse saves the edited response to the database
 func (rp *RawProxyWrapper) saveEditedResponse(reqCtx *RequestContext, responseData map[string]any, editedResponse string) {
-	if rp.backend == nil || rp.backend.App == nil {
-		log.Println("[RawProxy][DB][ERROR] Backend or App is nil")
+	if rp.backend == nil || rp.backend.DB == nil {
+		log.Println("[RawProxy][DB][ERROR] Backend or DB is nil")
 		return
 	}
 
-	dao := rp.backend.App.Dao()
 	userdata := reqCtx.UserData
 	dataRecord := reqCtx.DataRecord
 	id := userdata["id"].(string)
@@ -1147,12 +1089,12 @@ func (rp *RawProxyWrapper) saveEditedResponse(reqCtx *RequestContext, responseDa
 	log.Printf("[RawProxy][DB][EDIT] Saving edited response for ID=%s", id)
 
 	// Create _resp_edited record with edited response data
-	respEditedRecord := models.NewRecord(rp.respEditedCollection)
+	respEditedRecord := lorgdb.NewRecord("_resp_edited")
 	respEditedRecord.Set("id", id)
 	respEditedRecord.Load(responseData)
 	respEditedRecord.Set("raw", editedResponse)
 
-	if err := dao.SaveRecord(respEditedRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(respEditedRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to save edited response to _resp_edited ID=%s: %v", id, err)
 		return
 	}
@@ -1163,7 +1105,7 @@ func (rp *RawProxyWrapper) saveEditedResponse(reqCtx *RequestContext, responseDa
 	dataRecord.Set("is_resp_edited", true)
 	dataRecord.Set("resp_edited", id)
 	dataRecord.Set("resp_edited_json", responseData)
-	if err := dao.SaveRecord(dataRecord); err != nil {
+	if err := rp.backend.DB.SaveRecord(dataRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to update is_resp_edited flag ID=%s: %v", id, err)
 		return
 	}
@@ -1179,15 +1121,9 @@ func (rp *RawProxyWrapper) onWebSocketMessage(msg *rawproxy.WebSocketMessage) er
 
 // saveWebSocketMessageToDB saves a single WebSocket message to the database
 func (rp *RawProxyWrapper) saveWebSocketMessageToDB(msg *rawproxy.WebSocketMessage) {
-	if rp.backend == nil || rp.backend.App == nil {
+	if rp.backend == nil || rp.backend.DB == nil {
 		return
 	}
-
-	if rp.wsCollection == nil {
-		return
-	}
-
-	dao := rp.backend.App.Dao()
 
 	// Handle payload - for binary data, encode as base64
 	var payloadStr string
@@ -1203,7 +1139,7 @@ func (rp *RawProxyWrapper) saveWebSocketMessageToDB(msg *rawproxy.WebSocketMessa
 
 	// Find the parent _data record to get its user-friendly index
 	// The WebSocket RequestID corresponds to the proxy_id in the _data collection
-	if dataRecord, err := dao.FindFirstRecordByData(rp.dataCollection.Name, "proxy_id", msg.RequestID); err == nil {
+	if dataRecord, err := rp.backend.DB.FindFirstRecord("_data", "proxy_id = ?", msg.RequestID); err == nil {
 		dataIndex = dataRecord.GetString("index")
 		generatedBy = dataRecord.GetString("generated_by")
 	}
@@ -1211,7 +1147,7 @@ func (rp *RawProxyWrapper) saveWebSocketMessageToDB(msg *rawproxy.WebSocketMessa
 	// id = fmt.Sprintf("%s.%d", dataIndex, msg.Index)
 	id = utils.FormatStringID(fmt.Sprintf("%v.%v", dataIndex, msg.Index), 15)
 
-	record := models.NewRecord(rp.wsCollection)
+	record := lorgdb.NewRecord("_websockets")
 	record.Set("id", id)
 	record.Set("index", msg.Index)
 	record.Set("host", msg.Host)
@@ -1227,7 +1163,7 @@ func (rp *RawProxyWrapper) saveWebSocketMessageToDB(msg *rawproxy.WebSocketMessa
 	record.Set("data_index", dataIndex)
 	record.Set("generated_by", generatedBy)
 
-	if err := dao.SaveRecord(record); err != nil {
+	if err := rp.backend.DB.SaveRecord(record); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to save WebSocket message for %s: %v", msg.RequestID, err)
 	}
 }

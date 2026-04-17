@@ -53,6 +53,13 @@ type Config struct {
 	CertPath string  // Path to CA certificate (default: "<ConfigFolder>/ca.crt" or "cert/ca.crt")
 	KeyPath  string  // Path to CA key (default: "<ConfigFolder>/ca.key" or "cert/ca.key")
 
+	// Upstream proxy (optional — HTTP or SOCKS5)
+	UpstreamProxy string // e.g. "http://corporate:8080", "socks5://127.0.0.1:9050"
+
+	// Client certificate for mTLS (optional)
+	ClientCertFile string // Path to PEM-encoded client certificate
+	ClientKeyFile  string // Path to PEM-encoded client private key
+
 	// Handlers (optional)
 	OnRequestHandler          OnRequestHandler          // Custom request handler
 	OnResponseHandler         OnResponseHandler         // Custom response handler

@@ -9,18 +9,15 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
-	"github.com/campbellcharlie/lorg/internal/schemas"
+
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // loop over commandChannel
 func (launcher *Launcher) CommandManager() {
-	// log.Println("[CommandManager Stared]")
 	for c := range launcher.CmdChannel {
 		log.Println("Command received: ", c)
 		if c.SaveTo == "collection" {
@@ -32,15 +29,15 @@ func (launcher *Launcher) CommandManager() {
 }
 
 func (launcher *Launcher) SetProcess(id, state string) {
-	process.SetState(launcher.App, id, state)
+	process.SetState(launcher.DB, id, state)
 }
 
-func (launcher *Launcher) GetProcess(id string) (*models.Record, error) {
-	return process.GetProcess(launcher.App, id)
+func (launcher *Launcher) GetProcess(id string) (*lorgdb.Record, error) {
+	return process.GetProcess(launcher.DB, id)
 }
 
 func (launcher *Launcher) RegisterProcessInDB(input, data any, name, typz, state string) string {
-	return process.RegisterInDB(launcher.App, input, data, name, typz, state)
+	return process.RegisterInDB(launcher.DB, input, data, name, typz, state)
 }
 
 type RunCommandData struct {
@@ -67,47 +64,34 @@ func (d *RunCommandData) Scan(value interface{}) error {
 	}
 }
 
-func (launcher *Launcher) RunCommand(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/runcommand",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (launcher *Launcher) RunCommand(e *echo.Echo) {
+	e.POST("/api/runcommand", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data process.RunCommandData
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		log.Println("[RunCommand]: ", data)
 
-			var data process.RunCommandData
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
+		id := launcher.RegisterProcessInDB(data.Data, data, data.Command, "command", "In Queue")
 
-			log.Println("[RunCommand]: ", data)
+		data.ID = id
 
-			id := launcher.RegisterProcessInDB(data.Data, data, data.Command, "command", schemas.ProcessState.Inqueue)
+		// send to channel
+		launcher.CmdChannel <- data
 
-			data.ID = id
-
-			// send to channel
-			launcher.CmdChannel <- data
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id": id,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id": id,
+		})
 	})
-	return nil
 }
 
 func (launcher *Launcher) RunningCommand(id string, command string, filename string) {
-	launcher.SetProcess(id, schemas.ProcessState.Running)
+	launcher.SetProcess(id, "Running")
 	var cmd *exec.Cmd
 	saveToFile := filename != ""
 
@@ -150,11 +134,11 @@ func (launcher *Launcher) RunningCommand(id string, command string, filename str
 		return
 	}
 
-	launcher.SetProcess(id, schemas.ProcessState.Completed)
+	launcher.SetProcess(id, "Completed")
 }
 
 func (launcher *Launcher) RunningCommandSaveToCollection(id, command, collectionName string) {
-	launcher.SetProcess(id, schemas.ProcessState.Running)
+	launcher.SetProcess(id, "Running")
 
 	log.Println("RunningCommand: ", command)
 	var cmd *exec.Cmd
@@ -186,17 +170,14 @@ func (launcher *Launcher) RunningCommandSaveToCollection(id, command, collection
 	// Create a scanner to read the output line by line
 	scanner := bufio.NewScanner(stdout)
 
-	collection, err := launcher.App.Dao().FindCollectionByNameOrId(collectionName)
-	utils.CheckErr("[RunningCommand][FindCollection]:", err)
-
 	// Read the output in real-time
 	for scanner.Scan() {
 		jsonrow := scanner.Text()
 		log.Println("[RunningCommand][Scanner]: ", jsonrow)
 
-		record := models.NewRecord(collection)
+		record := lorgdb.NewRecord(collectionName)
 		record.Set("data", jsonrow)
-		err = launcher.App.Dao().SaveRecord(record)
+		err = launcher.DB.SaveRecord(record)
 		utils.CheckErr("[RunningCommand][SaveRecord]:", err)
 	}
 
@@ -209,5 +190,5 @@ func (launcher *Launcher) RunningCommandSaveToCollection(id, command, collection
 		return
 	}
 
-	launcher.SetProcess(id, schemas.ProcessState.Completed)
+	launcher.SetProcess(id, "Completed")
 }

@@ -1,6 +1,7 @@
 package rawproxy
 
 import (
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -32,6 +33,50 @@ func GetTransportForHost(scheme, host string) http.RoundTripper {
 		return GetUTLSRoundTripper(host, FingerprintChrome)
 	}
 	return sharedHTTPTransport
+}
+
+// GetTransportForHostWithConfig returns a transport configured with upstream proxy and mTLS.
+func GetTransportForHostWithConfig(scheme, host string, config *Config) http.RoundTripper {
+	if config == nil || (config.UpstreamProxy == "" && config.ClientCertFile == "") {
+		return GetTransportForHost(scheme, host)
+	}
+
+	// Load client cert if configured
+	var clientCert *tls.Certificate
+	if config.ClientCertFile != "" {
+		cert, err := LoadClientCert(config.ClientCertFile, config.ClientKeyFile)
+		if err == nil {
+			clientCert = cert
+		}
+	}
+
+	// Create upstream dialer (handles SOCKS5)
+	var customDialer ContextDialer
+	if config.UpstreamProxy != "" {
+		ud, err := NewUpstreamDialer(config.UpstreamProxy)
+		if err == nil {
+			customDialer = ud
+		}
+	}
+
+	if scheme == "https" {
+		return NewUTLSRoundTripperWithOptions(host, FingerprintChrome, customDialer, clientCert)
+	}
+
+	// For HTTP with upstream proxy
+	t := &http.Transport{
+		Proxy:                 UpstreamHTTPProxyFunc(config.UpstreamProxy),
+		ForceAttemptHTTP2:     false,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+	if customDialer != nil {
+		t.DialContext = customDialer.DialContext
+	}
+	return t
 }
 
 // copyHeader copies HTTP headers from src to dst

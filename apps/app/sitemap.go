@@ -11,16 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/campbellcharlie/lorg/internal/schemas"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
+
 	"github.com/campbellcharlie/lorg/internal/types"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 	"github.com/jpillora/go-tld"
-	"github.com/labstack/echo/v5"
-	"github.com/pocketbase/dbx"
+	"github.com/labstack/echo/v4"
+	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 )
 
 func (backend *Backend) handleSitemapNew(data *types.SitemapGet) error {
@@ -29,7 +26,14 @@ func (backend *Backend) handleSitemapNew(data *types.SitemapGet) error {
 	var collectionExists = true
 
 	SitemapCollectionName := utils.ParseDatabaseName(data.Host)
-	err := backend.CreateCollection(SitemapCollectionName, schemas.Sitemap)
+	err := backend.CreateCollection(SitemapCollectionName, []string{
+		"path TEXT NOT NULL DEFAULT ''",
+		"query TEXT NOT NULL DEFAULT ''",
+		"fragment TEXT NOT NULL DEFAULT ''",
+		"type TEXT NOT NULL DEFAULT ''",
+		"ext TEXT NOT NULL DEFAULT ''",
+		"data TEXT NOT NULL DEFAULT ''",
+	})
 
 	// Checking error if it is collection already exists
 	// This is the error "constraint failed: UNIQUE constraint failed: collections.name (2067)"
@@ -156,43 +160,30 @@ func (backend *Backend) handleSitemapNew(data *types.SitemapGet) error {
 	return nil
 }
 
-func (backend *Backend) SitemapNew(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/sitemap/new",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) SitemapNew(e *echo.Echo) {
+	e.POST("/api/sitemap/new", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data types.SitemapGet
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
+		log.Print("SitemapNew: ", data)
 
-			var data types.SitemapGet
+		err := backend.handleSitemapNew(&data)
+		if err != nil {
+			return err
+		}
 
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
-			log.Print("SitemapNew: ", data)
-
-			err := backend.handleSitemapNew(&data)
-			if err != nil {
-				return err
-			}
-
-			return c.String(http.StatusOK, "Created")
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.String(http.StatusOK, "Created")
 	})
-	return nil
 }
 
 // buildSitemapTree builds a hierarchical tree structure from flat records
-func buildSitemapTree(records []*models.Record, basePath string, host string, maxDepth int) []*types.SitemapNode {
+func buildSitemapTree(records []*lorgdb.Record, basePath string, host string, maxDepth int) []*types.SitemapNode {
 	// Create a map to store all nodes by their path
 	nodeMap := make(map[string]*types.SitemapNode)
 	pathChildren := make(map[string][]string) // Track children paths for each parent path
@@ -346,27 +337,17 @@ func (backend *Backend) sitemapFetchLogic(data *types.SitemapFetch) ([]*types.Si
 	db := utils.ParseDatabaseName(data.Host)
 	path := data.Path + `/%`
 
-	var result []*models.Record
+	var result []*lorgdb.Record
 	var err error
-
-	dao := backend.App.Dao()
 
 	fmt.Println("db: ", db)
 	fmt.Println("path: ", path)
 	fmt.Println("depth: ", data.Depth)
 
-	collection, err := dao.FindCollectionByNameOrId(db)
-	if err != nil {
-		log.Println("Error fetching collection: ", err)
-		return nil, fmt.Errorf("host doesn't exist")
-	}
-
 	if data.Path == "" {
-		result, err = dao.FindRecordsByExpr(collection.Id)
+		result, err = backend.DB.FindRecords(db, "1=1")
 	} else {
-		result, err = dao.FindRecordsByFilter(collection.Id, "path ~ {:path}", "path", 0, 0, dbx.Params{
-			"path": path,
-		})
+		result, err = backend.DB.FindRecordsSorted(db, "path LIKE ?", "path", 0, 0, path)
 	}
 
 	if err != nil {
@@ -388,40 +369,26 @@ func (backend *Backend) sitemapFetchLogic(data *types.SitemapFetch) ([]*types.Si
 	return treeNodes, nil
 }
 
-func (backend *Backend) SitemapFetch(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/sitemap/fetch",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) SitemapFetch(e *echo.Echo) {
+	e.POST("/api/sitemap/fetch", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data types.SitemapFetch
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		treeNodes, err := backend.sitemapFetchLogic(&data)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"error":   err.Error(),
+				"message": err.Error(),
+				"data":    []interface{}{},
+			})
+		}
 
-			var data types.SitemapFetch
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
-
-			treeNodes, err := backend.sitemapFetchLogic(&data)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"error":   err.Error(),
-					"message": err.Error(),
-					"data":    []interface{}{},
-				})
-			}
-
-			return c.JSON(http.StatusOK, treeNodes)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, treeNodes)
 	})
-
-	return nil
 }

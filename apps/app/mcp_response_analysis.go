@@ -657,15 +657,13 @@ func (backend *Backend) compareTrafficByIdHandler(ctx context.Context, request m
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Pad IDs to 15 chars with leading underscores (same as getRequestResponseFromIDHandler)
 	id1 := utils.FormatStringID(args.ID1, 15)
 	id2 := utils.FormatStringID(args.ID2, 15)
 
 	// Fetch raw responses
-	respRec1, _ := dao.FindRecordById("_resp", id1)
-	respRec2, _ := dao.FindRecordById("_resp", id2)
+	respRec1, _ := backend.DB.FindRecordById("_resp", id1)
+	respRec2, _ := backend.DB.FindRecordById("_resp", id2)
 
 	if respRec1 == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("no response found for ID1: %s", id1)), nil
@@ -678,8 +676,8 @@ func (backend *Backend) compareTrafficByIdHandler(ctx context.Context, request m
 	rawResp2 := respRec2.GetString("raw")
 
 	// Fetch raw requests for context
-	reqRec1, _ := dao.FindRecordById("_req", id1)
-	reqRec2, _ := dao.FindRecordById("_req", id2)
+	reqRec1, _ := backend.DB.FindRecordById("_req", id1)
+	reqRec2, _ := backend.DB.FindRecordById("_req", id2)
 
 	// Extract method and path from request lines for context
 	req1Method, req1Path := "", ""

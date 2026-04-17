@@ -3,20 +3,14 @@ package launcher
 import (
 	"net/http"
 
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // Cook endpoints have been removed. This stub remains so that route
-// registrations in cmd/lorg-launcher/main.go compile without changes.
+// registrations compile without changes.
 
-func (launcher *Launcher) CookSearch(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "POST",
-		Path:   "/api/cook/search",
-		Handler: func(c echo.Context) error {
-			return c.JSON(http.StatusGone, map[string]string{"error": "cook support has been removed"})
-		},
+func (launcher *Launcher) CookSearch(e *echo.Echo) {
+	e.POST("/api/cook/search", func(c echo.Context) error {
+		return c.JSON(http.StatusGone, map[string]string{"error": "cook support has been removed"})
 	})
-	return nil
 }

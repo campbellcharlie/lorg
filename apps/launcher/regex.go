@@ -5,45 +5,32 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
-func (launcher *Launcher) SearchRegex(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "POST",
-		Path:   "/api/regex",
-		Handler: func(c echo.Context) error {
+func (launcher *Launcher) SearchRegex(e *echo.Echo) {
+	e.POST("/api/regex", func(c echo.Context) error {
 
-			var data map[string]interface{}
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
+		var data map[string]interface{}
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			// fmt.Println("regex data:", data)
+		regex := data["regex"].(string)
+		responseBody := data["responseBody"].(string)
 
-			regex := data["regex"].(string)
-			responseBody := data["responseBody"].(string)
+		jsonData := make(map[string]any)
 
-			jsonData := make(map[string]any)
-
-			matched, err := regexp.MatchString(regex, responseBody)
-			if err != nil {
-				jsonData["error"] = err.Error()
-				json.Marshal(jsonData)
-				return c.JSON(http.StatusOK, jsonData)
-			}
-
-			jsonData["matched"] = matched
+		matched, err := regexp.MatchString(regex, responseBody)
+		if err != nil {
+			jsonData["error"] = err.Error()
 			json.Marshal(jsonData)
 			return c.JSON(http.StatusOK, jsonData)
+		}
 
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		jsonData["matched"] = matched
+		json.Marshal(jsonData)
+		return c.JSON(http.StatusOK, jsonData)
+
 	})
-
-	return nil
 }

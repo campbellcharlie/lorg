@@ -313,7 +313,7 @@
       var method = req.method || '?';
       var path = req.path || req.url || '/';
       var status = resp.status || '';
-      var length = resp.length || '';
+      var length = resp.length || row.length || '';
       var genBy = row.generated_by || '';
       var source = genBy.indexOf('ai/mcp') !== -1 ? 'AI' : genBy.indexOf('repeater/') !== -1 ? 'Repeater' : 'Proxy';
       var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : 'source-proxy';
@@ -677,7 +677,31 @@
 
   // --- HTTP Syntax Highlighting ---
   var MAX_HIGHLIGHT_LINES = 500;
-  var MAX_HIGHLIGHT_BYTES = 2000000;
+  var MAX_HIGHLIGHT_BYTES = 200000; // 200KB for pretty view (was 2MB — too slow for DOM)
+
+  // Content types that should not be rendered as text
+  var BINARY_CONTENT_TYPES = [
+    'application/octet-stream', 'image/', 'audio/', 'video/', 'font/',
+    'application/zip', 'application/gzip', 'application/x-tar',
+    'application/pdf', 'application/wasm', 'application/protobuf'
+  ];
+
+  function isBinaryContentType(headers) {
+    var ct = '';
+    var lines = headers.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var lower = lines[i].toLowerCase();
+      if (lower.indexOf('content-type:') === 0) {
+        ct = lower.substring(13).trim();
+        break;
+      }
+    }
+    if (!ct) return false;
+    for (var j = 0; j < BINARY_CONTENT_TYPES.length; j++) {
+      if (ct.indexOf(BINARY_CONTENT_TYPES[j]) !== -1) return true;
+    }
+    return false;
+  }
 
   function addLineNumbers(html) {
     var lines = html.split('\n');
@@ -689,27 +713,48 @@
   function highlightHTTP(raw) {
     if (!raw) return '';
 
+    // Normalize \r\n to \n early for header detection
+    var normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // Find header/body boundary
+    var headerEnd = normalized.indexOf('\n\n');
+    var rawHeaders = headerEnd >= 0 ? normalized.substring(0, headerEnd) : normalized;
+    var rawBody = headerEnd >= 0 ? normalized.substring(headerEnd + 2) : '';
+    var bodyLen = rawBody.length;
+
+    // Detect binary content — show headers + placeholder instead of garbage
+    if (rawBody.length > 0 && isBinaryContentType(rawHeaders)) {
+      var escHeaders2 = escapeHtml(rawHeaders);
+      var headerLines2 = escHeaders2.split('\n');
+      var result2 = [];
+      for (var k = 0; k < headerLines2.length; k++) {
+        if (k === 0) { result2.push(highlightFirstLine(headerLines2[k])); continue; }
+        var ci = headerLines2[k].indexOf(':');
+        if (ci > 0) {
+          result2.push('<span class="hl-header-name">' + headerLines2[k].substring(0, ci) + '</span><span class="hl-colon">:</span><span class="hl-header-value">' + headerLines2[k].substring(ci + 1) + '</span>');
+        } else {
+          result2.push(headerLines2[k]);
+        }
+      }
+      result2.push('');
+      result2.push('<span class="hl-truncated">[Binary data — ' + formatBytes(bodyLen) + '. Switch to "Raw" to view.]</span>');
+      return addLineNumbers(result2.join('\n'));
+    }
+
     // For very large responses, truncate body to keep UI responsive
     var truncated = false;
     if (raw.length > MAX_HIGHLIGHT_BYTES) {
-      var bodyStart = raw.indexOf('\r\n\r\n');
-      if (bodyStart < 0) bodyStart = raw.indexOf('\n\n');
-      if (bodyStart >= 0) {
-        var headerLen = bodyStart + (raw.charAt(bodyStart) === '\r' ? 4 : 2);
+      if (headerEnd >= 0) {
+        var headerLen = headerEnd + 2;
         var maxBody = MAX_HIGHLIGHT_BYTES - headerLen;
-        if (maxBody > 0 && raw.length - headerLen > maxBody) {
-          raw = raw.substring(0, headerLen + maxBody);
+        if (maxBody > 0 && rawBody.length > maxBody) {
+          rawBody = rawBody.substring(0, maxBody);
           truncated = true;
         }
       }
     }
-    // Normalize \r\n to \n to prevent double line spacing
-    raw = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-    // Split headers from body on the RAW (unescaped) text so we can pretty-print
-    var headerEnd = raw.indexOf('\n\n');
-    var rawHeaders = headerEnd >= 0 ? raw.substring(0, headerEnd) : raw;
-    var rawBody = headerEnd >= 0 ? raw.substring(headerEnd + 2) : '';
+    raw = normalized;
 
     // Highlight headers (escape then highlight)
     var escHeaders = escapeHtml(rawHeaders);
@@ -746,7 +791,7 @@
 
     var output = result.join('\n');
     if (truncated) {
-      output += '\n<span class="hl-truncated">... response truncated (' + formatBytes(MAX_HIGHLIGHT_BYTES) + ' shown). Switch to "Raw" format for full content.</span>';
+      output += '\n<span class="hl-truncated">... response truncated (' + formatBytes(MAX_HIGHLIGHT_BYTES) + ' shown of ' + formatBytes(bodyLen) + '). Switch to "Raw" for full content.</span>';
     }
 
     // Skip line numbers for very long output (DOM performance)

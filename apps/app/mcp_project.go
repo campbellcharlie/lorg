@@ -16,10 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/types"
-	"github.com/glitchedgitz/pocketbase/models"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 	_ "modernc.org/sqlite"
 )
 
@@ -468,9 +467,8 @@ func (backend *Backend) projectInfoHandler(ctx context.Context, request mcp.Call
 
 	info := projectDB.Info()
 
-	// Augment with PocketBase host count for backward compat
-	dao := backend.App.Dao()
-	allData, _ := dao.FindRecordsByExpr("_data")
+	// Augment with host count from lorgdb for backward compat
+	allData, _ := backend.DB.FindRecords("_data", "1=1")
 
 	hostSet := map[string]struct{}{}
 	for _, rec := range allData {
@@ -520,18 +518,13 @@ func (backend *Backend) projectSetNameHandler(ctx context.Context, request mcp.C
 // storeProjectNameInPB persists the project name in PocketBase _settings
 // for backward compatibility with the UI and other tools.
 func (backend *Backend) storeProjectNameInPB(name string) {
-	dao := backend.App.Dao()
-	record, err := dao.FindFirstRecordByFilter("_settings", "option = {:opt}", dbx.Params{"opt": "project_name"})
+	record, err := backend.DB.FindFirstRecord("_settings", "option = ?", "project_name")
 	if err != nil || record == nil {
-		collection, colErr := dao.FindCollectionByNameOrId("_settings")
-		if colErr != nil {
-			return
-		}
-		record = models.NewRecord(collection)
+		record = lorgdb.NewRecord("_settings")
 		record.Set("option", "project_name")
 	}
 	record.Set("value", name)
-	_ = dao.SaveRecord(record)
+	_ = backend.DB.SaveRecord(record)
 }
 
 // ---------------------------------------------------------------------------
@@ -789,16 +782,14 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(fmt.Sprintf("failed to insert schema_version: %v", err)), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// -----------------------------------------------------------------
 	// Export traffic
 	// -----------------------------------------------------------------
-	var dataRecords []*models.Record
+	var dataRecords []*lorgdb.Record
 	if args.HostFilter != "" {
-		dataRecords, err = dao.FindRecordsByFilter("_data", "host ~ {:host}", "-index", 0, 0, dbx.Params{"host": args.HostFilter})
+		dataRecords, err = backend.DB.FindRecordsSorted("_data", "host LIKE ?", "\"index\" DESC", 0, 0, "%"+args.HostFilter+"%")
 	} else {
-		dataRecords, err = dao.FindRecordsByExpr("_data")
+		dataRecords, err = backend.DB.FindRecords("_data", "1=1")
 	}
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch traffic data: %v", err)), nil
@@ -938,10 +929,10 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 		// Fetch raw request and response
 		reqRaw := ""
 		respRaw := ""
-		if reqRec, _ := dao.FindRecordById("_req", id); reqRec != nil {
+		if reqRec, _ := backend.DB.FindRecordById("_req", id); reqRec != nil {
 			reqRaw = reqRec.GetString("raw")
 		}
-		if respRec, _ := dao.FindRecordById("_resp", id); respRec != nil {
+		if respRec, _ := backend.DB.FindRecordById("_resp", id); respRec != nil {
 			respRaw = respRec.GetString("raw")
 		}
 
@@ -1010,7 +1001,7 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 	// Export sessions from _sessions collection
 	// -----------------------------------------------------------------
 	exportedSessions := 0
-	sessionRecords, sessErr := dao.FindRecordsByExpr("_sessions")
+	sessionRecords, sessErr := backend.DB.FindRecords("_sessions", "1=1")
 	if sessErr == nil && len(sessionRecords) > 0 {
 		sessTx, txErr := exportDB.Begin()
 		if txErr == nil {
@@ -1038,7 +1029,7 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 	// Export templates from _mcp_templates collection
 	// -----------------------------------------------------------------
 	exportedTemplates := 0
-	tmplRecords, tmplErr := dao.FindRecordsByExpr("_mcp_templates")
+	tmplRecords, tmplErr := backend.DB.FindRecords("_mcp_templates", "1=1")
 	if tmplErr == nil && len(tmplRecords) > 0 {
 		tmplTx, txErr := exportDB.Begin()
 		if txErr == nil {

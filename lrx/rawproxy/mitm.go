@@ -193,7 +193,7 @@ func MitmHTTPS(clientConn net.Conn, connectReq *http.Request, requestID string, 
 
 	// Create upstream round tripper with uTLS to mimic browser TLS fingerprint
 	// This bypasses Cloudflare and other CDN bot detection that use JA3/JA4 fingerprinting
-	roundTripper := GetUTLSRoundTripper(host, FingerprintChrome)
+	roundTripper := GetTransportForHostWithConfig("https", host, config)
 
 	// Create a custom handler for this MITM connection
 	handler := &mitmHandler{

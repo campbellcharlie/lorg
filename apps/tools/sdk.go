@@ -6,10 +6,7 @@ import (
 	"net/http"
 
 	"github.com/campbellcharlie/lorg/internal/sdk"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 // LoginSDK initializes and authenticates the SDK client for connecting to the main app
@@ -48,98 +45,72 @@ type LoginSDKRequest struct {
 	Password string `json:"password"`
 }
 
-func (backend *Tools) SDKStatus(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodGet,
-		Path:   "/api/sdk/status",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Tools) SDKStatus(e *echo.Echo) {
+	e.GET("/api/sdk/status", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"status":    "success",
-				"connected": backend.AppSDK != nil,
-				"url":       backend.AppURL,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":    "success",
+			"connected": backend.AppSDK != nil,
+			"url":       backend.AppURL,
+		})
 	})
-	return nil
 }
 
-func (backend *Tools) LoginSDKEndpoint(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/sdk/login",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Tools) LoginSDKEndpoint(e *echo.Echo) {
+	e.POST("/api/sdk/login", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			var body LoginSDKRequest
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{
-					"status":    "error",
-					"connected": false,
-					"error":     err.Error(),
-				})
-			}
-
-			// Validate required fields
-			if body.URL == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{
-					"status":    "error",
-					"connected": false,
-					"error":     "url is required",
-				})
-			}
-			if body.Email == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{
-					"status":    "error",
-					"connected": false,
-					"error":     "email is required",
-				})
-			}
-			if body.Password == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{
-					"status":    "error",
-					"connected": false,
-					"error":     "password is required",
-				})
-			}
-
-			// Attempt to login
-			err := backend.LoginSDK(body.URL, body.Email, body.Password)
-			if err != nil {
-				return c.JSON(http.StatusUnauthorized, map[string]interface{}{
-					"status":    "error",
-					"connected": false,
-					"error":     err.Error(),
-				})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"status":    "success",
-				"connected": true,
-				"url":       backend.AppURL,
+		var body LoginSDKRequest
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":    "error",
+				"connected": false,
+				"error":     err.Error(),
 			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		}
+
+		// Validate required fields
+		if body.URL == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":    "error",
+				"connected": false,
+				"error":     "url is required",
+			})
+		}
+		if body.Email == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":    "error",
+				"connected": false,
+				"error":     "email is required",
+			})
+		}
+		if body.Password == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":    "error",
+				"connected": false,
+				"error":     "password is required",
+			})
+		}
+
+		// Attempt to login
+		err := backend.LoginSDK(body.URL, body.Email, body.Password)
+		if err != nil {
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+				"status":    "error",
+				"connected": false,
+				"error":     err.Error(),
+			})
+		}
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"status":    "success",
+			"connected": true,
+			"url":       backend.AppURL,
+		})
 	})
-	return nil
 }

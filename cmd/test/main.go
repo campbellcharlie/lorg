@@ -1,15 +1,13 @@
+// Test utility for exercising the lorg SDK client.
+// Usage: go run ./cmd/test/
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/campbellcharlie/lorg/internal/schemas"
 	"github.com/campbellcharlie/lorg/internal/sdk"
 	"github.com/campbellcharlie/lorg/internal/types"
-	pbTypes "github.com/glitchedgitz/pocketbase/tools/types"
-
-	"github.com/glitchedgitz/pocketbase/models"
 )
 
 func testPlaygroundAdd(lorgdb *sdk.Client, id string, playgroundAddData string) {
@@ -32,17 +30,6 @@ func main() {
 	var lorgdb = sdk.NewClient(
 		"http://127.0.0.1:8091",
 		sdk.WithAdminEmailPassword("new@example.com", "1234567890"))
-
-	lorgdb.CreateCollection(models.Collection{
-		Name:       "plugin_tmp_intercept",
-		Type:       models.CollectionTypeBase,
-		ListRule:   pbTypes.Pointer(""),
-		ViewRule:   pbTypes.Pointer(""),
-		CreateRule: pbTypes.Pointer(""),
-		UpdateRule: pbTypes.Pointer(""),
-		DeleteRule: nil,
-		Schema:     schemas.Intercept,
-	})
 
 	// Create a new playground
 	playgroundNewData := `{
@@ -113,41 +100,4 @@ func main() {
 	}`
 
 	testPlaygroundAdd(lorgdb, id, playgroundAddData2)
-
-	playgroundAddIntruderData := `{
-		"parent_id": "` + id + `",
-		"items": [
-			{
-			"name": "test intruder",
-			"type": "fuzzer",
-			"tool_data": {
-				"url": "http://example.com/test",
-				"req": "GET /test HTTP/1.1\nHost: example.com",
-				"resp": "HTTP/1.1 200 OK\nContent-Type: text/plain\n\nHello World",
-				"httpVersionTab": "HTTP/1.1",
-				"threads": 40,
-				"markers": { "FUZZ": { "name": "FUZZ", "color": "#e5c07b" } },
-				"props": {
-					"FUZZ": {
-						"generator": {
-							"title": "Range",
-							"name": "Range",
-							"props": {
-								"from": "1",
-								"to": "999"
-								},
-							"component": "Range",
-							"favourite": false,
-							"id": "h13NCzug"
-							},
-						"methods": []
-						}
-					}
-				}
-			}
-		]
-	}`
-
-	testPlaygroundAdd(lorgdb, id, playgroundAddIntruderData)
-
 }

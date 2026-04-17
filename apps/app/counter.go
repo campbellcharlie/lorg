@@ -5,8 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/glitchedgitz/pocketbase"
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 )
 
 // Counter represents a counter entry with atomic operations
@@ -24,14 +23,14 @@ type Counter struct {
 type CounterManager struct {
 	mu       sync.RWMutex
 	counters map[string]*Counter // map[counter_key]*Counter - simple and fast!
-	app      *pocketbase.PocketBase
+	db       *lorgdb.LorgDB
 }
 
 // SetupCounterManager initializes the counter manager and loads from database
 func (backend *Backend) SetupCounterManager() error {
 	backend.CounterManager = &CounterManager{
 		counters: make(map[string]*Counter),
-		app:      backend.App,
+		db:       backend.DB,
 	}
 
 	log.Println("[Startup] Loading counters from database...")
@@ -47,7 +46,7 @@ func (cm *CounterManager) LoadFromDB() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	records, err := cm.app.Dao().FindRecordsByExpr("_counters")
+	records, err := cm.db.FindRecords("_counters", "1=1")
 	if err != nil {
 		log.Printf("[CounterManager][LoadFromDB] Error loading counters: %v\n", err)
 		return err
@@ -295,12 +294,6 @@ func (cm *CounterManager) SyncToDB() error {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	collection, err := cm.app.Dao().FindCollectionByNameOrId("_counters")
-	if err != nil {
-		// log.Printf("[CounterManager][SyncToDB] Error finding collection: %v\n", err)
-		return err
-	}
-
 	syncCount := 0
 	skippedCount := 0
 	for _, counter := range cm.counters {
@@ -319,15 +312,14 @@ func (cm *CounterManager) SyncToDB() error {
 
 		if counter.ID == "" {
 			// New counter - create in DB
-			record := models.NewRecord(collection)
+			record := lorgdb.NewRecord("_counters")
 			record.Set("counter_key", counter.Key)
 			record.Set("collection", counter.Collection)
 			record.Set("filter", counter.Filter)
 			record.Set("count", currentCount)
 			record.Set("load_on_startup", counter.LoadOnStartup)
 
-			if err := cm.app.Dao().SaveRecord(record); err != nil {
-				// log.Printf("[CounterManager][SyncToDB] Error creating counter: %v\n", err)
+			if err := cm.db.SaveRecord(record); err != nil {
 				continue
 			}
 			counter.ID = record.Id
@@ -335,15 +327,13 @@ func (cm *CounterManager) SyncToDB() error {
 			syncCount++
 		} else {
 			// Existing counter - update in DB
-			record, err := cm.app.Dao().FindRecordById("_counters", counter.ID)
+			record, err := cm.db.FindRecordById("_counters", counter.ID)
 			if err != nil {
-				// log.Printf("[CounterManager][SyncToDB] Error finding counter %s: %v\n", counter.ID, err)
 				continue
 			}
 
 			record.Set("count", currentCount)
-			if err := cm.app.Dao().SaveRecord(record); err != nil {
-				// log.Printf("[CounterManager][SyncToDB] Error updating counter %s: %v\n", counter.ID, err)
+			if err := cm.db.SaveRecord(record); err != nil {
 				continue
 			}
 			counter.lastSyncedValue = currentCount
@@ -374,35 +364,30 @@ func (cm *CounterManager) SyncOne(key string) error {
 		return nil
 	}
 
-	collection, err := cm.app.Dao().FindCollectionByNameOrId("_counters")
-	if err != nil {
-		return err
-	}
-
 	currentCount := counter.Count.Load()
 
 	if counter.ID == "" {
 		// New counter - create in DB
-		record := models.NewRecord(collection)
+		record := lorgdb.NewRecord("_counters")
 		record.Set("counter_key", counter.Key)
 		record.Set("collection", counter.Collection)
 		record.Set("filter", counter.Filter)
 		record.Set("count", currentCount)
 		record.Set("load_on_startup", counter.LoadOnStartup)
 
-		if err := cm.app.Dao().SaveRecord(record); err != nil {
+		if err := cm.db.SaveRecord(record); err != nil {
 			return err
 		}
 		counter.ID = record.Id
 	} else {
 		// Existing counter - update in DB
-		record, err := cm.app.Dao().FindRecordById("_counters", counter.ID)
+		record, err := cm.db.FindRecordById("_counters", counter.ID)
 		if err != nil {
 			return err
 		}
 
 		record.Set("count", currentCount)
-		if err := cm.app.Dao().SaveRecord(record); err != nil {
+		if err := cm.db.SaveRecord(record); err != nil {
 			return err
 		}
 	}
@@ -457,11 +442,8 @@ func (cm *CounterManager) Delete(key, collection, filter string) {
 	if counter, exists := cm.counters[key]; exists {
 		// Delete from DB if it exists there
 		if counter.ID != "" {
-			record, err := cm.app.Dao().FindRecordById("_counters", counter.ID)
-			if err == nil {
-				if err := cm.app.Dao().DeleteRecord(record); err != nil {
-					log.Printf("[CounterManager][Delete] Error deleting counter from DB: %v\n", err)
-				}
+			if err := cm.db.DeleteRecord("_counters", counter.ID); err != nil {
+				log.Printf("[CounterManager][Delete] Error deleting counter from DB: %v\n", err)
 			}
 		}
 		delete(cm.counters, key)

@@ -7,9 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/glitchedgitz/pocketbase/models"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/pocketbase/dbx"
 )
 
 // FlexibleStringMap is a map[string]string that accepts both a JSON object
@@ -75,22 +74,20 @@ type CsrfExtractArgs struct {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func (backend *Backend) findActiveSession() (*models.Record, error) {
-	dao := backend.App.Dao()
-	record, err := dao.FindFirstRecordByFilter("_sessions", "active = true")
+func (backend *Backend) findActiveSession() (*lorgdb.Record, error) {
+	record, err := backend.DB.FindFirstRecord("_sessions", "active = ?", true)
 	if err != nil {
 		return nil, fmt.Errorf("no active session found, create one with sessionCreate and activate with sessionSwitch")
 	}
 	return record, nil
 }
 
-func (backend *Backend) findSessionByName(name string) (*models.Record, error) {
-	dao := backend.App.Dao()
-	return dao.FindFirstRecordByFilter("_sessions", "name = {:name}", dbx.Params{"name": name})
+func (backend *Backend) findSessionByName(name string) (*lorgdb.Record, error) {
+	return backend.DB.FindFirstRecord("_sessions", "name = ?", name)
 }
 
 // resolveSession returns a session by name, or the active session if name is empty.
-func (backend *Backend) resolveSession(name string) (*models.Record, error) {
+func (backend *Backend) resolveSession(name string) (*lorgdb.Record, error) {
 	if name != "" {
 		return backend.findSessionByName(name)
 	}
@@ -107,26 +104,19 @@ func (backend *Backend) sessionCreateHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Check if session with this name already exists
-	existing, _ := dao.FindFirstRecordByFilter("_sessions", "name = {:name}", dbx.Params{"name": args.Name})
+	existing, _ := backend.DB.FindFirstRecord("_sessions", "name = ?", args.Name)
 	if existing != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("session with name %q already exists", args.Name)), nil
 	}
 
-	collection, err := dao.FindCollectionByNameOrId("_sessions")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to find _sessions collection: %v", err)), nil
-	}
-
-	record := models.NewRecord(collection)
+	record := lorgdb.NewRecord("_sessions")
 	record.Set("name", args.Name)
 	record.Set("cookies", args.Cookies)
 	record.Set("headers", args.Headers)
 	record.Set("active", false)
 
-	if err := dao.SaveRecord(record); err != nil {
+	if err := backend.DB.SaveRecord(record); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to create session: %v", err)), nil
 	}
 
@@ -138,9 +128,7 @@ func (backend *Backend) sessionCreateHandler(ctx context.Context, request mcp.Ca
 }
 
 func (backend *Backend) sessionListHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	dao := backend.App.Dao()
-
-	records, err := dao.FindRecordsByExpr("_sessions")
+	records, err := backend.DB.FindRecords("_sessions", "1=1")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list sessions: %v", err)), nil
 	}
@@ -170,16 +158,14 @@ func (backend *Backend) sessionSwitchHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
 	// Find the target session
-	target, err := dao.FindFirstRecordByFilter("_sessions", "name = {:name}", dbx.Params{"name": args.Name})
+	target, err := backend.DB.FindFirstRecord("_sessions", "name = ?", args.Name)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("session not found: %s", args.Name)), nil
 	}
 
 	// Deactivate all sessions
-	allRecords, err := dao.FindRecordsByExpr("_sessions")
+	allRecords, err := backend.DB.FindRecords("_sessions", "1=1")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list sessions: %v", err)), nil
 	}
@@ -187,7 +173,7 @@ func (backend *Backend) sessionSwitchHandler(ctx context.Context, request mcp.Ca
 	for _, rec := range allRecords {
 		if rec.GetBool("active") {
 			rec.Set("active", false)
-			if err := dao.SaveRecord(rec); err != nil {
+			if err := backend.DB.SaveRecord(rec); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to deactivate session %s: %v", rec.GetString("name"), err)), nil
 			}
 		}
@@ -195,7 +181,7 @@ func (backend *Backend) sessionSwitchHandler(ctx context.Context, request mcp.Ca
 
 	// Activate the target session
 	target.Set("active", true)
-	if err := dao.SaveRecord(target); err != nil {
+	if err := backend.DB.SaveRecord(target); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to activate session: %v", err)), nil
 	}
 
@@ -211,14 +197,12 @@ func (backend *Backend) sessionDeleteHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	dao := backend.App.Dao()
-
-	record, err := dao.FindFirstRecordByFilter("_sessions", "name = {:name}", dbx.Params{"name": args.Name})
+	record, err := backend.DB.FindFirstRecord("_sessions", "name = ?", args.Name)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("session not found: %s", args.Name)), nil
 	}
 
-	if err := dao.DeleteRecord(record); err != nil {
+	if err := backend.DB.DeleteRecord("_sessions", record.Id); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to delete session: %v", err)), nil
 	}
 
@@ -264,8 +248,7 @@ func (backend *Backend) sessionUpdateCookiesHandler(ctx context.Context, request
 	}
 
 	record.Set("cookies", existing)
-	dao := backend.App.Dao()
-	if err := dao.SaveRecord(record); err != nil {
+	if err := backend.DB.SaveRecord(record); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to update cookies: %v", err)), nil
 	}
 
@@ -373,8 +356,7 @@ func (backend *Backend) csrfExtractHandler(ctx context.Context, request mcp.Call
 		}
 		record.Set("csrf_token", tokens[0].Value)
 		record.Set("csrf_field", tokens[0].Name)
-		dao := backend.App.Dao()
-		if err := dao.SaveRecord(record); err != nil {
+		if err := backend.DB.SaveRecord(record); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update session CSRF token: %v", err)), nil
 		}
 	}

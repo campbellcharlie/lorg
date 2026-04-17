@@ -3,7 +3,7 @@ package dev
 import (
 	"embed"
 
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 //go:embed all:dist

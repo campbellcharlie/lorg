@@ -8,10 +8,7 @@ import (
 	"strings"
 
 	"github.com/campbellcharlie/lorg/internal/save"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v4"
 )
 
 func (launcher *Launcher) GetFilePath(folder, fileName string) string {
@@ -28,76 +25,50 @@ func (launcher *Launcher) GetFilePath(folder, fileName string) string {
 	}
 }
 
-func (launcher *Launcher) ReadFile(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/readfile",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (launcher *Launcher) ReadFile(e *echo.Echo) {
+	e.POST("/api/readfile", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data map[string]interface{}
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
+		log.Println("[ReadFile]: ", data)
+		fileName := data["fileName"].(string)
+		fileName = strings.Trim(fileName, " ")
+		folder := data["folder"].(string)
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		content := save.ReadFile(launcher.GetFilePath(folder, fileName))
 
-			var data map[string]interface{}
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
-			log.Println("[ReadFile]: ", data)
-			fileName := data["fileName"].(string)
-			fileName = strings.Trim(fileName, " ")
-			folder := data["folder"].(string)
-
-			content := save.ReadFile(launcher.GetFilePath(folder, fileName))
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"filecontent": string(content),
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"filecontent": string(content),
+		})
 	})
-	return nil
 }
 
-func (launcher *Launcher) SaveFile(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/savefile",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (launcher *Launcher) SaveFile(e *echo.Echo) {
+	e.POST("/api/savefile", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data map[string]interface{}
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
+		fileName := data["fileName"].(string)
+		fileData := data["fileData"].(string)
+		folder := data["folder"].(string)
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		filepath := launcher.GetFilePath(folder, fileName)
 
-			var data map[string]interface{}
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
-			fileName := data["fileName"].(string)
-			fileData := data["fileData"].(string)
-			folder := data["folder"].(string)
+		// Save request_id.txt
+		save.WriteFile(filepath, []byte(fileData))
 
-			filepath := launcher.GetFilePath(folder, fileName)
-
-			// Save request_id.txt
-			save.WriteFile(filepath, []byte(fileData))
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"filepath": filepath,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"filepath": filepath,
+		})
 	})
-	return nil
 }

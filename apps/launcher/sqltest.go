@@ -1,16 +1,11 @@
 package launcher
 
 import (
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
 
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
-	"github.com/pocketbase/dbx"
+	"github.com/labstack/echo/v4"
 )
 
 type TEXTSQL struct {
@@ -21,50 +16,55 @@ type CountResult struct {
 	CountOfDistinctRows int `db:"CountOfDistinctRows" json:"CountOfDistinctRows"`
 }
 
-func (launcher *Launcher) TextSQL(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: "POST",
-		Path:   "/api/sqltest",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (launcher *Launcher) TextSQL(e *echo.Echo) {
+	e.POST("/api/sqltest", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		var data TEXTSQL
+		if err := c.Bind(&data); err != nil {
+			return err
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
+		log.Println("[TextSQL] ", data.SQL)
+
+		rows, err := launcher.DB.Query(data.SQL)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		defer rows.Close()
+
+		cols, err := rows.Columns()
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+
+		resultStr := ""
+		for rows.Next() {
+			// Scan into a generic slice
+			vals := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
 			}
-			var data TEXTSQL
-			if err := c.Bind(&data); err != nil {
-				return err
-			}
-
-			var results sql.Result
-
-			query := launcher.App.Dao().DB().NewQuery(data.SQL)
-			log.Println("[TextSQL] ", results)
-
-			rows, err := query.Rows()
-			if err != nil {
-				return apis.NewBadRequestError("Failed", err)
-			}
-
-			row := dbx.NullStringMap{}
-
-			resultStr := ""
-			for rows.Next() {
-				_ = rows.ScanMap(row)
-				// log.Println("Scanned SQL:, ", row)
-				jsonStr, _ := json.Marshal(row)
-				resultStr = resultStr + string(jsonStr) + "\n"
+			if err := rows.Scan(ptrs...); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 			}
 
-			return c.JSON(http.StatusOK, resultStr)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(launcher.App),
-		},
+			row := make(map[string]interface{}, len(cols))
+			for i, col := range cols {
+				v := vals[i]
+				if b, ok := v.([]byte); ok {
+					v = string(b)
+				}
+				row[col] = v
+			}
+
+			jsonStr, _ := json.Marshal(row)
+			resultStr = resultStr + string(jsonStr) + "\n"
+		}
+
+		return c.JSON(http.StatusOK, resultStr)
 	})
-
-	return nil
 }

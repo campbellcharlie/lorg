@@ -13,12 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/campbellcharlie/lorg/lrx/browser"
+	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/utils"
-	"github.com/glitchedgitz/pocketbase/apis"
-	"github.com/glitchedgitz/pocketbase/core"
-	"github.com/glitchedgitz/pocketbase/models"
-	"github.com/labstack/echo/v5"
+	"github.com/campbellcharlie/lorg/lrx/browser"
+	"github.com/labstack/echo/v4"
 )
 
 // ProxyInstance holds a proxy and its optional runtime attachments (browser, label, etc.)
@@ -71,23 +69,14 @@ func (pm *ProxyManager) GetNextProxyID() string {
 
 // initializeIndexFromDB queries the database to get the current max index
 func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
-	dao := backend.App.Dao()
-
-	// Query for the total number of rows in _data collection
-	var result struct {
-		TotalRows int `db:"total_rows" json:"total_rows"`
-	}
-
-	err := dao.DB().
-		NewQuery("SELECT COUNT(*) as total_rows FROM _data").
-		One(&result)
-
+	var count int
+	err := backend.DB.QueryRow("SELECT COUNT(*) FROM _data").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to query total rows: %w", err)
 	}
 
 	// Set the atomic counter to the total rows count
-	totalRows := uint64(result.TotalRows)
+	totalRows := uint64(count)
 	pm.index.Store(totalRows)
 
 	log.Printf("[ProxyManager] ========================================")
@@ -102,23 +91,14 @@ func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
 
 // initializeProxyIndexFromDB queries the database to get the current max proxy count
 func (pm *ProxyManager) initializeProxyIndexFromDB(backend *Backend) error {
-	dao := backend.App.Dao()
-
-	// Query for the total number of proxies in _proxies collection
-	var result struct {
-		TotalProxies int `db:"total_proxies" json:"total_proxies"`
-	}
-
-	err := dao.DB().
-		NewQuery("SELECT COUNT(*) as total_proxies FROM _proxies").
-		One(&result)
-
+	var count int
+	err := backend.DB.QueryRow("SELECT COUNT(*) FROM _proxies").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to query total proxies: %w", err)
 	}
 
 	// Set the proxy index counter
-	totalProxies := uint64(result.TotalProxies)
+	totalProxies := uint64(count)
 	pm.proxyIndex.Store(totalProxies)
 
 	log.Printf("[ProxyManager] Proxy Index Initialization:")
@@ -416,7 +396,7 @@ func updateProxyVar() {
 }
 
 // loadProxySettings loads intercept and filter settings for a proxy
-func (backend *Backend) loadProxySettings(proxy *RawProxyWrapper, proxyRecord *models.Record) error {
+func (backend *Backend) loadProxySettings(proxy *RawProxyWrapper, proxyRecord *lorgdb.Record) error {
 	log.Printf("[ProxySettings] Loading settings for proxy ID: %s", proxyRecord.Id)
 
 	// Load intercept setting from _proxies record
@@ -577,13 +557,7 @@ func (backend *Backend) startProxyLogic(body *ProxyBody) (map[string]any, error)
 	}
 
 	// Create proxy record in database
-	dao := backend.App.Dao()
-	proxiesCollection, err := dao.FindCollectionByNameOrId("_proxies")
-	if err != nil {
-		return nil, fmt.Errorf("failed to find _proxies collection: %v", err)
-	}
-
-	proxyRecord := models.NewRecord(proxiesCollection)
+	proxyRecord := lorgdb.NewRecord("_proxies")
 	proxyRecord.Set("id", proxyID)
 	proxyRecord.Set("project", body.Project)
 	proxyRecord.Set("label", label)
@@ -598,7 +572,7 @@ func (backend *Backend) startProxyLogic(body *ProxyBody) (map[string]any, error)
 	proxyData := map[string]interface{}{}
 	proxyRecord.Set("data", proxyData)
 
-	if err := dao.SaveRecord(proxyRecord); err != nil {
+	if err := backend.DB.SaveRecord(proxyRecord); err != nil {
 		return nil, fmt.Errorf("failed to save proxy record: %v", err)
 	}
 
@@ -612,817 +586,656 @@ func (backend *Backend) startProxyLogic(body *ProxyBody) (map[string]any, error)
 	}, nil
 }
 
-func (backend *Backend) StartProxy(e *core.ServeEvent) error {
+func (backend *Backend) StartProxy(e *echo.Echo) {
+	e.POST("/api/proxy/start", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/start",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+		var body ProxyBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			isGuest := admin == nil && recordd == nil
+		result, err := backend.startProxyLogic(&body)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			var body ProxyBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			result, err := backend.startProxyLogic(&body)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			return c.JSON(http.StatusOK, result)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, result)
 	})
-	return nil
 }
 
 // updateProxyState updates the state field of a proxy record
 func (backend *Backend) updateProxyState(proxyID string, state string) {
-	dao := backend.App.Dao()
-	proxyRecord, err := dao.FindRecordById("_proxies", proxyID)
+	proxyRecord, err := backend.DB.FindRecordById("_proxies", proxyID)
 	if err != nil {
 		log.Printf("[ProxyState][WARN] Failed to find proxy record %s: %v", proxyID, err)
 		return
 	}
 
 	proxyRecord.Set("state", state)
-	if err := dao.SaveRecord(proxyRecord); err != nil {
+	if err := backend.DB.SaveRecord(proxyRecord); err != nil {
 		log.Printf("[ProxyState][WARN] Failed to update proxy state for %s: %v", proxyID, err)
 	} else {
 		log.Printf("[ProxyState] Updated proxy %s state to: %s", proxyID, state)
 	}
 }
 
-func (backend *Backend) StopProxy(e *core.ServeEvent) error {
+func (backend *Backend) StopProxy(e *echo.Echo) {
+	e.POST("/api/proxy/stop", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/stop",
-		Handler: func(c echo.Context) error {
+		type StopProxyBody struct {
+			ID string `json:"id,omitempty"` // Formatted ID like "______________1"
+		}
 
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
-
-			isGuest := admin == nil && recordd == nil
-
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			type StopProxyBody struct {
-				ID string `json:"id,omitempty"` // Formatted ID like "______________1"
-			}
-
-			var body StopProxyBody
-			if err := c.Bind(&body); err != nil {
-				// If no body provided and field is optional, stop all proxies
-				log.Println("[StopProxy] No body or empty body provided, stopping all proxies")
-				proxyIDs := ProxyMgr.GetAllProxies()
-				for _, proxyID := range proxyIDs {
-					if err := ProxyMgr.StopProxy(proxyID); err != nil {
-						log.Printf("[WARN] Error stopping proxy %s: %v", proxyID, err)
-					}
-					backend.updateProxyState(proxyID, "")
-					ProxyMgr.RemoveProxy(proxyID)
-				}
-			} else if body.ID != "" {
-				// Stop specific proxy by ID
-				proxyID := body.ID
-				log.Printf("[StopProxy] Stopping specific proxy: %s", proxyID)
-
-				// Check if proxy exists
-				if proxy := ProxyMgr.GetProxy(proxyID); proxy == nil {
-					log.Printf("[StopProxy][WARN] Proxy %s not found in manager", proxyID)
-					return c.JSON(http.StatusNotFound, map[string]interface{}{"error": fmt.Sprintf("Proxy %s not found", proxyID)})
-				}
-
+		var body StopProxyBody
+		if err := c.Bind(&body); err != nil {
+			// If no body provided and field is optional, stop all proxies
+			log.Println("[StopProxy] No body or empty body provided, stopping all proxies")
+			proxyIDs := ProxyMgr.GetAllProxies()
+			for _, proxyID := range proxyIDs {
 				if err := ProxyMgr.StopProxy(proxyID); err != nil {
-					log.Printf("[StopProxy][ERROR] Failed to stop proxy %s: %v", proxyID, err)
-					return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+					log.Printf("[WARN] Error stopping proxy %s: %v", proxyID, err)
 				}
-
 				backend.updateProxyState(proxyID, "")
-				log.Printf("[StopProxy] Removing proxy %s from manager", proxyID)
 				ProxyMgr.RemoveProxy(proxyID)
-			} else {
-				// No ID field, stop all proxies
-				log.Println("[StopProxy] ID field not specified, stopping all proxies")
-				proxyIDs := ProxyMgr.GetAllProxies()
-				for _, proxyID := range proxyIDs {
-					if err := ProxyMgr.StopProxy(proxyID); err != nil {
-						log.Printf("[WARN] Error stopping proxy %s: %v", proxyID, err)
-					}
-					backend.updateProxyState(proxyID, "")
-					ProxyMgr.RemoveProxy(proxyID)
-				}
 			}
-
-			// Update PROXY for backward compatibility
-			updateProxyVar()
-
-			return c.JSON(http.StatusOK, map[string]any{"message": "Proxy stopped"})
-		},
-	})
-	return nil
-}
-
-func (backend *Backend) RestartProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/restart",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
-
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			type RestartProxyBody struct {
-				ID string `json:"id"` // Formatted ID like "______________1"
-			}
-
-			var body RestartProxyBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
-
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
-
+		} else if body.ID != "" {
+			// Stop specific proxy by ID
 			proxyID := body.ID
-			log.Printf("[RestartProxy] Restarting proxy: %s", proxyID)
+			log.Printf("[StopProxy] Stopping specific proxy: %s", proxyID)
 
-			// Check if proxy is already running
-			if ProxyMgr.GetProxy(proxyID) != nil {
-				return c.JSON(http.StatusConflict, map[string]interface{}{"error": "Proxy is already running"})
+			// Check if proxy exists
+			if proxy := ProxyMgr.GetProxy(proxyID); proxy == nil {
+				log.Printf("[StopProxy][WARN] Proxy %s not found in manager", proxyID)
+				return c.JSON(http.StatusNotFound, map[string]interface{}{"error": fmt.Sprintf("Proxy %s not found", proxyID)})
 			}
 
-			// Get the proxy record from database
-			dao := backend.App.Dao()
-			proxyRecord, err := dao.FindRecordById("_proxies", proxyID)
-			if err != nil {
-				log.Printf("[RestartProxy] Proxy record not found: %s", proxyID)
-				return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "Proxy record not found"})
-			}
-
-			// Read proxy configuration from record
-			listenAddr := proxyRecord.GetString("addr")
-			browserType := proxyRecord.GetString("browser")
-			label := proxyRecord.GetString("label")
-
-			log.Printf("[RestartProxy] Found proxy config - addr: %s, browser: %s, label: %s", listenAddr, browserType, label)
-
-			// Check if port is available
-			availableHost, err := utils.CheckAndFindAvailablePort(listenAddr)
-			if err != nil {
+			if err := ProxyMgr.StopProxy(proxyID); err != nil {
+				log.Printf("[StopProxy][ERROR] Failed to stop proxy %s: %v", proxyID, err)
 				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
 			}
 
-			if availableHost != listenAddr {
-				if browserType == "" {
-					return c.JSON(http.StatusConflict, map[string]interface{}{
-						"error":         "port not available",
-						"availableHost": availableHost,
-					})
+			backend.updateProxyState(proxyID, "")
+			log.Printf("[StopProxy] Removing proxy %s from manager", proxyID)
+			ProxyMgr.RemoveProxy(proxyID)
+		} else {
+			// No ID field, stop all proxies
+			log.Println("[StopProxy] ID field not specified, stopping all proxies")
+			proxyIDs := ProxyMgr.GetAllProxies()
+			for _, proxyID := range proxyIDs {
+				if err := ProxyMgr.StopProxy(proxyID); err != nil {
+					log.Printf("[WARN] Error stopping proxy %s: %v", proxyID, err)
 				}
+				backend.updateProxyState(proxyID, "")
+				ProxyMgr.RemoveProxy(proxyID)
 			}
+		}
 
-			// Initialize global index from database if not already initialized
-			if ProxyMgr.index.Load() == 0 {
-				if err := ProxyMgr.initializeIndexFromDB(backend); err != nil {
-					log.Printf("[RestartProxy] Warning: Failed to initialize global index from database: %v", err)
+		// Update PROXY for backward compatibility
+		updateProxyVar()
+
+		return c.JSON(http.StatusOK, map[string]any{"message": "Proxy stopped"})
+	})
+}
+
+func (backend *Backend) RestartProxy(e *echo.Echo) {
+	e.POST("/api/proxy/restart", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
+
+		type RestartProxyBody struct {
+			ID string `json:"id"` // Formatted ID like "______________1"
+		}
+
+		var body RestartProxyBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
+
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
+
+		proxyID := body.ID
+		log.Printf("[RestartProxy] Restarting proxy: %s", proxyID)
+
+		// Check if proxy is already running
+		if ProxyMgr.GetProxy(proxyID) != nil {
+			return c.JSON(http.StatusConflict, map[string]interface{}{"error": "Proxy is already running"})
+		}
+
+		// Get the proxy record from database
+		proxyRecord, err := backend.DB.FindRecordById("_proxies", proxyID)
+		if err != nil {
+			log.Printf("[RestartProxy] Proxy record not found: %s", proxyID)
+			return c.JSON(http.StatusNotFound, map[string]interface{}{"error": "Proxy record not found"})
+		}
+
+		// Read proxy configuration from record
+		listenAddr := proxyRecord.GetString("addr")
+		browserType := proxyRecord.GetString("browser")
+		label := proxyRecord.GetString("label")
+
+		log.Printf("[RestartProxy] Found proxy config - addr: %s, browser: %s, label: %s", listenAddr, browserType, label)
+
+		// Check if port is available
+		availableHost, err := utils.CheckAndFindAvailablePort(listenAddr)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
+
+		if availableHost != listenAddr {
+			if browserType == "" {
+				return c.JSON(http.StatusConflict, map[string]interface{}{
+					"error":         "port not available",
+					"availableHost": availableHost,
+				})
+			}
+		}
+
+		// Initialize global index from database if not already initialized
+		if ProxyMgr.index.Load() == 0 {
+			if err := ProxyMgr.initializeIndexFromDB(backend); err != nil {
+				log.Printf("[RestartProxy] Warning: Failed to initialize global index from database: %v", err)
+			}
+		}
+
+		// Create new rawproxy wrapper with existing ID
+		configDir := path.Join(backend.Config.ConfigDirectory)
+		outputDir := "" // Disabled
+
+		listenAddr = availableHost
+
+		existingProject := proxyRecord.GetString("project")
+		newProxy, err := NewRawProxyWrapper(listenAddr, configDir, outputDir, backend, proxyID, existingProject)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
+
+		// Update proxy record state to running
+		proxyRecord.Set("state", "running")
+		proxyRecord.Set("addr", listenAddr)
+		if err := backend.DB.SaveRecord(proxyRecord); err != nil {
+			log.Printf("[RestartProxy][WARN] Failed to update proxy state: %v", err)
+		}
+
+		// Create proxy instance
+		proxyInstance := &ProxyInstance{
+			Proxy:      newProxy,
+			Browser:    browserType,
+			BrowserCmd: nil,
+			Label:      label,
+		}
+
+		// Add to manager with the same ID
+		ProxyMgr.AddProxyInstance(proxyID, proxyInstance)
+
+		// Update PROXY for backward compatibility
+		updateProxyVar()
+
+		// Load intercept and filter settings from proxy record
+		if err := backend.loadProxySettings(newProxy, proxyRecord); err != nil {
+			log.Printf("[RestartProxy] Warning: Failed to load proxy settings: %v", err)
+		}
+
+		// Start the proxy
+		if err := newProxy.RunProxy(); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
+
+		// Launch browser if configured
+		if browserType != "" {
+			certPath := newProxy.GetCertPath()
+
+			// Generate browser profile directory: [projectid]+[proxyid]
+			profileID := backend.Config.ProjectID + proxyID
+			profileDir := path.Join(backend.Config.ConfigDirectory, "profiles", profileID)
+			log.Printf("[RestartProxy] Browser profile directory: %s", profileDir)
+
+			startURL := backend.Config.InterceptedPagePath()
+			go func(proxyID, browserType, listenAddr, cert, profDir, startURL string) {
+				cmd, err := browser.LaunchBrowser(browserType, listenAddr, cert, profDir, startURL)
+				if err != nil {
+					log.Println("Error launching browser:", err)
+					return
 				}
-			}
-
-			// Create new rawproxy wrapper with existing ID
-			configDir := path.Join(backend.Config.ConfigDirectory)
-			outputDir := "" // Disabled
-
-			listenAddr = availableHost
-
-			existingProject := proxyRecord.GetString("project")
-			newProxy, err := NewRawProxyWrapper(listenAddr, configDir, outputDir, backend, proxyID, existingProject)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			// Update proxy record state to running
-			proxyRecord.Set("state", "running")
-			proxyRecord.Set("addr", listenAddr)
-			if err := dao.SaveRecord(proxyRecord); err != nil {
-				log.Printf("[RestartProxy][WARN] Failed to update proxy state: %v", err)
-			}
-
-			// Create proxy instance
-			proxyInstance := &ProxyInstance{
-				Proxy:      newProxy,
-				Browser:    browserType,
-				BrowserCmd: nil,
-				Label:      label,
-			}
-
-			// Add to manager with the same ID
-			ProxyMgr.AddProxyInstance(proxyID, proxyInstance)
-
-			// Update PROXY for backward compatibility
-			updateProxyVar()
-
-			// Load intercept and filter settings from proxy record
-			if err := backend.loadProxySettings(newProxy, proxyRecord); err != nil {
-				log.Printf("[RestartProxy] Warning: Failed to load proxy settings: %v", err)
-			}
-
-			// Start the proxy
-			if err := newProxy.RunProxy(); err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			// Launch browser if configured
-			if browserType != "" {
-				certPath := newProxy.GetCertPath()
-
-				// Generate browser profile directory: [projectid]+[proxyid]
-				profileID := backend.Config.ProjectID + proxyID
-				profileDir := path.Join(backend.Config.ConfigDirectory, "profiles", profileID)
-				log.Printf("[RestartProxy] Browser profile directory: %s", profileDir)
-
-				startURL := backend.Config.InterceptedPagePath()
-				go func(proxyID, browserType, listenAddr, cert, profDir, startURL string) {
-					cmd, err := browser.LaunchBrowser(browserType, listenAddr, cert, profDir, startURL)
-					if err != nil {
-						log.Println("Error launching browser:", err)
-						return
-					}
-					ProxyMgr.mu.Lock()
-					if inst := ProxyMgr.instances[proxyID]; inst != nil {
-						inst.Browser = browserType
-						inst.BrowserCmd = cmd
-					}
-					ProxyMgr.mu.Unlock()
-				}(proxyID, browserType, listenAddr, certPath, profileDir, startURL)
-			}
-
-			log.Printf("[RestartProxy] Successfully restarted proxy %s", proxyID)
-
-			return c.JSON(http.StatusOK, map[string]any{
-				"id":         proxyID,
-				"listenAddr": listenAddr,
-				"label":      label,
-				"browser":    browserType,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
-	})
-	return nil
-}
-
-func (backend *Backend) ListProxies(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodGet,
-		Path:   "/api/proxy/list",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
-
-			isGuest := admin == nil && recordd == nil
-
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
-
-			ProxyMgr.mu.RLock()
-			instances := make([]map[string]interface{}, 0, len(ProxyMgr.instances))
-			for id, inst := range ProxyMgr.instances {
-				if inst != nil && inst.Proxy != nil {
-					var browserPid int
-					if inst.BrowserCmd != nil && inst.BrowserCmd.Process != nil {
-						browserPid = inst.BrowserCmd.Process.Pid
-					}
-					instances = append(instances, map[string]interface{}{
-						"id":         id,                    // Formatted ID like "______________1"
-						"listenAddr": inst.Proxy.listenAddr, // Listen address like "127.0.0.1:8080"
-						"label":      inst.Label,
-						"browser":    inst.Browser,
-						"browserPid": browserPid,
-						"project":    inst.Project,
-					})
+				ProxyMgr.mu.Lock()
+				if inst := ProxyMgr.instances[proxyID]; inst != nil {
+					inst.Browser = browserType
+					inst.BrowserCmd = cmd
 				}
-			}
-			ProxyMgr.mu.RUnlock()
+				ProxyMgr.mu.Unlock()
+			}(proxyID, browserType, listenAddr, certPath, profileDir, startURL)
+		}
 
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"proxies": instances,
-				"count":   len(instances),
-			})
-		},
+		log.Printf("[RestartProxy] Successfully restarted proxy %s", proxyID)
+
+		return c.JSON(http.StatusOK, map[string]any{
+			"id":         proxyID,
+			"listenAddr": listenAddr,
+			"label":      label,
+			"browser":    browserType,
+		})
 	})
-	return nil
 }
 
-func (backend *Backend) ScreenshotProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/screenshot",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) ListProxies(e *echo.Echo) {
+	e.GET("/api/proxy/list", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
+		ProxyMgr.mu.RLock()
+		instances := make([]map[string]interface{}, 0, len(ProxyMgr.instances))
+		for id, inst := range ProxyMgr.instances {
+			if inst != nil && inst.Proxy != nil {
+				var browserPid int
+				if inst.BrowserCmd != nil && inst.BrowserCmd.Process != nil {
+					browserPid = inst.BrowserCmd.Process.Pid
+				}
+				instances = append(instances, map[string]interface{}{
+					"id":         id,                    // Formatted ID like "______________1"
+					"listenAddr": inst.Proxy.listenAddr, // Listen address like "127.0.0.1:8080"
+					"label":      inst.Label,
+					"browser":    inst.Browser,
+					"browserPid": browserPid,
+					"project":    inst.Project,
+				})
 			}
+		}
+		ProxyMgr.mu.RUnlock()
 
-			type ScreenshotBody struct {
-				ID       string `json:"id"`                 // Proxy ID (required)
-				URL      string `json:"url,omitempty"`      // URL to navigate to (optional, empty = current tab)
-				FullPage bool   `json:"fullPage,omitempty"` // Capture full page or viewport (default: false)
-				SaveFile bool   `json:"saveFile,omitempty"` // Save to disk in cache directory (default: false)
-			}
-
-			var body ScreenshotBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
-
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
-
-			log.Printf("[ScreenshotProxy] Taking screenshot for proxy %s (url=%s, fullPage=%v, saveFile=%v)",
-				body.ID, body.URL, body.FullPage, body.SaveFile)
-
-			// Generate file path if saveFile is requested
-			var savePath string
-			if body.SaveFile {
-				timestamp := time.Now().Format("20060102-150405")
-				filename := fmt.Sprintf("screenshot-%s.png", timestamp)
-				savePath = path.Join(backend.Config.CacheDirectory, filename)
-				log.Printf("[ScreenshotProxy] Will save screenshot to: %s", savePath)
-			}
-
-			// Capture the screenshot using ProxyManager
-			screenshotBytes, filePath, err := ProxyMgr.TakeScreenshot(body.ID, body.FullPage, savePath)
-			if err != nil {
-				log.Printf("[ScreenshotProxy] Error taking screenshot: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			// Encode screenshot as base64 for JSON response
-			screenshotBase64 := base64.StdEncoding.EncodeToString(screenshotBytes)
-
-			response := map[string]interface{}{
-				"screenshot": screenshotBase64,
-				"size":       len(screenshotBytes),
-				"timestamp":  time.Now().Format(time.RFC3339),
-			}
-
-			if filePath != "" {
-				response["filePath"] = filePath
-			}
-
-			log.Printf("[ScreenshotProxy] Screenshot captured successfully (%d bytes)", len(screenshotBytes))
-			return c.JSON(http.StatusOK, response)
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"proxies": instances,
+			"count":   len(instances),
+		})
 	})
-	return nil
 }
 
-func (backend *Backend) ClickProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/click",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) ScreenshotProxy(e *echo.Echo) {
+	e.POST("/api/proxy/screenshot", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		type ScreenshotBody struct {
+			ID       string `json:"id"`                 // Proxy ID (required)
+			URL      string `json:"url,omitempty"`      // URL to navigate to (optional, empty = current tab)
+			FullPage bool   `json:"fullPage,omitempty"` // Capture full page or viewport (default: false)
+			SaveFile bool   `json:"saveFile,omitempty"` // Save to disk in cache directory (default: false)
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		var body ScreenshotBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			type ClickBody struct {
-				ID                string `json:"id"`                          // Proxy ID (required)
-				URL               string `json:"url,omitempty"`               // URL to navigate to (optional, empty = current page)
-				Selector          string `json:"selector"`                    // CSS selector for element to click (required)
-				WaitForNavigation bool   `json:"waitForNavigation,omitempty"` // Wait for navigation after click (default: false)
-			}
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
 
-			var body ClickBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		log.Printf("[ScreenshotProxy] Taking screenshot for proxy %s (url=%s, fullPage=%v, saveFile=%v)",
+			body.ID, body.URL, body.FullPage, body.SaveFile)
 
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
+		// Generate file path if saveFile is requested
+		var savePath string
+		if body.SaveFile {
+			timestamp := time.Now().Format("20060102-150405")
+			filename := fmt.Sprintf("screenshot-%s.png", timestamp)
+			savePath = path.Join(backend.Config.CacheDirectory, filename)
+			log.Printf("[ScreenshotProxy] Will save screenshot to: %s", savePath)
+		}
 
-			if body.Selector == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Selector is required"})
-			}
+		// Capture the screenshot using ProxyManager
+		screenshotBytes, filePath, err := ProxyMgr.TakeScreenshot(body.ID, body.FullPage, savePath)
+		if err != nil {
+			log.Printf("[ScreenshotProxy] Error taking screenshot: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			log.Printf("[ClickProxy] Clicking element for proxy %s (url=%s, selector=%s, waitNav=%v)",
-				body.ID, body.URL, body.Selector, body.WaitForNavigation)
+		// Encode screenshot as base64 for JSON response
+		screenshotBase64 := base64.StdEncoding.EncodeToString(screenshotBytes)
 
-			// Click the element using ProxyManager
-			err := ProxyMgr.ClickElement(body.ID, body.URL, body.Selector, body.WaitForNavigation)
-			if err != nil {
-				log.Printf("[ClickProxy] Error clicking element: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
+		response := map[string]interface{}{
+			"screenshot": screenshotBase64,
+			"size":       len(screenshotBytes),
+			"timestamp":  time.Now().Format(time.RFC3339),
+		}
 
-			log.Printf("[ClickProxy] Element clicked successfully")
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success":   true,
-				"message":   "Element clicked successfully",
-				"selector":  body.Selector,
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		if filePath != "" {
+			response["filePath"] = filePath
+		}
+
+		log.Printf("[ScreenshotProxy] Screenshot captured successfully (%d bytes)", len(screenshotBytes))
+		return c.JSON(http.StatusOK, response)
 	})
-	return nil
 }
 
-func (backend *Backend) GetElementsProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/elements",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) ClickProxy(e *echo.Echo) {
+	e.POST("/api/proxy/click", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
+		type ClickBody struct {
+			ID                string `json:"id"`                          // Proxy ID (required)
+			URL               string `json:"url,omitempty"`               // URL to navigate to (optional, empty = current page)
+			Selector          string `json:"selector"`                    // CSS selector for element to click (required)
+			WaitForNavigation bool   `json:"waitForNavigation,omitempty"` // Wait for navigation after click (default: false)
+		}
 
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		var body ClickBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			type ElementsBody struct {
-				ID  string `json:"id"`            // Proxy ID (required)
-				URL string `json:"url,omitempty"` // URL to navigate to (optional, empty = current page)
-			}
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
 
-			var body ElementsBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.Selector == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Selector is required"})
+		}
 
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
+		log.Printf("[ClickProxy] Clicking element for proxy %s (url=%s, selector=%s, waitNav=%v)",
+			body.ID, body.URL, body.Selector, body.WaitForNavigation)
 
-			log.Printf("[GetElementsProxy] Getting elements for proxy %s (url=%s)", body.ID, body.URL)
+		// Click the element using ProxyManager
+		err := ProxyMgr.ClickElement(body.ID, body.URL, body.Selector, body.WaitForNavigation)
+		if err != nil {
+			log.Printf("[ClickProxy] Error clicking element: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			// Get elements using ProxyManager
-			elements, err := ProxyMgr.GetElements(body.ID, body.URL)
-			if err != nil {
-				log.Printf("[GetElementsProxy] Error getting elements: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			log.Printf("[GetElementsProxy] Found %d clickable elements", len(elements))
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"elements":  elements,
-				"count":     len(elements),
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		log.Printf("[ClickProxy] Element clicked successfully")
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":   true,
+			"message":   "Element clicked successfully",
+			"selector":  body.Selector,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
 	})
-	return nil
+}
+
+func (backend *Backend) GetElementsProxy(e *echo.Echo) {
+	e.POST("/api/proxy/elements", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
+
+		type ElementsBody struct {
+			ID  string `json:"id"`            // Proxy ID (required)
+			URL string `json:"url,omitempty"` // URL to navigate to (optional, empty = current page)
+		}
+
+		var body ElementsBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
+
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
+
+		log.Printf("[GetElementsProxy] Getting elements for proxy %s (url=%s)", body.ID, body.URL)
+
+		// Get elements using ProxyManager
+		elements, err := ProxyMgr.GetElements(body.ID, body.URL)
+		if err != nil {
+			log.Printf("[GetElementsProxy] Error getting elements: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
+
+		log.Printf("[GetElementsProxy] Found %d clickable elements", len(elements))
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"elements":  elements,
+			"count":     len(elements),
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	})
 }
 
 // ListChromeTabs endpoint - lists all open tabs in Chrome
-func (backend *Backend) ListChromeTabs(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/chrome/tabs",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) ListChromeTabs(e *echo.Echo) {
+	e.POST("/api/proxy/chrome/tabs", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		type ListTabsBody struct {
+			ProxyID string `json:"proxyId"`
+		}
 
-			type ListTabsBody struct {
-				ProxyID string `json:"proxyId"`
-			}
+		var body ListTabsBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			var body ListTabsBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.ProxyID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "proxyId is required"})
+		}
 
-			if body.ProxyID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "proxyId is required"})
-			}
+		// Get Chrome remote
+		chrome, err := ProxyMgr.GetChromeRemote(body.ProxyID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			// Get Chrome remote
-			chrome, err := ProxyMgr.GetChromeRemote(body.ProxyID)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
+		// List tabs
+		tabs, err := chrome.ListTabs()
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("Failed to list tabs: %v", err)})
+		}
 
-			// List tabs
-			tabs, err := chrome.ListTabs()
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("Failed to list tabs: %v", err)})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"tabs":      tabs,
-				"count":     len(tabs),
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"tabs":      tabs,
+			"count":     len(tabs),
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
 	})
-	return nil
 }
 
 // OpenChromeTab endpoint - opens a new tab in Chrome
-func (backend *Backend) OpenChromeTab(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/chrome/tab/open",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) OpenChromeTab(e *echo.Echo) {
+	e.POST("/api/proxy/chrome/tab/open", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		type OpenTabBody struct {
+			ProxyID string `json:"proxyId"`
+			URL     string `json:"url"` // Optional, defaults to about:blank
+		}
 
-			type OpenTabBody struct {
-				ProxyID string `json:"proxyId"`
-				URL     string `json:"url"` // Optional, defaults to about:blank
-			}
+		var body OpenTabBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			var body OpenTabBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.ProxyID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "proxyId is required"})
+		}
 
-			if body.ProxyID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "proxyId is required"})
-			}
+		// Get Chrome remote
+		chrome, err := ProxyMgr.GetChromeRemote(body.ProxyID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			// Get Chrome remote
-			chrome, err := ProxyMgr.GetChromeRemote(body.ProxyID)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
+		// Open new tab
+		targetID, err := chrome.OpenTab(body.URL)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("Failed to open tab: %v", err)})
+		}
 
-			// Open new tab
-			targetID, err := chrome.OpenTab(body.URL)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("Failed to open tab: %v", err)})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"targetId":  targetID,
-				"url":       body.URL,
-				"timestamp": time.Now().Format(time.RFC3339),
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"targetId":  targetID,
+			"url":       body.URL,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
 	})
-	return nil
 }
 
 // NavigateChromeTab endpoint - navigates a tab to a URL
-func (backend *Backend) NavigateChromeTab(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/chrome/tab/navigate",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) NavigateChromeTab(e *echo.Echo) {
+	e.POST("/api/proxy/chrome/tab/navigate", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		type NavigateTabBody struct {
+			ProxyID   string `json:"proxyId"`
+			TargetID  string `json:"targetId"` // Optional, empty = active tab
+			URL       string `json:"url"`
+			WaitUntil string `json:"waitUntil"` // Optional: domcontentloaded, load, networkidle
+			TimeoutMs int    `json:"timeoutMs"` // Optional: timeout in milliseconds
+		}
 
-			type NavigateTabBody struct {
-				ProxyID   string `json:"proxyId"`
-				TargetID  string `json:"targetId"` // Optional, empty = active tab
-				URL       string `json:"url"`
-				WaitUntil string `json:"waitUntil"` // Optional: domcontentloaded, load, networkidle
-				TimeoutMs int    `json:"timeoutMs"` // Optional: timeout in milliseconds
-			}
+		var body NavigateTabBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			var body NavigateTabBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.ProxyID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "proxyId is required"})
+		}
 
-			if body.ProxyID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "proxyId is required"})
-			}
+		if body.URL == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "url is required"})
+		}
 
-			if body.URL == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "url is required"})
-			}
+		// Get Chrome remote
+		chrome, err := ProxyMgr.GetChromeRemote(body.ProxyID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			// Get Chrome remote
-			chrome, err := ProxyMgr.GetChromeRemote(body.ProxyID)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
+		// Navigate tab
+		result, err := chrome.Navigate(body.TargetID, body.URL, body.WaitUntil, body.TimeoutMs)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("Failed to navigate tab: %v", err)})
+		}
 
-			// Navigate tab
-			result, err := chrome.Navigate(body.TargetID, body.URL, body.WaitUntil, body.TimeoutMs)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("Failed to navigate tab: %v", err)})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"targetId":     body.TargetID,
-				"url":          result.FinalURL,
-				"status":       result.Status,
-				"navigationId": result.NavigationID,
-				"timestamp":    time.Now().Format(time.RFC3339),
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"targetId":     body.TargetID,
+			"url":          result.FinalURL,
+			"status":       result.Status,
+			"navigationId": result.NavigationID,
+			"timestamp":    time.Now().Format(time.RFC3339),
+		})
 	})
-	return nil
 }
 
-func (backend *Backend) TypeTextProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/typetext",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) TypeTextProxy(e *echo.Echo) {
+	e.POST("/api/proxy/typetext", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		type TypeTextBody struct {
+			ID         string `json:"id"`
+			Selector   string `json:"selector"`
+			Text       string `json:"text"`
+			ClearFirst bool   `json:"clearFirst,omitempty"`
+			TimeoutMs  int    `json:"timeoutMs,omitempty"`
+		}
 
-			type TypeTextBody struct {
-				ID         string `json:"id"`
-				Selector   string `json:"selector"`
-				Text       string `json:"text"`
-				ClearFirst bool   `json:"clearFirst,omitempty"`
-				TimeoutMs  int    `json:"timeoutMs,omitempty"`
-			}
+		var body TypeTextBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			var body TypeTextBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
+		if body.Selector == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Selector is required"})
+		}
 
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
-			if body.Selector == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Selector is required"})
-			}
+		if err := ProxyMgr.TypeText(body.ID, body.Selector, body.Text, body.ClearFirst, body.TimeoutMs); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			if err := ProxyMgr.TypeText(body.ID, body.Selector, body.Text, body.ClearFirst, body.TimeoutMs); err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success":  true,
-				"selector": body.Selector,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":  true,
+			"selector": body.Selector,
+		})
 	})
-	return nil
 }
 
-func (backend *Backend) WaitForSelectorProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/waitforselector",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) WaitForSelectorProxy(e *echo.Echo) {
+	e.POST("/api/proxy/waitforselector", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		type WaitForSelectorBody struct {
+			ID        string `json:"id"`
+			Selector  string `json:"selector"`
+			TimeoutMs int    `json:"timeoutMs,omitempty"`
+		}
 
-			type WaitForSelectorBody struct {
-				ID        string `json:"id"`
-				Selector  string `json:"selector"`
-				TimeoutMs int    `json:"timeoutMs,omitempty"`
-			}
+		var body WaitForSelectorBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			var body WaitForSelectorBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
+		if body.Selector == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Selector is required"})
+		}
 
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
-			if body.Selector == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Selector is required"})
-			}
+		if err := ProxyMgr.WaitForSelector(body.ID, body.Selector, body.TimeoutMs); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			if err := ProxyMgr.WaitForSelector(body.ID, body.Selector, body.TimeoutMs); err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success":  true,
-				"selector": body.Selector,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":  true,
+			"selector": body.Selector,
+		})
 	})
-	return nil
 }
 
-func (backend *Backend) EvaluateProxy(e *core.ServeEvent) error {
-	e.Router.AddRoute(echo.Route{
-		Method: http.MethodPost,
-		Path:   "/api/proxy/evaluate",
-		Handler: func(c echo.Context) error {
-			admin, _ := c.Get(apis.ContextAdminKey).(*models.Admin)
-			recordd, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (backend *Backend) EvaluateProxy(e *echo.Echo) {
+	e.POST("/api/proxy/evaluate", func(c echo.Context) error {
+		if err := requireAuth(c); err != nil {
+			return err
+		}
 
-			isGuest := admin == nil && recordd == nil
-			if isGuest {
-				return c.String(http.StatusForbidden, "")
-			}
+		type EvaluateBody struct {
+			ID        string `json:"id"`
+			JS        string `json:"js"`
+			TimeoutMs int    `json:"timeoutMs,omitempty"`
+		}
 
-			type EvaluateBody struct {
-				ID        string `json:"id"`
-				JS        string `json:"js"`
-				TimeoutMs int    `json:"timeoutMs,omitempty"`
-			}
+		var body EvaluateBody
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
+		}
 
-			var body EvaluateBody
-			if err := c.Bind(&body); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Invalid request body"})
-			}
+		if body.ID == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
+		}
+		if body.JS == "" {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "JS expression is required"})
+		}
 
-			if body.ID == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "Proxy ID is required"})
-			}
-			if body.JS == "" {
-				return c.JSON(http.StatusBadRequest, map[string]interface{}{"error": "JS expression is required"})
-			}
+		result, err := ProxyMgr.Evaluate(body.ID, body.JS, body.TimeoutMs)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		}
 
-			result, err := ProxyMgr.Evaluate(body.ID, body.JS, body.TimeoutMs)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success": true,
-				"result":  result,
-			})
-		},
-		Middlewares: []echo.MiddlewareFunc{
-			apis.ActivityLogger(backend.App),
-		},
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": true,
+			"result":  result,
+		})
 	})
-	return nil
 }
