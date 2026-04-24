@@ -811,12 +811,23 @@
       output += '\n<span class="hl-truncated">... response truncated (' + formatBytes(MAX_HIGHLIGHT_BYTES) + ' shown of ' + formatBytes(bodyLen) + '). Switch to "Raw" for full content.</span>';
     }
 
-    // Skip line numbers for very long output (DOM performance)
+    // Skip line numbers for very long output (DOM performance), but
+    // still wrap each logical line in an .rh-line div so the per-line
+    // hanging-indent CSS keeps wrap-continuations aligned. Without this,
+    // long responses wrapped to weird positions because the wrap rule
+    // only matched .rh-line.
     var lineCount = output.split('\n').length;
     if (lineCount > MAX_HIGHLIGHT_LINES) {
-      return output;
+      return wrapLinesNoNumbers(output);
     }
     return addLineNumbers(output);
+  }
+
+  function wrapLinesNoNumbers(html) {
+    var lines = html.split('\n');
+    return lines.map(function(line) {
+      return '<div class="rh-line">' + line + '</div>';
+    }).join('');
   }
 
   // Pretty-print JSON body if detected. Returns the raw (unescaped) body string.
@@ -1066,12 +1077,38 @@
       loadScopeRules();
     });
 
-    $('#scope-reset-btn').addEventListener('click', async function() {
-      if (confirm('Reset all scope rules?')) {
+    // Two-click confirm pattern. The previous version used native
+    // confirm() which is unreliable across contexts: some browsers
+    // suppress dialogs on un-interacted pages, headless automation
+    // returns false by default, and a quick mis-click could either
+    // wipe everything or do nothing. The two-click approach is
+    // explicit, works everywhere, and self-resets after 3s.
+    (function() {
+      var armed = false;
+      var armedTimer = null;
+      var origText = null;
+      var btn = $('#scope-reset-btn');
+      btn.addEventListener('click', async function() {
+        if (origText === null) origText = btn.textContent;
+        if (!armed) {
+          armed = true;
+          btn.textContent = 'Click again to confirm';
+          btn.classList.add('confirm-pending');
+          armedTimer = setTimeout(function() {
+            armed = false;
+            btn.textContent = origText;
+            btn.classList.remove('confirm-pending');
+          }, 3000);
+          return;
+        }
+        clearTimeout(armedTimer);
+        armed = false;
+        btn.textContent = origText;
+        btn.classList.remove('confirm-pending');
         await api('/api/scope/reset', { method: 'POST', body: JSON.stringify({}) });
         loadScopeRules();
-      }
-    });
+      });
+    })();
 
     $('#scope-refresh-btn').addEventListener('click', loadScopeRules);
     loadScopeRules();

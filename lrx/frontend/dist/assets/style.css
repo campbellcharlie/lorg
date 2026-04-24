@@ -1074,11 +1074,25 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
 
 /* One block per logical source line. The hanging indent puts wrapped
    content under the content column rather than under the gutter, so a
-   long wrapped line no longer slides back beneath the line-number area. */
-.raw-http .rh-line {
+   long wrapped line no longer slides back beneath the line-number area.
+   The :has() selector limits the indent to lines that actually have a
+   line-number gutter — large responses skip line numbers (DOM perf cap)
+   but still get rh-line divs, and we don't want to indent those since
+   there's no gutter for the indent to align under. */
+.raw-http .rh-line:has(.line-num) {
   padding-left: 4.5ch;
   text-indent: -4.5ch;
+}
+.raw-http .rh-line {
   white-space: inherit;
+}
+
+/* Two-click confirm state for destructive buttons (e.g. Reset Scope).
+   Visually distinct so the user knows the next click commits. */
+button.confirm-pending {
+  background: var(--red, #ef4444) !important;
+  color: var(--bg, #1a1a1a) !important;
+  border-color: var(--red, #ef4444) !important;
 }
 
 /* ============================================================

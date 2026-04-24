@@ -91,6 +91,19 @@ var Migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version:     5,
+		Description: "seed UIPREFS row so frontend GET no longer 404s on existing DBs",
+		Up: func(db *sql.DB) error {
+			_, err := db.Exec(
+				`INSERT OR IGNORE INTO _settings (id, created, updated, option, value)
+				 VALUES (?, ?, ?, ?, ?)`,
+				"UIPREFS________", "2025-01-01 00:00:00.000Z", "2025-01-01 00:00:00.000Z",
+				"UI Preferences", "",
+			)
+			return err
+		},
+	},
 }
 
 // RunMigrations applies any unapplied migrations in order.
@@ -553,32 +566,27 @@ var allTableSQL = []string{
 }
 
 // SeedDefaults inserts default settings, labels, and their label_* collections
-// for a fresh database. Safe to call on an existing DB — skips if data exists.
+// for a fresh database. Safe to call on an existing DB — uses INSERT OR
+// IGNORE so each row is independently idempotent. Skips full re-seeding
+// when ALL the well-known setting IDs already exist (so the labels block
+// doesn't run on every boot).
 func (d *LorgDB) SeedDefaults() error {
-	// Check if default settings already exist.
-	var count int
-	if err := d.db.QueryRow("SELECT count(*) FROM _settings").Scan(&count); err == nil && count > 0 {
-		return nil // already seeded
+	// Skip the heavier label-seeding work if the canonical settings AND
+	// labels both already exist. Use a label count check (more expensive
+	// to recompute than settings) as the gate.
+	var labelCount int
+	_ = d.db.QueryRow("SELECT count(*) FROM _labels").Scan(&labelCount)
+	if labelCount > 0 {
+		// Still ensure default settings are present (newer fields like
+		// UIPREFS may have been added in a later release).
+		return d.seedDefaultSettings()
 	}
 
-	// Default settings
-	settings := []struct{ id, option, value string }{
-		{"PROJECT_NAME__", "Project Name", "Untitled Project"},
-		{"PROXY__________", "Proxy", "127.0.0.1:8080"},
-		{"INTERCEPT______", "Intercept", "false"},
-		{"MAIN_TAB_______", "Main Tab", "Sitemaps"},
+	if err := d.seedDefaultSettings(); err != nil {
+		return err
 	}
 
 	now := "2025-01-01 00:00:00.000Z"
-	for _, s := range settings {
-		_, err := d.db.Exec(
-			"INSERT OR IGNORE INTO _settings (id, created, updated, option, value) VALUES (?, ?, ?, ?, ?)",
-			s.id, now, now, s.option, s.value,
-		)
-		if err != nil {
-			return fmt.Errorf("lorgdb: seed setting %s: %w", s.id, err)
-		}
-	}
 
 	// Default labels
 	type label struct{ name, color, typ string }
@@ -618,6 +626,38 @@ func (d *LorgDB) SeedDefaults() error {
 	}
 
 	log.Printf("[LorgDB] Seeded default settings and labels")
+	return nil
+}
+
+// seedDefaultSettings inserts the canonical _settings rows. Idempotent —
+// uses INSERT OR IGNORE so existing rows are preserved. Pulled into its
+// own helper so SeedDefaults can call it both on fresh init and on a
+// boot where labels already exist (in case a new default setting like
+// UIPREFS was added in a later release).
+func (d *LorgDB) seedDefaultSettings() error {
+	settings := []struct{ id, option, value string }{
+		{"PROJECT_NAME__", "Project Name", "Untitled Project"},
+		{"PROXY__________", "Proxy", "127.0.0.1:8080"},
+		{"INTERCEPT______", "Intercept", "false"},
+		{"MAIN_TAB_______", "Main Tab", "Sitemaps"},
+		// UIPREFS row pre-seeded with empty value: the frontend GETs this
+		// record on every load to restore theme/font preferences. Without
+		// the row a 404 fires on every fresh install, spamming the
+		// browser console (the call is wrapped in .catch() so behavior
+		// is unaffected, but the noise was misleading).
+		{"UIPREFS________", "UI Preferences", ""},
+	}
+
+	now := "2025-01-01 00:00:00.000Z"
+	for _, s := range settings {
+		_, err := d.db.Exec(
+			"INSERT OR IGNORE INTO _settings (id, created, updated, option, value) VALUES (?, ?, ?, ?, ?)",
+			s.id, now, now, s.option, s.value,
+		)
+		if err != nil {
+			return fmt.Errorf("lorgdb: seed setting %s: %w", s.id, err)
+		}
+	}
 	return nil
 }
 
