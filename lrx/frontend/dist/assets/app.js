@@ -361,7 +361,7 @@
       detailPane._rawRequest = detail.request || '';
       detailPane._rawResponse = detail.response || '';
       detailPane._detailSource = detail.source || 'none';
-      $('#detail-request-raw').innerHTML = highlightHTTP(detail.request || 'No request data');
+      renderRequestWithFormat(detail.request || 'No request data', 'pretty');
       renderResponseWithFormat(detail.response, 'pretty');
     } else {
       $('#detail-request-raw').innerHTML = 'Failed to load';
@@ -381,28 +381,41 @@
     }
   }
 
-  // --- Response Format Toggle ---
+  // --- Format toggles ---
+  // Both request and response panes share the same render logic; only the
+  // target element and the button group differ. renderHTTPWithFormat is the
+  // shared core; renderRequestWithFormat / renderResponseWithFormat are the
+  // pane-specific entry points.
   var currentResponseFormat = 'pretty';
+  var currentRequestFormat = 'pretty';
 
-  function renderResponseWithFormat(rawResp, format) {
-    var el = $('#detail-response-raw');
-    if (!rawResp) { el.innerHTML = 'No response data'; return; }
+  function renderHTTPWithFormat(el, raw, format, btnSelector) {
+    if (!el) return;
+    if (!raw) { el.innerHTML = 'No data'; return; }
 
-    currentResponseFormat = format;
-
-    // Update active button
-    $$('.fmt-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === format); });
+    // Update active button within the same toggle group only.
+    $$(btnSelector).forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === format); });
 
     if (format === 'pretty') {
-      el.innerHTML = highlightHTTP(rawResp);
+      el.innerHTML = highlightHTTP(raw);
     } else if (format === 'raw') {
-      el.textContent = rawResp;
+      el.textContent = raw;
     } else if (format === 'headers') {
-      var headerEnd = rawResp.indexOf('\r\n\r\n');
-      if (headerEnd < 0) headerEnd = rawResp.indexOf('\n\n');
-      var headers = headerEnd >= 0 ? rawResp.substring(0, headerEnd) : rawResp;
+      var headerEnd = raw.indexOf('\r\n\r\n');
+      if (headerEnd < 0) headerEnd = raw.indexOf('\n\n');
+      var headers = headerEnd >= 0 ? raw.substring(0, headerEnd) : raw;
       el.innerHTML = highlightHTTP(headers);
     }
+  }
+
+  function renderResponseWithFormat(rawResp, format) {
+    currentResponseFormat = format;
+    renderHTTPWithFormat($('#detail-response-raw'), rawResp, format, '.fmt-btn');
+  }
+
+  function renderRequestWithFormat(rawReq, format) {
+    currentRequestFormat = format;
+    renderHTTPWithFormat($('#detail-request-raw'), rawReq, format, '.req-fmt-btn');
   }
 
   // --- Repeater ---
@@ -704,10 +717,14 @@
   }
 
   function addLineNumbers(html) {
+    // Wrap each logical line in its own block element so the wrap CSS can
+    // apply a per-line hanging indent: the gutter sits in the negative
+    // text-indent, and any wrapped continuation hangs under the content
+    // column instead of running back under the line numbers.
     var lines = html.split('\n');
     return lines.map(function(line, idx) {
-      return '<span class="line-num">' + (idx + 1) + '</span>' + line;
-    }).join('\n');
+      return '<div class="rh-line"><span class="line-num">' + (idx + 1) + '</span>' + line + '</div>';
+    }).join('');
   }
 
   function highlightHTTP(raw) {
@@ -1397,6 +1414,10 @@
         var detailPane = $('#traffic-detail');
         renderResponseWithFormat(detailPane._rawResponse || '', e.target.dataset.fmt);
       }
+      if (e.target.classList.contains('req-fmt-btn')) {
+        var detailPane = $('#traffic-detail');
+        renderRequestWithFormat(detailPane._rawRequest || '', e.target.dataset.fmt);
+      }
     });
 
     // Intercept view
@@ -1409,7 +1430,11 @@
     // Load repeater tabs
     loadRepeaterTabs();
 
-    // Resizable detail pane (drag handle between table and detail)
+    // Resizable detail pane (drag handle between table and detail).
+    // After a drag, the pane heights are pinned in px. When the window is
+    // resized the parent container changes size, but pinned panes stay at
+    // their old absolute heights and the layout breaks. We track the ratio
+    // (table height / total) and re-derive pixel heights on window resize.
     (function() {
       var handle = document.getElementById('resize-handle');
       var tableContainer = document.querySelector('#view-traffic .table-container');
@@ -1420,6 +1445,27 @@
       var startY = 0;
       var startTableH = 0;
       var startDetailH = 0;
+      var tableRatio = null; // 0..1, set after a drag; null while flex defaults are in effect
+
+      function applyRatio() {
+        if (tableRatio == null) return;
+        var parent = tableContainer.parentElement;
+        if (!parent) return;
+        var parentH = parent.offsetHeight;
+        // Subtract the handle height (and any inter-pane chrome) so the two
+        // panes sum to the available space. 50px is a conservative cushion
+        // matching the original drag clamp.
+        var avail = parentH - 50;
+        if (avail < 200) return;
+        var newTableH = Math.round(avail * tableRatio);
+        var newDetailH = avail - newTableH;
+        if (newTableH < 80) newTableH = 80;
+        if (newDetailH < 120) newDetailH = 120;
+        tableContainer.style.flex = 'none';
+        tableContainer.style.height = newTableH + 'px';
+        detailPane.style.flex = 'none';
+        detailPane.style.height = newDetailH + 'px';
+      }
 
       handle.addEventListener('mousedown', function(e) {
         isDragging = true;
@@ -1437,10 +1483,8 @@
         var delta = e.clientY - startY;
         var newTableH = startTableH + delta;
         var newDetailH = startDetailH - delta;
-        // Enforce minimums
         if (newTableH < 80) newTableH = 80;
         if (newDetailH < 120) newDetailH = 120;
-        // Enforce total doesn't exceed parent
         var parentH = tableContainer.parentElement.offsetHeight;
         if (newTableH + newDetailH > parentH - 50) return;
         tableContainer.style.flex = 'none';
@@ -1455,10 +1499,18 @@
         handle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+        // Capture ratio from the current pinned heights so window resize
+        // can re-derive proportional pixel values.
+        var totalH = tableContainer.offsetHeight + detailPane.offsetHeight;
+        if (totalH > 0) tableRatio = tableContainer.offsetHeight / totalH;
       });
+
+      window.addEventListener('resize', applyRatio);
     })();
 
-    // Resizable request/response split (horizontal drag handle)
+    // Resizable request/response split (horizontal drag handle).
+    // Same fix pattern as the vertical splitter above: after a drag, store
+    // the ratio so a later window resize re-derives proportional widths.
     (function() {
       var handle = document.getElementById('detail-split-handle');
       var reqPane = document.getElementById('detail-pane-request');
@@ -1469,6 +1521,25 @@
       var startX = 0;
       var startReqW = 0;
       var startRespW = 0;
+      var reqRatio = null; // null when flex defaults apply
+
+      function applyRatio() {
+        if (reqRatio == null) return;
+        var parent = reqPane.parentElement;
+        if (!parent) return;
+        var parentW = parent.offsetWidth;
+        var handleW = handle.offsetWidth || 0;
+        var avail = parentW - handleW;
+        if (avail < 160) return;
+        var newReqW = Math.round(avail * reqRatio);
+        var newRespW = avail - newReqW;
+        if (newReqW < 80) newReqW = 80;
+        if (newRespW < 80) newRespW = 80;
+        reqPane.style.flex = 'none';
+        reqPane.style.width = newReqW + 'px';
+        respPane.style.flex = 'none';
+        respPane.style.width = newRespW + 'px';
+      }
 
       handle.addEventListener('mousedown', function(e) {
         isDragging = true;
@@ -1502,15 +1573,20 @@
         handle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+        var totalW = reqPane.offsetWidth + respPane.offsetWidth;
+        if (totalW > 0) reqRatio = reqPane.offsetWidth / totalW;
       });
 
-      // Double-click to reset to 50/50
+      // Double-click to reset to 50/50 (clear pinned widths and ratio).
       handle.addEventListener('dblclick', function() {
         reqPane.style.flex = '1';
         reqPane.style.width = '';
         respPane.style.flex = '1';
         respPane.style.width = '';
+        reqRatio = null;
       });
+
+      window.addEventListener('resize', applyRatio);
     })();
 
     // Context menu (right-click on traffic rows)

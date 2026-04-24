@@ -1058,15 +1058,27 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
 .hl-html-attr { color: var(--accent); }
 .hl-html-value { color: #fbbf24; }
 
-/* Line numbers in request/response display */
+/* Line numbers in request/response display.
+   Both -webkit- and unprefixed user-select for cross-browser correctness;
+   without the prefix WebKit was including line numbers in copied selections. */
 .line-num {
   display: inline-block;
   min-width: 3ch;
   text-align: right;
   color: var(--text-ghost, #3f3f46);
   margin-right: 1.5ch;
+  -webkit-user-select: none;
   user-select: none;
   opacity: 0.5;
+}
+
+/* One block per logical source line. The hanging indent puts wrapped
+   content under the content column rather than under the gutter, so a
+   long wrapped line no longer slides back beneath the line-number area. */
+.raw-http .rh-line {
+  padding-left: 4.5ch;
+  text-indent: -4.5ch;
+  white-space: inherit;
 }
 
 /* ============================================================
@@ -1297,7 +1309,8 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   padding: 1px;
   margin-left: 8px;
 }
-.fmt-btn {
+.fmt-btn,
+.req-fmt-btn {
   background: none;
   border: none;
   color: var(--text-ghost);
@@ -1311,10 +1324,12 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   border-radius: 3px;
   transition: background var(--transition), color var(--transition);
 }
-.fmt-btn:hover {
+.fmt-btn:hover,
+.req-fmt-btn:hover {
   color: var(--text-secondary);
 }
-.fmt-btn.active {
+.fmt-btn.active,
+.req-fmt-btn.active {
   background: var(--accent-dim);
   color: var(--accent);
 }

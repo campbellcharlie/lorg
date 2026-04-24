@@ -73,6 +73,24 @@ var Migrations = []Migration{
 			return err
 		},
 	},
+	{
+		Version:     4,
+		Description: "add fingerprint column to _data for response clustering",
+		Up: func(db *sql.DB) error {
+			alters := []string{
+				"ALTER TABLE _data ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
+			}
+			for _, stmt := range alters {
+				if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+					return err
+				}
+			}
+			if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_data_fingerprint ON _data (fingerprint)`); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
 }
 
 // RunMigrations applies any unapplied migrations in order.
@@ -225,9 +243,11 @@ var allTableSQL = []string{
 		generated_by    TEXT NOT NULL DEFAULT '',
 		extra           JSON DEFAULT NULL,
 		attached        TEXT NOT NULL DEFAULT '',
-		action          TEXT NOT NULL DEFAULT ''
+		action          TEXT NOT NULL DEFAULT '',
+		fingerprint     TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_data_generated_by ON _data (generated_by)`,
+	`CREATE INDEX IF NOT EXISTS idx_data_fingerprint ON _data (fingerprint)`,
 
 	`CREATE TABLE IF NOT EXISTS _proxies (
 		id      TEXT PRIMARY KEY NOT NULL,
