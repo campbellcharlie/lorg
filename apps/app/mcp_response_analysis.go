@@ -152,7 +152,16 @@ func (backend *Backend) extractRegexHandler(ctx context.Context, request mcp.Cal
 		return mcp.NewToolResultError(fmt.Sprintf("invalid regex pattern: %v", err)), nil
 	}
 
-	allMatches := re.FindAllStringSubmatch(args.Content, args.MaxMatches)
+	// Go's FindAllStringSubmatch(_, n) returns nothing when n == 0 (a common
+	// gotcha) and unlimited when n < 0. The MCP-facing meaning of "0" is
+	// "unspecified", so treat <= 0 as "default to 100" — bounded enough to
+	// keep the response cheap, generous enough that most useful regexes fit.
+	maxMatches := args.MaxMatches
+	if maxMatches <= 0 {
+		maxMatches = 100
+	}
+
+	allMatches := re.FindAllStringSubmatch(args.Content, maxMatches)
 
 	group := args.Group
 	matches := make([]string, 0, len(allMatches))
@@ -198,7 +207,12 @@ func (backend *Backend) extractBetweenHandler(ctx context.Context, request mcp.C
 	matches := make([]string, 0)
 	remaining := args.Content
 
-	for len(matches) < args.MaxMatches {
+	maxMatches := args.MaxMatches
+	if maxMatches <= 0 {
+		maxMatches = 100
+	}
+
+	for len(matches) < maxMatches {
 		startIdx := strings.Index(remaining, args.StartDelimiter)
 		if startIdx == -1 {
 			break

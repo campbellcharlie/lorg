@@ -15,7 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type OpenAPIArgs struct {
-	Action string `json:"action" jsonschema:"required,enum=import,listEndpoints,generateRequests" jsonschema_description:"import: parse OpenAPI spec; listEndpoints: list discovered routes; generateRequests: build raw HTTP requests from spec"`
+	Action string `json:"action" jsonschema:"required,enum=import,enum=listEndpoints,enum=generateRequests" jsonschema_description:"import: parse OpenAPI spec; listEndpoints: list discovered routes; generateRequests: build raw HTTP requests from spec"`
 	Spec   string `json:"spec,omitempty" jsonschema_description:"OpenAPI 3.x JSON spec string (for import)"`
 	Host   string `json:"host,omitempty" jsonschema_description:"Target host for request generation (overrides spec servers)"`
 	Path   string `json:"path,omitempty" jsonschema_description:"Filter by specific path prefix"`

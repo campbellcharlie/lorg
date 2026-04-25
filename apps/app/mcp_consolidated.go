@@ -647,8 +647,8 @@ type ConsolidatedHostArgs struct {
 	Host string `json:"host,omitempty" jsonschema_description:"Host (info, sitemap, rows, getNote, setNote, modifyLabels, modifyNotes). For modify*, include the protocol (e.g. http://example.com)."`
 
 	// list
-	Search string `json:"search,omitempty" jsonschema_description:"Search filter for host names (list)"`
-	Page   int    `json:"page,omitempty" jsonschema_description:"Page number, 1-indexed (list, rows)"`
+	Search string  `json:"search,omitempty" jsonschema_description:"Search filter for host names (list)"`
+	Page   flexInt `json:"page,omitempty" jsonschema_description:"Page number, 1-indexed (list, rows)"`
 
 	// sitemap
 	Path  string `json:"path,omitempty" jsonschema_description:"Path prefix to scope the sitemap (sitemap)"`
@@ -704,8 +704,8 @@ type ConsolidatedInterceptArgs struct {
 	Action string `json:"action" jsonschema:"required" jsonschema_description:"Operation: toggle (enable/disable on a proxy), list (intercepted rows for a proxy), getRaw (one record's raw req/resp), forward (pass through, optionally with edits), drop (block)"`
 
 	// toggle: id = proxy ID. forward/drop/getRaw: id = intercept record ID.
-	ID     string `json:"id,omitempty" jsonschema_description:"Proxy ID (toggle) or intercept record ID (getRaw, forward, drop)"`
-	Enable bool   `json:"enable,omitempty" jsonschema_description:"true to enable, false to disable (toggle)"`
+	ID     string   `json:"id,omitempty" jsonschema_description:"Proxy ID (toggle) or intercept record ID (getRaw, forward, drop)"`
+	Enable flexBool `json:"enable,omitempty" jsonschema_description:"true to enable, false to disable (toggle)"`
 
 	// list
 	ProxyID string `json:"proxyId,omitempty" jsonschema_description:"Proxy ID to list intercepted rows for (list)"`

@@ -17,7 +17,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type QueryArgs struct {
-	Action string `json:"action" jsonschema:"required,enum=search,explain" jsonschema_description:"search: execute query; explain: return generated SQL"`
+	Action string `json:"action" jsonschema:"required,enum=search,enum=explain" jsonschema_description:"search: execute query; explain: return generated SQL"`
 	Query  string `json:"query" jsonschema:"required" jsonschema_description:"HTTPQL-like query string, e.g. req.host.cont:\"example.com\" AND resp.status.eq:200"`
 	Limit  int    `json:"limit,omitempty" jsonschema_description:"Max results (default 100)"`
 }
@@ -287,31 +287,33 @@ func parseQuery(input string) (*astNode, error) {
 // SQL Compiler
 // ---------------------------------------------------------------------------
 
-// fieldMapping maps query fields to SQL column references.
-// The _data table has: host, method, path, status, length, mime, etc.
-// The _raw table has: request (raw req string), response (raw resp string).
-// They share the same ID.
+// fieldMapping maps query fields to SQL expressions over lorgdb's schema.
+// _data has flat host/port columns plus req_json / resp_json blobs (we
+// use json_extract for nested fields). Raw bytes live in separate _req
+// (alias q) and _resp (alias s) tables joined on the same id.
 var fieldMapping = map[string]struct {
-	column string
-	table  string // "data" or "raw"
-	isText bool
+	expr      string // SQL expression to use in WHERE
+	needsReq  bool   // requires JOIN on _req table (alias q)
+	needsResp bool   // requires JOIN on _resp table (alias s)
+	isText    bool
 }{
-	"req.host":     {"host", "data", true},
-	"req.method":   {"method", "data", true},
-	"req.path":     {"path", "data", true},
-	"req.body":     {"request", "raw", true},
-	"req.headers":  {"request", "raw", true},
-	"resp.status":  {"status", "data", false},
-	"resp.body":    {"response", "raw", true},
-	"resp.headers": {"response", "raw", true},
-	"resp.length":  {"length", "data", false},
-	"resp.mime":    {"mime", "data", true},
+	"req.host":     {"d.host", false, false, true},
+	"req.method":   {"json_extract(d.req_json, '$.method')", false, false, true},
+	"req.path":     {"json_extract(d.req_json, '$.path')", false, false, true},
+	"req.body":     {"q.raw", true, false, true},
+	"req.headers":  {"q.raw", true, false, true},
+	"resp.status":  {"CAST(json_extract(d.resp_json, '$.status') AS INTEGER)", false, false, false},
+	"resp.body":    {"s.raw", false, true, true},
+	"resp.headers": {"s.raw", false, true, true},
+	"resp.length":  {"CAST(json_extract(d.resp_json, '$.length') AS INTEGER)", false, false, false},
+	"resp.mime":    {"json_extract(d.resp_json, '$.mime')", false, false, true},
 }
 
 type compiledQuery struct {
-	where    string
-	params   []any
-	needsRaw bool // true if we need to JOIN the _raw table
+	where     string
+	params    []any
+	needsReq  bool // true if we need to JOIN the _req table (alias q)
+	needsResp bool // true if we need to JOIN the _resp table (alias s)
 }
 
 func compileToSQL(node *astNode) (*compiledQuery, error) {
@@ -354,12 +356,12 @@ func compileNode(node *astNode, cq *compiledQuery) (string, error) {
 			return "", fmt.Errorf("unknown field %q. Valid: %s", node.field, validFieldsList())
 		}
 
-		var colRef string
-		if mapping.table == "raw" {
-			cq.needsRaw = true
-			colRef = "r." + mapping.column
-		} else {
-			colRef = "d." + mapping.column
+		colRef := mapping.expr
+		if mapping.needsReq {
+			cq.needsReq = true
+		}
+		if mapping.needsResp {
+			cq.needsResp = true
 		}
 
 		switch node.operator {
@@ -460,19 +462,27 @@ func validFieldsList() string {
 // ---------------------------------------------------------------------------
 
 func buildFullSQL(cq *compiledQuery, limit int) string {
-	if cq.needsRaw {
-		return fmt.Sprintf(
-			"SELECT d.id, d.\"index\", d.host, d.method, d.path, d.status, d.length, d.mime, d.port, d.scheme, d.note "+
-				"FROM _data d LEFT JOIN _raw r ON d.id = r.id "+
-				"WHERE %s ORDER BY d.\"index\" DESC LIMIT %d",
-			cq.where, limit,
-		)
+	// Project the same shape as searchTraffic: id, index, host, method,
+	// path, status, length, mime, port. method/path/status/length/mime
+	// come from the JSON blobs in _data.
+	cols := `d.id, d."index", d.host, d.port,
+		json_extract(d.req_json, '$.method')   AS method,
+		json_extract(d.req_json, '$.path')     AS path,
+		CAST(json_extract(d.resp_json, '$.status') AS INTEGER) AS status,
+		CAST(json_extract(d.resp_json, '$.length') AS INTEGER) AS length,
+		json_extract(d.resp_json, '$.mime')    AS mime`
+
+	joins := ""
+	if cq.needsReq {
+		joins += " LEFT JOIN _req q ON d.id = q.id"
 	}
+	if cq.needsResp {
+		joins += " LEFT JOIN _resp s ON d.id = s.id"
+	}
+
 	return fmt.Sprintf(
-		"SELECT d.id, d.\"index\", d.host, d.method, d.path, d.status, d.length, d.mime, d.port, d.scheme, d.note "+
-			"FROM _data d "+
-			"WHERE %s ORDER BY d.\"index\" DESC LIMIT %d",
-		cq.where, limit,
+		"SELECT %s FROM _data d%s WHERE %s ORDER BY d.\"index\" DESC LIMIT %d",
+		cols, joins, cq.where, limit,
 	)
 }
 
@@ -500,15 +510,11 @@ func (backend *Backend) executeTrafficQuery(query string, limit int) ([]map[stri
 
 	sql := buildFullSQL(cq, limit)
 
-	// Execute against projectDB
-	if projectDB == nil || projectDB.db == nil {
-		return nil, sql, fmt.Errorf("project database not initialized")
-	}
-
-	projectDB.mu.Lock()
-	defer projectDB.mu.Unlock()
-
-	rows, err := projectDB.db.Query(sql, cq.params...)
+	// Execute against lorgdb — it owns the canonical _data / _raw tables
+	// the query DSL was designed against. The project SQLite uses a
+	// different schema (http_traffic / http_messages), so this SQL would
+	// fail there with "no such table: _data".
+	rows, err := backend.DB.Query(sql, cq.params...)
 	if err != nil {
 		return nil, sql, fmt.Errorf("query error: %w", err)
 	}
@@ -581,10 +587,11 @@ func (backend *Backend) queryHandler(ctx context.Context, request mcp.CallToolRe
 		paramsJSON, _ := json.Marshal(cq.params)
 
 		return mcpJSONResult(map[string]any{
-			"query":    args.Query,
-			"sql":      sql,
-			"params":   string(paramsJSON),
-			"needsRaw": cq.needsRaw,
+			"query":     args.Query,
+			"sql":       sql,
+			"params":    string(paramsJSON),
+			"needsReq":  cq.needsReq,
+			"needsResp": cq.needsResp,
 		})
 
 	default:

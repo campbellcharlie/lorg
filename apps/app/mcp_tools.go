@@ -39,14 +39,14 @@ type HostPrintSitemapArgs struct {
 }
 
 type HostPrintRowsArgs struct {
-	Host   string `json:"host" jsonschema:"required" jsonschema_description:"the host to get the table for"`
-	Page   int    `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
-	Filter string `json:"filter" jsonschema:"required" jsonschema_description:"filter the results for faster search"`
+	Host   string  `json:"host" jsonschema:"required" jsonschema_description:"the host to get the table for"`
+	Page   flexInt `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
+	Filter string  `json:"filter" jsonschema:"required" jsonschema_description:"filter the results for faster search"`
 }
 
 type ListHostsArgs struct {
-	Search string `json:"search,omitempty" jsonschema_description:"the search to get the table for, use empty string to get all results"`
-	Page   int    `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
+	Search string  `json:"search,omitempty" jsonschema_description:"the search to get the table for, use empty string to get all results"`
+	Page   flexInt `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
 }
 
 // --- Host arg structs ---
@@ -107,8 +107,8 @@ type ProxyStopArgs struct {
 // --- Intercept arg structs ---
 
 type InterceptToggleArgs struct {
-	ID     string `json:"id" jsonschema:"required" jsonschema_description:"The proxy ID to enable/disable interception on"`
-	Enable bool   `json:"enable" jsonschema:"required" jsonschema_description:"true to enable interception, false to disable (forwards all pending)"`
+	ID     string   `json:"id" jsonschema:"required" jsonschema_description:"The proxy ID to enable/disable interception on"`
+	Enable flexBool `json:"enable" jsonschema:"required" jsonschema_description:"true to enable interception, false to disable (forwards all pending)"`
 }
 
 type InterceptActionArgs struct {
@@ -207,8 +207,8 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 
 	perPage := 50
 	offset := 0
-	if args.Page > 1 {
-		offset = (args.Page - 1) * perPage
+	if int(args.Page) > 1 {
+		offset = (int(args.Page) - 1) * perPage
 	}
 
 	var records []*lorgdb.Record
@@ -278,8 +278,8 @@ func (backend *Backend) listHostsHandler(ctx context.Context, request mcp.CallTo
 
 	perPage := 50
 	offset := 0
-	if args.Page > 1 {
-		offset = (args.Page - 1) * perPage
+	if int(args.Page) > 1 {
+		offset = (int(args.Page) - 1) * perPage
 	}
 
 	where := "1=1"
@@ -645,7 +645,8 @@ func (backend *Backend) interceptToggleHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(fmt.Sprintf("proxy not found: %s", args.ID)), nil
 	}
 
-	proxyRecord.Set("intercept", args.Enable)
+	enable := bool(args.Enable)
+	proxyRecord.Set("intercept", enable)
 	if err := backend.DB.SaveRecord(proxyRecord); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to update intercept setting: %v", err)), nil
 	}
@@ -657,14 +658,14 @@ func (backend *Backend) interceptToggleHandler(ctx context.Context, request mcp.
 	ProxyMgr.mu.RUnlock()
 
 	if inst != nil && inst.Proxy != nil {
-		inst.Proxy.Intercept = args.Enable
-		if !args.Enable {
+		inst.Proxy.Intercept = enable
+		if !enable {
 			go backend.forwardProxyIntercepts(args.ID)
 		}
 	}
 
 	action := "enabled"
-	if !args.Enable {
+	if !enable {
 		action = "disabled"
 	}
 
@@ -672,7 +673,7 @@ func (backend *Backend) interceptToggleHandler(ctx context.Context, request mcp.
 		"success": true,
 		"message": fmt.Sprintf("Interception %s for proxy %s", action, args.ID),
 		"proxyId": args.ID,
-		"enabled": args.Enable,
+		"enabled": enable,
 	})
 }
 
