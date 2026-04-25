@@ -1598,6 +1598,185 @@ mark.find-match.find-current {
 }
 
 /* ============================================================
+   Match & Replace UI — table of rules with inline enable
+   toggle, edit, delete; collapsible add form.
+   ============================================================ */
+.settings-help {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin: 4px 0 12px 0;
+}
+.settings-help code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.mr-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.mr-rule {
+  display: grid;
+  grid-template-columns: 24px 110px 1fr 1fr 110px 24px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg, #18181b);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.mr-rule.disabled { opacity: 0.5; }
+.mr-rule .mr-type {
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mr-rule .mr-match,
+.mr-rule .mr-replace {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mr-rule .mr-replace { color: var(--blue, #60a5fa); }
+.mr-rule .mr-scope { color: var(--text-tertiary); font-size: 10px; }
+.mr-rule .mr-toggle {
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+.mr-rule .mr-toggle:hover { background: rgba(255,255,255,0.06); }
+.mr-rule .mr-toggle.on { color: var(--accent); }
+.mr-rule .mr-toggle.off { color: var(--text-ghost); }
+.mr-rule .mr-delete {
+  background: none;
+  border: none;
+  color: var(--text-ghost);
+  cursor: pointer;
+  font-size: 14px;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+}
+.mr-rule .mr-delete:hover { color: var(--red, #ef4444); background: rgba(239,68,68,0.1); }
+.mr-empty {
+  padding: 12px;
+  color: var(--text-ghost);
+  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-align: center;
+}
+.mr-add {
+  border: 1px dashed var(--border, #2a2a30);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.mr-add summary { cursor: pointer; user-select: none; }
+.mr-add-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr 180px 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.mr-add-grid input,
+.mr-add-grid select {
+  background: var(--bg, #18181b);
+  border: 1px solid var(--border, #2a2a30);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  outline: none;
+  min-width: 0;
+}
+.mr-add-grid input:focus,
+.mr-add-grid select:focus { border-color: var(--accent); }
+
+/* ============================================================
+   Row highlighting — applied to traffic rows by right-click.
+   Each color tints the row background while preserving the
+   selected-row left bar (which uses inset box-shadow).
+   ============================================================ */
+#traffic-table tr.hl-yellow td { background: rgba(251, 191, 36, 0.08); }
+#traffic-table tr.hl-orange td { background: rgba(251, 146, 60, 0.10); }
+#traffic-table tr.hl-red    td { background: rgba(239, 68, 68, 0.10); }
+#traffic-table tr.hl-green  td { background: rgba(45, 212, 168, 0.08); }
+#traffic-table tr.hl-blue   td { background: rgba(96, 165, 250, 0.10); }
+#traffic-table tr.selected.hl-yellow td,
+#traffic-table tr.selected.hl-orange td,
+#traffic-table tr.selected.hl-red td,
+#traffic-table tr.selected.hl-green td,
+#traffic-table tr.selected.hl-blue td {
+  background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
+}
+.context-menu-item.has-submenu::after {
+  content: '▸';
+  float: right;
+  color: var(--text-ghost);
+  font-size: 10px;
+}
+.context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  background: var(--bg-surface, #1c1c20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  min-width: 130px;
+  padding: 4px 0;
+}
+.context-menu-item.has-submenu:hover .context-submenu { display: block; }
+.context-submenu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+.context-submenu-item:hover { background: var(--accent-dim); color: var(--accent); }
+.hl-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.hl-swatch.yellow { background: rgb(251, 191, 36); }
+.hl-swatch.orange { background: rgb(251, 146, 60); }
+.hl-swatch.red    { background: rgb(239, 68, 68); }
+.hl-swatch.green  { background: rgb(45, 212, 168); }
+.hl-swatch.blue   { background: rgb(96, 165, 250); }
+.hl-swatch.none   { background: transparent; border-style: dashed; }
+
+/* ============================================================
    Scrollbar
    ============================================================ */
 ::-webkit-scrollbar {

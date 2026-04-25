@@ -255,4 +255,90 @@ func (backend *Backend) MatchReplaceEndpoints(e *echo.Echo) {
 		}
 		return c.JSON(http.StatusOK, map[string]any{"rules": items})
 	})
+
+	// POST /api/match-replace — create a rule
+	e.POST("/api/match-replace", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		var body struct {
+			Type    string `json:"type"`
+			Match   string `json:"match"`
+			Replace string `json:"replace"`
+			Scope   string `json:"scope"`
+			Comment string `json:"comment"`
+			Enabled *bool  `json:"enabled,omitempty"`
+		}
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		}
+		if body.Match == "" || body.Type == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "match and type are required"})
+		}
+		if _, err := regexp.Compile(body.Match); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid regex: " + err.Error()})
+		}
+		rec := lorgdb.NewRecord("_match_replace")
+		rec.Set("type", body.Type)
+		rec.Set("match", body.Match)
+		rec.Set("replace", body.Replace)
+		rec.Set("scope", body.Scope)
+		rec.Set("comment", body.Comment)
+		enabled := true
+		if body.Enabled != nil {
+			enabled = *body.Enabled
+		}
+		rec.Set("enabled", enabled)
+		if err := backend.DB.SaveRecord(rec); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		matchReplaceMgr.Reload()
+		return c.JSON(http.StatusOK, map[string]any{"success": true, "id": rec.Id})
+	})
+
+	// PATCH /api/match-replace/:id — partial update; supported fields:
+	// enabled, type, match, replace, scope, comment, priority.
+	e.PATCH("/api/match-replace/:id", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		id := c.Param("id")
+		rec, err := backend.DB.FindRecordById("_match_replace", id)
+		if err != nil {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "rule not found"})
+		}
+		var body map[string]any
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		}
+		// Validate regex if match is being changed.
+		if v, ok := body["match"].(string); ok && v != "" {
+			if _, err := regexp.Compile(v); err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid regex: " + err.Error()})
+			}
+		}
+		for _, k := range []string{"enabled", "type", "match", "replace", "scope", "comment", "priority"} {
+			if v, ok := body[k]; ok {
+				rec.Set(k, v)
+			}
+		}
+		if err := backend.DB.SaveRecord(rec); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		matchReplaceMgr.Reload()
+		return c.JSON(http.StatusOK, map[string]any{"success": true, "id": id})
+	})
+
+	// DELETE /api/match-replace/:id
+	e.DELETE("/api/match-replace/:id", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		id := c.Param("id")
+		if err := backend.DB.DeleteRecord("_match_replace", id); err != nil {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		matchReplaceMgr.Reload()
+		return c.JSON(http.StatusOK, map[string]any{"success": true, "deleted": id})
+	})
 }

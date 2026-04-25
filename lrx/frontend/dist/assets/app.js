@@ -350,6 +350,108 @@
     });
   }
 
+  // ===========================================================
+  // Match & Replace UI — backed by /api/match-replace REST.
+  // List rules with inline enable toggle + delete; an
+  // expandable form below adds new rules.
+  // ===========================================================
+  function initMatchReplace() {
+    var addBtn = document.getElementById('mr-add-btn');
+    if (!addBtn) return;
+    addBtn.addEventListener('click', async function() {
+      var body = {
+        type:    document.getElementById('mr-type').value,
+        match:   document.getElementById('mr-match').value,
+        replace: document.getElementById('mr-replace').value,
+        scope:   document.getElementById('mr-scope').value,
+        comment: document.getElementById('mr-comment').value,
+        enabled: true,
+      };
+      if (!body.match) { document.getElementById('mr-match').focus(); return; }
+      var res = await api('/api/match-replace', { method: 'POST', body: JSON.stringify(body) });
+      if (res && res.success) {
+        ['mr-match','mr-replace','mr-scope','mr-comment'].forEach(function(id){
+          document.getElementById(id).value = '';
+        });
+        loadMatchReplaceRules();
+      }
+    });
+    loadMatchReplaceRules();
+  }
+
+  async function loadMatchReplaceRules() {
+    var container = document.getElementById('mr-rules');
+    if (!container) return;
+    var data = await api('/api/match-replace');
+    var rules = (data && data.rules) || [];
+    if (rules.length === 0) {
+      container.innerHTML = '<div class="mr-empty">No match &amp; replace rules. Add one below.</div>';
+      return;
+    }
+    container.innerHTML = rules.map(function(r) {
+      var enabled = r.enabled === true || r.enabled === 1 || r.enabled === 'true';
+      var scope = r.scope || 'all hosts';
+      var comment = r.comment ? ' · ' + escapeHtml(r.comment) : '';
+      return '<div class="mr-rule ' + (enabled ? '' : 'disabled') + '" data-id="' + escapeAttr(r.id) + '">' +
+        '<span class="mr-toggle ' + (enabled ? 'on' : 'off') + '" data-action="toggle" title="Toggle">' + (enabled ? '✓' : '○') + '</span>' +
+        '<span class="mr-type">' + escapeHtml(r.type || '') + '</span>' +
+        '<span class="mr-match" title="' + escapeAttr(r.match || '') + '">' + escapeHtml(r.match || '') + '</span>' +
+        '<span class="mr-replace" title="' + escapeAttr(r.replace || '') + '">' + escapeHtml(r.replace || '') + '</span>' +
+        '<span class="mr-scope" title="' + escapeAttr(scope + comment) + '">' + escapeHtml(scope) + comment + '</span>' +
+        '<button class="mr-delete" data-action="delete" title="Delete">×</button>' +
+      '</div>';
+    }).join('');
+    container.querySelectorAll('.mr-rule').forEach(function(row) {
+      var id = row.dataset.id;
+      row.querySelector('[data-action="toggle"]').addEventListener('click', async function() {
+        var nowEnabled = !row.classList.contains('disabled');
+        await api('/api/match-replace/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: !nowEnabled }),
+        });
+        loadMatchReplaceRules();
+      });
+      row.querySelector('[data-action="delete"]').addEventListener('click', async function() {
+        await api('/api/match-replace/' + encodeURIComponent(id), { method: 'DELETE' });
+        loadMatchReplaceRules();
+      });
+    });
+  }
+
+  // ===========================================================
+  // Row highlights — right-click "Highlight" submenu sets a
+  // localStorage-backed color tint on a traffic row id. Persists
+  // across reloads but is per-browser; works without backend.
+  // ===========================================================
+  var rowHighlights = (function() {
+    try { return JSON.parse(localStorage.getItem('lorg-row-hl') || '{}'); }
+    catch (e) { return {}; }
+  })();
+  function saveRowHighlights() {
+    try { localStorage.setItem('lorg-row-hl', JSON.stringify(rowHighlights)); } catch (e) {}
+  }
+  function setRowHighlight(id, color) {
+    if (!color || color === 'none') delete rowHighlights[id];
+    else rowHighlights[id] = color;
+    saveRowHighlights();
+    var tr = document.querySelector('#traffic-body tr[data-id="' + cssEscape(id) + '"]');
+    if (tr) {
+      tr.classList.remove('hl-yellow', 'hl-orange', 'hl-red', 'hl-green', 'hl-blue');
+      if (color && color !== 'none') tr.classList.add('hl-' + color);
+    }
+  }
+  function applyStoredHighlights() {
+    Object.keys(rowHighlights).forEach(function(id) {
+      var tr = document.querySelector('#traffic-body tr[data-id="' + cssEscape(id) + '"]');
+      if (tr) {
+        tr.classList.remove('hl-yellow', 'hl-orange', 'hl-red', 'hl-green', 'hl-blue');
+        tr.classList.add('hl-' + rowHighlights[id]);
+      }
+    });
+  }
+  // Minimal CSS.escape polyfill for old WebKit (just enough for our IDs).
+  function cssEscape(s) { return s.replace(/([^a-zA-Z0-9_-])/g, '\\$1'); }
+
   // Wire chip clicks once on init.
   function initChipStrip() {
     var strip = document.getElementById('traffic-chips');
@@ -409,6 +511,15 @@
   }
 
   function matchesSingleCondition(row, cond) {
+    // Negation: leading '-' or 'NOT ' inverts the condition. Strip the
+    // marker and recurse so all field clauses get the negation for free.
+    if (cond.length > 1 && cond.charAt(0) === '-') {
+      return !matchesSingleCondition(row, cond.substring(1).trim());
+    }
+    if (/^NOT\s+/i.test(cond)) {
+      return !matchesSingleCondition(row, cond.replace(/^NOT\s+/i, '').trim());
+    }
+
     var req = row.req_json || {};
     var resp = row.resp_json || {};
 
@@ -575,6 +686,9 @@
     $$('#traffic-body tr').forEach(function(tr) {
       tr.addEventListener('click', function() { selectTrafficRow(tr.dataset.id); });
     });
+
+    // Re-apply any persisted highlight tints after each render.
+    applyStoredHighlights();
   }
 
   async function selectTrafficRow(id) {
@@ -2194,6 +2308,7 @@
     initChipStrip();
     initCommandPalette();
     initGlobalShortcuts();
+    initMatchReplace();
 
     document.addEventListener('click', function(e) {
       if (e.target.classList.contains('fmt-btn')) {
@@ -2424,6 +2539,15 @@
       menu.addEventListener('click', async function(e) {
         var action = e.target.dataset.action;
         if (!action || !contextRowId) return;
+
+        // Highlight actions — set color and close menu, no backend call.
+        if (action.indexOf('hl-') === 0) {
+          menu.classList.add('hidden');
+          var color = action.substring(3); // 'none', 'yellow', etc.
+          setRowHighlight(contextRowId, color);
+          return;
+        }
+
         menu.classList.add('hidden');
 
         if (action === 'send-repeater') {
