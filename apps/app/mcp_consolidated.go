@@ -578,7 +578,62 @@ func (backend *Backend) graphqlHandler(ctx context.Context, request mcp.CallTool
 	}
 }
 
-// ========================== 11. host ==========================
+// ========================== 11. browserSec ==========================
+//
+// Folds the three browser-side security/admin dispatchers (browserAuth,
+// browserXss, browserConfig) into one. Action names are disjoint
+// across all three, so dispatcher routing is unambiguous. The main
+// page-control tools (browser, browserInteract, browserExec) stay
+// separate — they're hot path and benefit from focused schemas.
+type ConsolidatedBrowserSecArgs struct {
+	Action string `json:"action" jsonschema:"required" jsonschema_description:"Operation: login, importCookies, exportCookies (auth); verifyAlert, injectPayload, testDomSink, checkCsp, disableCsp, disableCors, disableFrameProtection, restoreDefaults (xss); status, setDisplay, setCamofoxUrl (config)"`
+
+	TabID string `json:"tabId,omitempty" jsonschema_description:"Tab ID (most actions)"`
+	URL   string `json:"url,omitempty" jsonschema_description:"URL (login, verifyAlert, testDomSink)"`
+
+	// auth
+	Username    string           `json:"username,omitempty" jsonschema_description:"Username (login)"`
+	Password    string           `json:"password,omitempty" jsonschema_description:"Password (login)"`
+	UsernameRef string           `json:"usernameRef,omitempty" jsonschema_description:"Ref or selector for username field (login)"`
+	PasswordRef string           `json:"passwordRef,omitempty" jsonschema_description:"Ref or selector for password field (login)"`
+	SubmitRef   string           `json:"submitRef,omitempty" jsonschema_description:"Ref or selector for submit button (login)"`
+	Cookies     []map[string]any `json:"cookies,omitempty" jsonschema_description:"Cookies to import [{name,value,domain,path}] (importCookies)"`
+
+	// xss
+	Payload  string `json:"payload,omitempty" jsonschema_description:"XSS payload HTML/JS (injectPayload)"`
+	Selector string `json:"selector,omitempty" jsonschema_description:"Target element selector (injectPayload)"`
+	Sink     string `json:"sink,omitempty" jsonschema_description:"DOM sink to test: location.hash, document.referrer, window.name, postMessage (testDomSink)"`
+	Value    string `json:"value,omitempty" jsonschema_description:"Value to inject into sink (testDomSink)"`
+
+	// config
+	Headless   string `json:"headless,omitempty" jsonschema_description:"Display mode: true (headless), false (headed), virtual (VNC) (setDisplay)"`
+	CamofoxUrl string `json:"camofoxUrl,omitempty" jsonschema_description:"CamoFox server URL e.g. http://localhost:9377 (setCamofoxUrl)"`
+}
+
+func (backend *Backend) browserSecHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ConsolidatedBrowserSecArgs
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	switch args.Action {
+	// auth
+	case "login", "importCookies", "exportCookies":
+		return backend.browserAuthHandler(ctx, request)
+	// xss
+	case "verifyAlert", "injectPayload", "testDomSink",
+		"checkCsp", "disableCsp", "disableCors",
+		"disableFrameProtection", "restoreDefaults":
+		return backend.browserXssHandler(ctx, request)
+	// config
+	case "status", "setDisplay", "setCamofoxUrl":
+		return backend.browserConfigHandler(ctx, request)
+	default:
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid auth: login, importCookies, exportCookies. Valid xss: verifyAlert, injectPayload, testDomSink, checkCsp, disableCsp, disableCors, disableFrameProtection, restoreDefaults. Valid config: status, setDisplay, setCamofoxUrl"), nil
+	}
+}
+
+// ========================== 12. host ==========================
 //
 // Folds 8 previous tools (listHosts, getHostInfo, hostPrintSitemap,
 // hostPrintRowsInDetails, getNoteForHost, setNoteForHost,

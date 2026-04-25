@@ -393,27 +393,11 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
-		mcp.NewTool("browserXss",
-			mcp.WithDescription("XSS verification and security bypass. Actions: verifyAlert (XSS proof), injectPayload, testDomSink, checkCsp, disableCsp, disableCors, disableFrameProtection, restoreDefaults"),
-			mcp.WithInputSchema[BrowserXssArgs](),
+		mcp.NewTool("browserSec",
+			mcp.WithDescription("Browser security/admin (CamoFox): auth + XSS testing + server config in one tool. Actions: login|importCookies|exportCookies (auth), verifyAlert|injectPayload|testDomSink|checkCsp|disableCsp|disableCors|disableFrameProtection|restoreDefaults (xss), status|setDisplay|setCamofoxUrl (config). For day-to-day page driving use browser/browserInteract/browserExec instead."),
+			mcp.WithInputSchema[ConsolidatedBrowserSecArgs](),
 		),
-		backend.browserXssHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("browserAuth",
-			mcp.WithDescription("Browser authentication and cookie management. Actions: login (auto-detects form fields), importCookies, exportCookies"),
-			mcp.WithInputSchema[BrowserAuthArgs](),
-		),
-		backend.browserAuthHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("browserConfig",
-			mcp.WithDescription("CamoFox browser server configuration. Actions: status, setDisplay (headless/headed/virtual), setCamofoxUrl"),
-			mcp.WithInputSchema[BrowserConfigArgs](),
-		),
-		backend.browserConfigHandler,
+		backend.browserSecHandler,
 	)
 
 	// =====================================================================
