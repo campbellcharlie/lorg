@@ -24,6 +24,27 @@ func trimHost(host string) string {
 	return u.Scheme + "://" + u.Host
 }
 
+// resolveHostRecord finds a row in _hosts matching either the full
+// scheme://host form OR a bare hostname. Tries exact match first, then
+// falls back to LIKE on the bare hostname so callers can pass either
+// "https://example.com" or "example.com" interchangeably.
+func resolveHostRecord(backend *Backend, host string) (*lorgdb.Record, error) {
+	if rec, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host); err == nil && rec != nil {
+		return rec, nil
+	}
+	// Strip any scheme/path the caller might have included so we LIKE on
+	// the bare host portion only (avoids partial substring false positives).
+	bare := host
+	if u, err := url.Parse(host); err == nil && u.Host != "" {
+		bare = u.Host
+	}
+	rec, err := backend.DB.FindFirstRecord("_hosts", "host LIKE ?", "%"+bare+"%")
+	if err != nil || rec == nil {
+		return nil, fmt.Errorf("host not found: %s", host)
+	}
+	return rec, nil
+}
+
 // ---------------------------------------------------------------------------
 // Input schemas (struct-based, type-safe)
 // ---------------------------------------------------------------------------
@@ -33,15 +54,16 @@ type GetRequestResponseArgs struct {
 }
 
 type HostPrintSitemapArgs struct {
-	Host  string `json:"host" jsonschema:"required" jsonschema_description:"the host to get the sitemap for"`
-	Path  string `json:"path" jsonschema:"required" jsonschema_description:"the path to get the sitemap for, use empty string to get the root sitemap"`
-	Depth int    `json:"depth" jsonschema:"required" jsonschema_description:"the depth to get the sitemap for, default is -1, use -1 to get the full sitemap"`
+	Host  string  `json:"host" jsonschema:"required" jsonschema_description:"the host to get the sitemap for"`
+	Path  string  `json:"path" jsonschema:"required" jsonschema_description:"the path to get the sitemap for, use empty string to get the root sitemap"`
+	Depth flexInt `json:"depth" jsonschema:"required" jsonschema_description:"the depth to get the sitemap for, default is -1, use -1 to get the full sitemap"`
 }
 
 type HostPrintRowsArgs struct {
-	Host   string  `json:"host" jsonschema:"required" jsonschema_description:"the host to get the table for"`
-	Page   flexInt `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
-	Filter string  `json:"filter" jsonschema:"required" jsonschema_description:"filter the results for faster search"`
+	Host    string   `json:"host" jsonschema:"required" jsonschema_description:"the host to get the table for"`
+	Page    flexInt  `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
+	Filter  string   `json:"filter" jsonschema:"required" jsonschema_description:"filter the results for faster search"`
+	Concise flexBool `json:"concise,omitempty" jsonschema_description:"If true, return only id+method+path+status+length per row (~10x cheaper). Default: false (full req/resp JSON)."`
 }
 
 type ListHostsArgs struct {
@@ -179,7 +201,7 @@ func (backend *Backend) hostPrintSitemapHandler(ctx context.Context, request mcp
 	data := &types.SitemapFetch{
 		Host:  trimHost(args.Host),
 		Path:  args.Path,
-		Depth: args.Depth,
+		Depth: int(args.Depth),
 	}
 
 	nodes, err := backend.sitemapFetchLogic(data)
@@ -222,6 +244,8 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
 	}
 
+	concise := bool(args.Concise)
+
 	// Manually resolve the "data" relation: each site record has a "data" field
 	// containing a _data record ID.
 	rows := make([]map[string]any, 0, len(records))
@@ -238,14 +262,28 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 		reqJSON := dataRecord.Get("req_json")
 		respJSON := dataRecord.Get("resp_json")
 
-		// Remove headers from req/resp to keep response compact
+		if concise {
+			// Cheap summary: just enough to scan and decide what to drill into.
+			req, _ := reqJSON.(map[string]any)
+			resp, _ := respJSON.(map[string]any)
+			rows = append(rows, map[string]any{
+				"id":     dataRecord.GetString("id"),
+				"index":  dataRecord.GetFloat("index"),
+				"method": mapStr(req, "method"),
+				"path":   mapStr(req, "path"),
+				"status": int(mapFloat(resp, "status")),
+				"length": int(mapFloat(resp, "length")),
+			})
+			continue
+		}
+
+		// Full mode — strip header noise but keep the rest.
 		if req, ok := reqJSON.(map[string]any); ok {
 			delete(req, "headers")
 		}
 		if resp, ok := respJSON.(map[string]any); ok {
 			delete(resp, "headers")
 		}
-
 		rows = append(rows, map[string]any{
 			"id":           dataRecord.GetString("id"),
 			"index":        dataRecord.GetFloat("index"),
@@ -265,6 +303,7 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 		"host":      host,
 		"totalRows": len(rows),
 		"rows":      rows,
+		"concise":   concise,
 	}
 
 	return mcpJSONResult(result)
@@ -335,11 +374,9 @@ func (backend *Backend) getHostInfoHandler(ctx context.Context, request mcp.Call
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	host := trimHost(args.Host)
-
-	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
+	record, err := resolveHostRecord(backend, trimHost(args.Host))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	techNames := resolveRelationNames(backend, "_tech", record.Get("tech"))
@@ -363,15 +400,13 @@ func (backend *Backend) getNoteForHostHandler(ctx context.Context, request mcp.C
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	host := trimHost(args.Host)
-
-	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
+	record, err := resolveHostRecord(backend, trimHost(args.Host))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	return mcpJSONResult(map[string]any{
-		"host":  host,
+		"host":  record.GetString("host"),
 		"notes": record.Get("notes"),
 	})
 }
@@ -382,12 +417,11 @@ func (backend *Backend) setNoteForHostHandler(ctx context.Context, request mcp.C
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	host := trimHost(args.Host)
-
-	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
+	record, err := resolveHostRecord(backend, trimHost(args.Host))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
+	host := record.GetString("host")
 
 	// Get existing notes as string lines
 	existingNotes, _ := record.Get("notes").([]any)
@@ -429,12 +463,11 @@ func (backend *Backend) modifyHostLabelsHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	host := trimHost(args.Host)
-
-	hostRecord, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
+	hostRecord, err := resolveHostRecord(backend, trimHost(args.Host))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
+	host := hostRecord.GetString("host")
 
 	currentLabelIDs := getStringSlice(hostRecord.Get("labels"))
 
@@ -508,12 +541,11 @@ func (backend *Backend) modifyHostNotesHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	host := trimHost(args.Host)
-
-	record, err := backend.DB.FindFirstRecord("_hosts", "host = ?", host)
+	record, err := resolveHostRecord(backend, trimHost(args.Host))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
+		return mcp.NewToolResultError(err.Error()), nil
 	}
+	host := record.GetString("host")
 
 	// Get existing notes as array of maps
 	existingRaw, _ := record.Get("notes").([]any)

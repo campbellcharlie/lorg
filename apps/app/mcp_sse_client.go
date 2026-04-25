@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -183,17 +184,12 @@ func (backend *Backend) sseConnectHandler(args SSEClientArgs) (*mcp.CallToolResu
 }
 
 func (backend *Backend) sseListEventsHandler(args SSEClientArgs) (*mcp.CallToolResult, error) {
-	if args.URL == "" {
-		return mcp.NewToolResultError("url is required for listEvents"), nil
+	url, conn, err := resolveSSEConnection(args.URL)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
-
-	sseConnectionsMu.Lock()
-	conn, exists := sseConnections[args.URL]
-	sseConnectionsMu.Unlock()
-
-	if !exists {
-		return mcp.NewToolResultError("no connection found for " + args.URL), nil
-	}
+	args.URL = url
+	_ = conn // keep handle for the read below
 
 	limit := args.Limit
 	if limit <= 0 {
@@ -222,27 +218,54 @@ func (backend *Backend) sseListEventsHandler(args SSEClientArgs) (*mcp.CallToolR
 }
 
 func (backend *Backend) sseDisconnectHandler(args SSEClientArgs) (*mcp.CallToolResult, error) {
-	if args.URL == "" {
-		return mcp.NewToolResultError("url is required for disconnect"), nil
+	url, _, err := resolveSSEConnection(args.URL)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	sseConnectionsMu.Lock()
-	conn, exists := sseConnections[args.URL]
-	if exists {
-		conn.cancel()
-		delete(sseConnections, args.URL)
-	}
+	conn := sseConnections[url]
+	conn.cancel()
+	delete(sseConnections, url)
 	sseConnectionsMu.Unlock()
-
-	if !exists {
-		return mcp.NewToolResultError("no connection found for " + args.URL), nil
-	}
 
 	return mcpJSONResult(map[string]any{
 		"success":     true,
-		"url":         args.URL,
+		"url":         url,
 		"eventsTotal": len(conn.Events),
 	})
+}
+
+// resolveSSEConnection picks an active SSE connection by URL. If no URL is
+// supplied AND there's exactly one tracked connection, it auto-resolves to
+// that one — saves the caller from echoing back the URL on every listEvents
+// or disconnect call when only one stream is in flight.
+func resolveSSEConnection(url string) (string, *sseConnection, error) {
+	sseConnectionsMu.Lock()
+	defer sseConnectionsMu.Unlock()
+
+	if url != "" {
+		conn, ok := sseConnections[url]
+		if !ok {
+			return "", nil, fmt.Errorf("no connection found for %s", url)
+		}
+		return url, conn, nil
+	}
+
+	switch len(sseConnections) {
+	case 0:
+		return "", nil, fmt.Errorf("no SSE connections — call action:connect with url first")
+	case 1:
+		for u, c := range sseConnections {
+			return u, c, nil
+		}
+	}
+
+	urls := make([]string, 0, len(sseConnections))
+	for u := range sseConnections {
+		urls = append(urls, u)
+	}
+	return "", nil, fmt.Errorf("multiple connections (%v); pass url to disambiguate", urls)
 }
 
 func (backend *Backend) sseListConnectionsHandler() (*mcp.CallToolResult, error) {
