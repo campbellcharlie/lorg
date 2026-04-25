@@ -68,6 +68,9 @@
           <button class="chip" data-chip-type="mime" data-chip="other">Other</button>
           <span class="chip-sep"></span>
           <button class="chip chip-clear" id="chip-clear">Clear</button>
+          <span class="chip-sep"></span>
+          <span id="filter-presets" class="filter-presets"></span>
+          <button class="chip chip-save" id="chip-save-preset" title="Save current filter as preset">+ Save</button>
         </div>
         <div class="table-container">
           <table id="traffic-table">
@@ -102,6 +105,7 @@
               <span class="dss-mime" id="dss-mime"></span>
             </div>
             <button id="btn-send-to-repeater" class="btn btn-sm btn-primary">Send to Repeater</button>
+            <button id="btn-diff" class="btn btn-sm" disabled title="Mark two rows for diff first (right-click)">Diff A↔B</button>
           </div>
           <div class="detail-split">
             <div class="detail-split-pane" id="detail-pane-request">
@@ -148,6 +152,10 @@
               <button id="rep-send" class="btn btn-primary">Send</button>
             </div>
             <div id="rep-note" class="repeater-note"></div>
+            <details class="rep-vars">
+              <summary>Variables (substituted into <code>{{name}}</code> placeholders before send)</summary>
+              <textarea id="rep-vars-input" class="rep-vars-input" placeholder="baseUrl = https://api.example.com&#10;token = eyJhbGc..." spellcheck="false"></textarea>
+            </details>
           </div>
           <div class="repeater-panes">
             <div class="repeater-pane">
@@ -328,6 +336,21 @@
 
     </main>
 
+    <!-- Diff modal -->
+    <div id="diff-modal" class="diff-modal hidden">
+      <div class="diff-backdrop"></div>
+      <div class="diff-content">
+        <div class="diff-header">
+          <span id="diff-title">Response Diff</span>
+          <button class="diff-close" title="Close (Esc)">×</button>
+        </div>
+        <div class="diff-body">
+          <div class="diff-pane" id="diff-pane-a"><h5>A</h5><div id="diff-content-a"></div></div>
+          <div class="diff-pane" id="diff-pane-b"><h5>B</h5><div id="diff-content-b"></div></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Command palette (Cmd/Ctrl+K) -->
     <div id="cmd-palette" class="cmd-palette hidden" role="dialog" aria-label="Command palette">
       <div class="cmd-palette-backdrop"></div>
@@ -345,6 +368,10 @@
     <button class="context-menu-item" data-action="copy-curl-proxy">Copy as curl (through proxy)</button>
     <button class="context-menu-item" data-action="copy-raw">Copy raw request</button>
     <button class="context-menu-item" data-action="send-repeater">Send to Repeater</button>
+    <button class="context-menu-item" data-action="filter-by-host">Filter by host</button>
+    <button class="context-menu-item" data-action="filter-by-path">Filter by path</button>
+    <button class="context-menu-item" data-action="diff-mark-a">Mark for diff (A)</button>
+    <button class="context-menu-item" data-action="diff-mark-b">Mark for diff (B)</button>
     <div class="context-menu-item has-submenu">
       Highlight
       <div class="context-submenu">

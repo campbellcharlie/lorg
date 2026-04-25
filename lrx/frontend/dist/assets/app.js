@@ -17,25 +17,56 @@
   function $$(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
 
   // --- API Helpers ---
+  // opts.silent: skip console.error on failure (use for benign 404 polls)
+  // opts.retry:  retry count on network/transport errors (NOT on 4xx)
   async function api(path, opts) {
     opts = opts || {};
-    try {
-      var res = await fetch(API + path, {
-        headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}),
-        method: opts.method || 'GET',
-        body: opts.body || undefined,
-      });
-      if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
-      return await res.json();
-    } catch (e) {
-      console.error('API error: ' + path, e);
-      return null;
+    var attempts = (opts.retry | 0) + 1;
+    var lastErr = null;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        var res = await fetch(API + path, {
+          headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}),
+          method: opts.method || 'GET',
+          body: opts.body || undefined,
+        });
+        if (!res.ok) {
+          // Don't retry on application-level errors (4xx/5xx) — only
+          // on transport failures (which throw).
+          if (!opts.silent) console.error('API error: ' + path + ' → HTTP ' + res.status);
+          return null;
+        }
+        return await res.json();
+      } catch (e) {
+        lastErr = e;
+        // Brief backoff before retry — 60ms, 180ms, 540ms
+        if (attempt + 1 < attempts) {
+          await new Promise(function(r){ setTimeout(r, 60 * Math.pow(3, attempt)); });
+          continue;
+        }
+        if (!opts.silent) console.error('API error: ' + path, e);
+        return null;
+      }
     }
+    return null;
   }
 
   // --- Status Check ---
+  // Auto-poll endpoints fire on a schedule (every 5-15s) so transient
+  // failures are noise — silence them by default and rely on the
+  // failures-to-render symptom instead. Boot calls also retry to ride
+  // through the WebKit "access control checks" race that can fire on
+  // the very first fetch of a fresh navigation.
+  var bootInFlight = true;
+  setTimeout(function(){ bootInFlight = false; }, 6000);
+  function bootOpts() {
+    return bootInFlight
+      ? { retry: 2, silent: true }
+      : { silent: true };
+  }
+
   async function checkStatus() {
-    var info = await api('/mcp/health');
+    var info = await api('/mcp/health', bootOpts());
     var dot = $('#status-indicator');
     var txt = $('#status-text');
     if (info && info.status === 'ok') {
@@ -49,7 +80,7 @@
     // Update project status in sidebar footer
     var projStatus = document.getElementById('project-status');
     if (projStatus) {
-      api('/api/proxy/list').then(function(data) {
+      api('/api/proxy/list', bootOpts()).then(function(data) {
         if (data && data.proxies && data.proxies.length > 0) {
           var p = data.proxies[0];
           projStatus.textContent = 'Proxy: ' + p.listenAddr;
@@ -62,7 +93,7 @@
 
   // --- Host List ---
   async function loadHosts() {
-    var data = await api('/api/collections/_hosts/records?perPage=200&sort=-created');
+    var data = await api('/api/collections/_hosts/records?perPage=200&sort=-created', bootOpts());
     if (!data || !data.items) return;
     hosts = data.items;
     renderHosts();
@@ -97,7 +128,7 @@
   async function loadTraffic() {
     var hostParam = hostFilter ? '&host=' + encodeURIComponent(hostFilter) : '';
     var projectParam = activeProjectFilter ? '&project=' + encodeURIComponent(activeProjectFilter) : '';
-    var data = await api('/api/traffic/list?perPage=500' + hostParam + projectParam);
+    var data = await api('/api/traffic/list?perPage=500' + hostParam + projectParam, bootOpts());
 
     if (!data || !data.items) return;
 
@@ -348,6 +379,31 @@
         return;
       }
     });
+
+    // Unmodified ] / [ — jump between highlighted rows in the visible
+    // traffic table. Wraps around. Suppressed while typing.
+    document.addEventListener('keydown', function(e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.key !== ']' && e.key !== '[') return;
+      e.preventDefault();
+      var rows = Array.prototype.slice.call(document.querySelectorAll('#traffic-body tr'));
+      var hl = rows.filter(function(r) {
+        return Array.prototype.some.call(r.classList, function(c) { return c.indexOf('hl-') === 0; });
+      });
+      if (hl.length === 0) return;
+      var currentIdx = -1;
+      for (var i = 0; i < hl.length; i++) {
+        if (hl[i].dataset.id === selectedTrafficId) { currentIdx = i; break; }
+      }
+      var nextIdx = e.key === ']'
+        ? (currentIdx + 1) % hl.length
+        : (currentIdx <= 0 ? hl.length - 1 : currentIdx - 1);
+      var target = hl[nextIdx];
+      target.scrollIntoView({ block: 'nearest' });
+      selectTrafficRow(target.dataset.id);
+    });
   }
 
   // ===========================================================
@@ -451,6 +507,246 @@
   }
   // Minimal CSS.escape polyfill for old WebKit (just enough for our IDs).
   function cssEscape(s) { return s.replace(/([^a-zA-Z0-9_-])/g, '\\$1'); }
+
+  // ===========================================================
+  // Repeater variables — parse "key = value" lines from the
+  // textarea, then replace {{key}} occurrences in the target.
+  // Stored in localStorage so they survive reloads.
+  // ===========================================================
+  function parseRepeaterVars() {
+    var ta = document.getElementById('rep-vars-input');
+    if (!ta) return {};
+    // Persist on every parse so user typing is captured
+    try { localStorage.setItem('lorg-rep-vars', ta.value); } catch (e) {}
+    var out = {};
+    ta.value.split('\n').forEach(function(line) {
+      var idx = line.indexOf('=');
+      if (idx <= 0) return;
+      var k = line.substring(0, idx).trim();
+      var v = line.substring(idx + 1).trim();
+      if (k) out[k] = v;
+    });
+    return out;
+  }
+  function applyVarSubstitution(text, vars) {
+    if (!text) return text;
+    return text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, function(_, name) {
+      return Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : '{{' + name + '}}';
+    });
+  }
+  function restoreRepeaterVars() {
+    var ta = document.getElementById('rep-vars-input');
+    if (!ta) return;
+    try {
+      var saved = localStorage.getItem('lorg-rep-vars');
+      if (saved) ta.value = saved;
+    } catch (e) {}
+  }
+
+  // ===========================================================
+  // Saved filter presets — named filter strings persisted to
+  // localStorage. Click a preset to load it; shift-click to delete.
+  // "+ Save" prompts for a name and snapshots the current filter.
+  // ===========================================================
+  function loadPresets() {
+    try { return JSON.parse(localStorage.getItem('lorg-filter-presets') || '[]'); }
+    catch (e) { return []; }
+  }
+  function savePresets(p) {
+    try { localStorage.setItem('lorg-filter-presets', JSON.stringify(p)); } catch (e) {}
+  }
+  function renderPresets() {
+    var holder = document.getElementById('filter-presets');
+    if (!holder) return;
+    var presets = loadPresets();
+    holder.innerHTML = presets.map(function(p) {
+      return '<button class="chip chip-preset" data-preset-name="' + escapeAttr(p.name) +
+        '" title="' + escapeAttr(p.filter) + '   (Shift-click to delete)">' +
+        escapeHtml(p.name) + '</button>';
+    }).join('');
+  }
+  function initFilterPresets() {
+    renderPresets();
+    var holder = document.getElementById('filter-presets');
+    var saveBtn = document.getElementById('chip-save-preset');
+    var input = document.getElementById('traffic-filter');
+    if (holder) {
+      holder.addEventListener('click', function(e) {
+        var btn = e.target.closest('.chip-preset');
+        if (!btn) return;
+        var name = btn.dataset.presetName;
+        var presets = loadPresets();
+        if (e.shiftKey) {
+          presets = presets.filter(function(p) { return p.name !== name; });
+          savePresets(presets);
+          renderPresets();
+          return;
+        }
+        var preset = presets.find(function(p) { return p.name === name; });
+        if (!preset) return;
+        input.value = preset.filter;
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+      });
+    }
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function() {
+        var current = input.value.trim();
+        if (!current) { alert('Type a filter first, then click Save.'); return; }
+        var name = prompt('Name this filter preset:', current.slice(0, 20));
+        if (!name) return;
+        var presets = loadPresets();
+        // Replace existing preset with the same name
+        presets = presets.filter(function(p) { return p.name !== name; });
+        presets.push({ name: name, filter: current });
+        savePresets(presets);
+        renderPresets();
+      });
+    }
+  }
+
+  // ===========================================================
+  // Diff marks — track up to two row IDs (A, B) for diffing.
+  // Marked rows get a small badge in the # column. The actual
+  // diff render is opened from the detail toolbar's Diff button.
+  // ===========================================================
+  var diffMarks = { A: null, B: null };
+  function markForDiff(slot, id) {
+    diffMarks[slot] = id;
+    updateDiffMarkBadges();
+    updateDiffButtonState();
+  }
+  function updateDiffMarkBadges() {
+    document.querySelectorAll('#traffic-body tr .diff-mark').forEach(function(b) { b.remove(); });
+    ['A', 'B'].forEach(function(slot) {
+      if (!diffMarks[slot]) return;
+      var tr = document.querySelector('#traffic-body tr[data-id="' + cssEscape(diffMarks[slot]) + '"]');
+      if (!tr) return;
+      var firstCell = tr.querySelector('td:first-child');
+      if (!firstCell) return;
+      var badge = document.createElement('span');
+      badge.className = 'diff-mark diff-mark-' + slot.toLowerCase();
+      badge.textContent = slot;
+      firstCell.appendChild(badge);
+    });
+  }
+  function updateDiffButtonState() {
+    var btn = document.getElementById('btn-diff');
+    if (!btn) return;
+    var ready = diffMarks.A && diffMarks.B && diffMarks.A !== diffMarks.B;
+    btn.disabled = !ready;
+    btn.classList.toggle('btn-primary', !!ready);
+  }
+  function initDiffMarks() {
+    var btn = document.getElementById('btn-diff');
+    if (btn) btn.addEventListener('click', openDiffModal);
+    var modal = document.getElementById('diff-modal');
+    if (modal) {
+      modal.querySelector('.diff-close').addEventListener('click', function() { modal.classList.add('hidden'); });
+      modal.querySelector('.diff-backdrop').addEventListener('click', function() { modal.classList.add('hidden'); });
+      // Esc closes
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+          modal.classList.add('hidden');
+        }
+      });
+    }
+    updateDiffButtonState();
+  }
+
+  async function openDiffModal() {
+    if (!diffMarks.A || !diffMarks.B) return;
+    var modal = document.getElementById('diff-modal');
+    var titleEl = document.getElementById('diff-title');
+    var aPane = document.getElementById('diff-content-a');
+    var bPane = document.getElementById('diff-content-b');
+
+    titleEl.textContent = 'Loading…';
+    aPane.innerHTML = '';
+    bPane.innerHTML = '';
+    modal.classList.remove('hidden');
+
+    var [aDetail, bDetail] = await Promise.all([
+      api('/api/traffic/' + diffMarks.A + '/detail'),
+      api('/api/traffic/' + diffMarks.B + '/detail'),
+    ]);
+    if (!aDetail || !bDetail) {
+      titleEl.textContent = 'Failed to load one or both rows';
+      return;
+    }
+    var aBody = extractBody(aDetail.response || '');
+    var bBody = extractBody(bDetail.response || '');
+
+    // For JSON, pretty-print first so the line-diff is meaningful.
+    aBody = maybePrettyJSON(aBody);
+    bBody = maybePrettyJSON(bBody);
+
+    var diff = lineDiff(aBody, bBody);
+    aPane.innerHTML = renderDiffSide(diff, 'a');
+    bPane.innerHTML = renderDiffSide(diff, 'b');
+    titleEl.textContent = 'Response Diff — A: ' + escapeHtml(diffMarks.A) + '   B: ' + escapeHtml(diffMarks.B);
+  }
+
+  function extractBody(raw) {
+    var sep = raw.indexOf('\r\n\r\n');
+    if (sep < 0) sep = raw.indexOf('\n\n');
+    return sep >= 0 ? raw.substring(sep + (raw.indexOf('\r\n\r\n') >= 0 ? 4 : 2)) : raw;
+  }
+  function maybePrettyJSON(s) {
+    var t = s.trim();
+    if (!t) return s;
+    if ((t[0] !== '{' && t[0] !== '[')) return s;
+    try { return JSON.stringify(JSON.parse(t), null, 2); }
+    catch (e) { return s; }
+  }
+
+  // O(n*m) LCS line diff. Fine for typical response sizes; we cap at
+  // 2000 lines per side to avoid pathological cost on huge bodies.
+  function lineDiff(a, b) {
+    var aL = a.split('\n');
+    var bL = b.split('\n');
+    var maxLines = 2000;
+    var truncated = false;
+    if (aL.length > maxLines) { aL = aL.slice(0, maxLines); truncated = true; }
+    if (bL.length > maxLines) { bL = bL.slice(0, maxLines); truncated = true; }
+
+    var n = aL.length, m = bL.length;
+    var dp = Array.from({length: n + 1}, function() { return new Uint16Array(m + 1); });
+    for (var i = n - 1; i >= 0; i--) {
+      for (var j = m - 1; j >= 0; j--) {
+        dp[i][j] = aL[i] === bL[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+
+    var ops = [];
+    var i2 = 0, j2 = 0;
+    while (i2 < n && j2 < m) {
+      if (aL[i2] === bL[j2])      { ops.push({ op: 'eq',  a: aL[i2], b: bL[j2] }); i2++; j2++; }
+      else if (dp[i2 + 1][j2] >= dp[i2][j2 + 1]) { ops.push({ op: 'del', a: aL[i2], b: null });   i2++; }
+      else                                       { ops.push({ op: 'add', a: null,  b: bL[j2] }); j2++; }
+    }
+    while (i2 < n) { ops.push({ op: 'del', a: aL[i2++], b: null }); }
+    while (j2 < m) { ops.push({ op: 'add', a: null, b: bL[j2++] }); }
+
+    if (truncated) ops.push({ op: 'eq', a: '… (diff truncated at 2000 lines per side)', b: '…' });
+    return ops;
+  }
+
+  function renderDiffSide(ops, side) {
+    return ops.map(function(op) {
+      if (op.op === 'eq') {
+        return '<div class="diff-line eq">' + escapeHtml(side === 'a' ? (op.a || '') : (op.b || '')) + '</div>';
+      }
+      if (side === 'a') {
+        if (op.op === 'del') return '<div class="diff-line del">' + escapeHtml(op.a || '') + '</div>';
+        return '<div class="diff-line"></div>'; // add → blank on A side
+      } else {
+        if (op.op === 'add') return '<div class="diff-line add">' + escapeHtml(op.b || '') + '</div>';
+        return '<div class="diff-line"></div>'; // del → blank on B side
+      }
+    }).join('');
+  }
 
   // Wire chip clicks once on init.
   function initChipStrip() {
@@ -1470,6 +1766,14 @@
       return;
     }
 
+    // Variable substitution — pull `key = value` lines from the
+    // collapsible Variables panel and replace {{key}} occurrences
+    // in the request before sending. Host/port are also subbed so
+    // {{baseHost}} works in the host input.
+    var vars = parseRepeaterVars();
+    request = applyVarSubstitution(request, vars);
+    host = applyVarSubstitution(host, vars);
+
     // Normalize request line to match selected HTTP version
     request = normalizeRequestVersion(request, httpVersion === 2);
 
@@ -2309,6 +2613,9 @@
     initCommandPalette();
     initGlobalShortcuts();
     initMatchReplace();
+    initFilterPresets();
+    initDiffMarks();
+    restoreRepeaterVars();
 
     document.addEventListener('click', function(e) {
       if (e.target.classList.contains('fmt-btn')) {
@@ -2552,6 +2859,22 @@
 
         if (action === 'send-repeater') {
           selectTrafficRow(contextRowId).then(function() { sendToRepeater(); });
+          return;
+        }
+
+        if (action === 'filter-by-host' || action === 'filter-by-path') {
+          var row = trafficData.find(function(r) { return r.id === contextRowId; });
+          if (!row) return;
+          var input = document.getElementById('traffic-filter');
+          var host = (row.host || '').replace(/^https?:\/\//, '').split(':')[0];
+          var path = (row.req_json && row.req_json.path) || row.path || '';
+          input.value = action === 'filter-by-host' ? 'host:' + host : 'path:' + path;
+          input.dispatchEvent(new Event('input', {bubbles:true}));
+          return;
+        }
+
+        if (action === 'diff-mark-a' || action === 'diff-mark-b') {
+          markForDiff(action === 'diff-mark-a' ? 'A' : 'B', contextRowId);
           return;
         }
 

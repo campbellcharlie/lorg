@@ -1486,6 +1486,176 @@ mark.find-match.find-current {
   color: var(--red, #ef4444);
   border-color: var(--red, #ef4444);
 }
+.filter-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-preset {
+  background: rgba(96, 165, 250, 0.06);
+  border-color: rgba(96, 165, 250, 0.25);
+  color: var(--blue, #60a5fa);
+}
+.chip-preset:hover {
+  background: rgba(96, 165, 250, 0.15);
+}
+.chip-save {
+  color: var(--text-ghost);
+  border-style: dashed;
+}
+.chip-save:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+/* ============================================================
+   Repeater variables panel — collapsed by default; key=value
+   per line. Values substitute into {{name}} in the request body
+   on Send.
+   ============================================================ */
+.rep-vars {
+  margin-top: 8px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.rep-vars summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-tertiary);
+}
+.rep-vars summary code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.rep-vars-input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--bg, #18181b);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-height: 60px;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.rep-vars-input:focus { border-color: var(--accent); }
+
+/* Diff mark badges shown in the # column of the traffic table */
+.diff-mark {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  margin-left: 4px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.diff-mark-a { background: rgba(96, 165, 250, 0.25); color: var(--blue, #60a5fa); }
+.diff-mark-b { background: rgba(168, 85, 247, 0.25); color: var(--purple, #a855f7); }
+
+/* ============================================================
+   Diff modal — full-screen overlay showing two responses
+   side by side with line-level adds/removes highlighted.
+   ============================================================ */
+.diff-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.diff-modal.hidden { display: none; }
+.diff-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+}
+.diff-content {
+  position: relative;
+  width: 92vw;
+  height: 86vh;
+  background: var(--bg-surface, #1c1c20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text);
+}
+.diff-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+}
+.diff-close:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+.diff-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border, #2a2a30);
+  overflow: hidden;
+  min-height: 0;
+}
+.diff-pane {
+  background: var(--bg, #18181b);
+  overflow: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.diff-pane h5 {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin: 0 0 8px 0;
+}
+.diff-line {
+  white-space: pre-wrap;
+  padding: 0 4px;
+  border-left: 2px solid transparent;
+}
+.diff-line.add {
+  background: rgba(45, 212, 168, 0.10);
+  border-left-color: var(--accent);
+}
+.diff-line.del {
+  background: rgba(239, 68, 68, 0.10);
+  border-left-color: var(--red, #ef4444);
+}
+.diff-line.eq {
+  color: var(--text-tertiary);
+}
 
 /* Pane-footer at-a-glance stats — Caido-style "1.4K · 142ms" pinned
    to bottom-right of the response pane. Doesn't take pointer events
