@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026-04-25] - MCP tool consolidation 77 → 42 and Chrome/CDP stack removal
+
+Massive cleanup pass: shrunk the MCP surface by 45% (77 → 42 tools) and ripped the legacy Chrome/CDP browser stack (-2,759 lines). Browser automation now flows exclusively through CamoFox via the `browser*` tools.
+
+- Phase 1 (commit fccfdf3): dropped 7 redundant MCP tools — `sendRequest`, `replayFromDb`, `searchTrafficRegex`, `getTrafficStats`, `getStatusDistribution`, `getEndpoints`, `getParameters`.
+- Phase 2 (e116d98): merged `extract` + `analyze` + `compare` → `responseAnalysis`.
+- Phase 3 (e19391c): merged 4 intercept tools → `intercept`.
+- Phase 4A (ebae6b2): removed 14 Chrome/CDP MCP page tools (CamoFox covers them via `browser*`).
+- Phase 5 (7078e29): merged 8 host tools → `host`.
+- Phase 6 (1a951e1): merged `browserAuth` + `browserXss` + `browserConfig` → `browserSec`.
+- Stage B (93314fe): full Chrome/CDP browser stack rip — deleted `apps/app/proxy_chrome_phase1.go`, `lrx/browser/chrome.go`, `lrx/browser/chrome_test.go` (2,215 lines), and pruned 544 lines from `proxy.go` / `routes.go` / `browser.go`.
+
 # Released v2026.3.9
 
 Includes `v0.28.1`

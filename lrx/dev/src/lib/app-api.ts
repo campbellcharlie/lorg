@@ -902,19 +902,19 @@ export const tools_api = [
 	},
 	{
 		id: 'tools',
-		name: 'Tool',
+		name: 'Tool (removed)',
 		method: 'GET',
 		path: '/api/tool',
-		description: 'Start a new PocketBase instance at the specified path',
+		description: 'Tool sub-instances are no longer supported. Endpoint kept as a tombstone that returns 410 Gone.',
 		category: '/api/tool',
 		examples: [
 			{
-				name: 'Start tool',
-				description: 'Bootstraps and serves a new PocketBase instance on an available port',
+				name: 'Tombstone',
+				description: 'Returns 410 Gone so old clients fail fast.',
 				request: {},
 				response: {
-					status: 200,
-					body: 'Path parameter: /path/to/data'
+					status: 410,
+					body: 'tool sub-instances are no longer supported'
 				}
 			}
 		]
@@ -1077,193 +1077,6 @@ export const proxy_api = [
 				description: 'Returns all active proxy instances with their details',
 				request: {},
 				response: { status: 200, body: [] }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Screenshot',
-		method: 'POST',
-		path: '/api/proxy/screenshot',
-		description: 'Take a screenshot of the browser attached to a proxy (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '' },
-		examples: [
-			{
-				name: 'Take screenshot',
-				description: 'Captures a screenshot from the Chrome instance attached to the proxy',
-				request: { id: 'abc123' },
-				response: { status: 200, body: { screenshot: '<base64 data>' } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Click Element',
-		method: 'POST',
-		path: '/api/proxy/click',
-		description: 'Click an element in the browser by selector (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '', selector: '' },
-		examples: [
-			{
-				name: 'Click element',
-				description: 'Clicks a DOM element in the Chrome instance by CSS selector',
-				request: { id: 'abc123', selector: '#submit' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Get Elements',
-		method: 'POST',
-		path: '/api/proxy/elements',
-		description: 'Get DOM elements from the browser by selector (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '', selector: '' },
-		examples: [
-			{
-				name: 'Get elements',
-				description: 'Returns DOM elements matching the CSS selector from the Chrome instance',
-				request: { id: 'abc123', selector: 'a' },
-				response: { status: 200, body: { elements: [] } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Chrome Tabs',
-		method: 'POST',
-		path: '/api/proxy/chrome/tabs',
-		description: 'List Chrome tabs for a proxy (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '' },
-		examples: [
-			{
-				name: 'List Chrome tabs',
-				description: 'Returns all open tabs in the Chrome instance',
-				request: { id: 'abc123' },
-				response: { status: 200, body: { tabs: [] } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Open Tab',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/open',
-		description: 'Open a new Chrome tab (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '', url: 'about:blank' },
-		examples: [
-			{
-				name: 'Open new tab',
-				description: 'Opens a new tab in the Chrome instance',
-				request: { id: 'abc123', url: 'https://example.com' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Navigate Tab',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/navigate',
-		description: 'Navigate a Chrome tab to a URL (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '', url: '' },
-		examples: [
-			{
-				name: 'Navigate tab',
-				description: 'Navigates the active tab to the specified URL',
-				request: { id: 'abc123', url: 'https://example.com' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Activate Tab',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/activate',
-		description: 'Activate a Chrome tab by ID (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '', tabId: '' },
-		examples: [
-			{
-				name: 'Activate tab',
-				description: 'Switches to the specified Chrome tab',
-				request: { id: 'abc123', tabId: 'tab1' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Close Tab',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/close',
-		description: 'Close a Chrome tab by ID (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '', tabId: '' },
-		examples: [
-			{
-				name: 'Close tab',
-				description: 'Closes the specified Chrome tab',
-				request: { id: 'abc123', tabId: 'tab1' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Reload Tab',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/reload',
-		description: 'Reload the active Chrome tab (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '' },
-		examples: [
-			{
-				name: 'Reload tab',
-				description: 'Reloads the active tab in the Chrome instance',
-				request: { id: 'abc123' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Back',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/back',
-		description: 'Navigate back in the active Chrome tab (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '' },
-		examples: [
-			{
-				name: 'Navigate back',
-				description: 'Goes back in the browser history of the active tab',
-				request: { id: 'abc123' },
-				response: { status: 200, body: { success: true } }
-			}
-		]
-	},
-	{
-		id: 'proxy',
-		name: 'Forward',
-		method: 'POST',
-		path: '/api/proxy/chrome/tab/forward',
-		description: 'Navigate forward in the active Chrome tab (requires auth)',
-		category: '/api/proxy',
-		defaultBody: { id: '' },
-		examples: [
-			{
-				name: 'Navigate forward',
-				description: 'Goes forward in the browser history of the active tab',
-				request: { id: 'abc123' },
-				response: { status: 200, body: { success: true } }
 			}
 		]
 	}
