@@ -1131,8 +1131,6 @@
       el.innerHTML = renderTreeView(raw);
     } else if (format === 'render') {
       el.innerHTML = renderHTMLView(raw);
-    } else if (format === 'hex') {
-      el.innerHTML = renderHexView(raw);
     }
   }
 
@@ -1325,54 +1323,6 @@
     // exfil cookies, navigate, or run scripts.
     var doc = body.replace(/"/g, '&quot;');
     return '<div class="render-view"><iframe class="render-frame" sandbox="" srcdoc="' + doc + '"></iframe></div>';
-  }
-
-  // ===========================================================
-  // Hex view (Burp Hex tab).
-  // Renders the body as 16-byte rows: 8-digit offset | hex bytes
-  // | ASCII (non-printable as '.'). Capped at 16KB per render to
-  // keep the DOM responsive — past that, switch to Raw.
-  // ===========================================================
-  function renderHexView(raw) {
-    var sep = raw.indexOf('\r\n\r\n');
-    if (sep < 0) sep = raw.indexOf('\n\n');
-    var body = sep >= 0 ? raw.substring(sep + (raw.indexOf('\r\n\r\n') >= 0 ? 4 : 2)) : raw;
-    if (!body) return '<div class="hex-view"><div class="hex-empty">Empty body</div></div>';
-
-    var maxBytes = 16 * 1024;
-    var truncated = false;
-    if (body.length > maxBytes) {
-      body = body.substring(0, maxBytes);
-      truncated = true;
-    }
-
-    var lines = [];
-    for (var i = 0; i < body.length; i += 16) {
-      var chunk = body.substring(i, i + 16);
-      var hex = '';
-      var ascii = '';
-      for (var j = 0; j < 16; j++) {
-        if (j < chunk.length) {
-          var code = chunk.charCodeAt(j) & 0xff;
-          hex += (code < 16 ? '0' : '') + code.toString(16) + ' ';
-          ascii += (code >= 0x20 && code < 0x7f) ? chunk[j] : '.';
-        } else {
-          hex += '   ';
-          ascii += ' ';
-        }
-        if (j === 7) hex += ' '; // visual midpoint gap
-      }
-      var offset = i.toString(16).padStart(8, '0');
-      lines.push(
-        '<div class="hex-row">' +
-          '<span class="hex-offset">' + offset + '</span>' +
-          '<span class="hex-bytes">' + hex.trimEnd() + '</span>' +
-          '<span class="hex-ascii">' + escapeHtml(ascii) + '</span>' +
-        '</div>'
-      );
-    }
-    var trunc = truncated ? '<div class="hex-trunc">Hex view truncated at 16 KB. Switch to Raw for the full body.</div>' : '';
-    return '<div class="hex-view">' + lines.join('') + trunc + '</div>';
   }
 
   // extractCT pulls Content-Type out of a raw HTTP message (headers part).

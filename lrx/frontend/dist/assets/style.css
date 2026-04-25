@@ -1388,50 +1388,6 @@ mark.find-match.find-current {
   font-size: 12px;
 }
 
-/* ============================================================
-   Hex view — Burp-style 16-byte rows with offset/hex/ascii
-   columns. Monospaced, fixed alignment.
-   ============================================================ */
-.hex-view {
-  padding: 8px 12px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text);
-  overflow: auto;
-  line-height: 1.4;
-}
-.hex-empty {
-  color: var(--text-ghost);
-  font-style: italic;
-}
-.hex-row {
-  display: flex;
-  gap: 16px;
-  white-space: pre;
-}
-.hex-offset {
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
-.hex-bytes {
-  color: var(--text-secondary);
-  flex: 1;
-  min-width: 0;
-}
-.hex-ascii {
-  color: var(--accent);
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.02);
-  padding: 0 4px;
-  border-radius: 2px;
-}
-.hex-trunc {
-  margin-top: 8px;
-  padding: 6px 8px;
-  color: var(--text-ghost);
-  font-style: italic;
-  border-top: 1px dotted var(--border, #2a2a30);
-}
 
 /* ============================================================
    Filter chips above the traffic table — Caido-style.
