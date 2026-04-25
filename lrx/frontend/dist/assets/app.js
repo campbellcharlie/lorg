@@ -1125,6 +1125,11 @@
     // Update active button within the same toggle group only.
     $$(btnSelector).forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === format); });
 
+    // Render mode swaps the <pre> to a flex column so the iframe can
+    // claim the full pane height; other modes keep the default block
+    // <pre> layout that sizes to text content.
+    el.classList.toggle('rh-render-mode', format === 'render');
+
     if (format === 'pretty') {
       // Image preview path — for image/* content-type, show the image
       // itself instead of trying to highlight binary garbage. Lifted
