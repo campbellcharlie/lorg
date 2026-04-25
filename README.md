@@ -20,8 +20,13 @@
 # Build
 go build -o lorg ./cmd/lorg/
 
-# Run (auto-starts proxy on :9090, API/UI on :8090)
-./lorg serve --http 127.0.0.1:8090
+# Run — API/UI on 127.0.0.1:8090, MITM proxy auto-started
+./lorg -host 127.0.0.1:8090 -path ~/.lorg/default
+
+# Optional flags:
+#   -projects-dir <dir>   per-project SQLite DBs (default: ~/.lorg/projects)
+#   -mcp-token   <token>  bearer token for the /mcp endpoint
+#   -log                  verbose logging
 
 # Open UI
 open http://127.0.0.1:8090
@@ -46,7 +51,7 @@ Add to your `.mcp.json`:
 
 | Category | Tools | Actions |
 |---|---|---|
-| **Request Sending** | `sendHttpRequest`, `mirror`, `sendRaw`, `exportCurl` | Structured HTTP with session inject, CSRF, redirects, regex extraction; mirror re-fires a captured row with small mutations |
+| **Request Sending** | `sendHttpRequest`, `mirror`, `sendRaw`, `exportCurl` | Structured HTTP with session inject + CSRF + redirects + regex extract; `mirror` re-fires a captured row with small mutations (~10× cheaper); `sendRaw` for raw TCP/TLS bytes or HTTP/2 sequences (request smuggling, malformed framing) |
 | **Browser** | `browser`, `browserInteract`, `browserExec`, `browserSec` | CamoFox tabs, page interaction, JS exec, security/admin (auth + XSS + config) |
 | **Intercept** | `intercept` | toggle, list, getRaw, forward, drop |
 | **Hosts** | `host` | list, info, sitemap, rows, getNote, setNote, modifyLabels, modifyNotes |
@@ -64,7 +69,6 @@ Add to your `.mcp.json`:
 | **Proxy** | `proxyList`, `proxyStart`, `proxyStop`, `matchReplace` | Lifecycle + match/replace rules |
 | **Encoding** | `encode` | urlEncode, urlDecode, b64Encode, b64Decode, random |
 | **Wire / Streams** | `protobuf`, `websocket`, `sseClient`, `ja4`, `oob` | Protobuf decoding, WebSocket inspection, SSE client, JA4 fingerprints, OOB callback server |
-| **Raw Socket** | `sendRaw` | tcp, tls, h2Sequence |
 | **Data** | `getRequestResponseFromID`, `lorgStatus` | Fetch raw req/resp by ID, runtime status |
 
 ## Architecture
@@ -81,7 +85,7 @@ Claude Code --> lorg MCP (port 8090) --> CamoFox (port 9377) --> Firefox
 
 ## UI Themes
 
-10 built-in themes: Obsidian (default), Dracula, Gruvbox, Nord, Monokai Pro, Solarized Dark, Catppuccin Mocha, Rose Pine, Midnight Blue, Ember.
+12 built-in themes: Obsidian (default), Dracula, Gruvbox, Nord, Monokai Pro, Solarized Dark, Catppuccin Mocha, Rosé Pine, Midnight Blue, Ember, Ayu Mirage Plus, Ayu Light.
 
 ## Requirements
 
