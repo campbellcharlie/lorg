@@ -578,108 +578,72 @@ func (backend *Backend) graphqlHandler(ctx context.Context, request mcp.CallTool
 	}
 }
 
-// ========================== 11. extract ==========================
+// ========================== 11. responseAnalysis ==========================
+//
+// One tool that absorbs the previous extract/analyze/compare dispatchers
+// (which themselves were already 3-way action dispatchers). Action names
+// are namespaced (analyze* / extract* / diff*) so the LLM can pick from
+// a flat list instead of two-level routing. All sub-handler argument
+// field names are compatible across categories — none collide.
+type ConsolidatedResponseAnalysisArgs struct {
+	Action string `json:"action" jsonschema:"required" jsonschema_description:"Operation: analyzeResponse, analyzeVariations, analyzeKeywords, extractRegex, extractJsonPath, extractBetween, diffResponses, diffById, diffStructural, diffJson"`
 
-// ConsolidatedExtractArgs is the union argument struct for the extract tool.
-type ConsolidatedExtractArgs struct {
-	Action         string `json:"action" jsonschema:"required" jsonschema_description:"Operation: regex, jsonPath, between"`
-	Content        string `json:"content,omitempty" jsonschema_description:"Content to search in"`
-	Pattern        string `json:"pattern,omitempty" jsonschema_description:"Regex pattern (regex)"`
-	MaxMatches     int    `json:"maxMatches,omitempty" jsonschema_description:"Max matches to return (regex, between)"`
-	Group          int    `json:"group,omitempty" jsonschema_description:"Capture group to extract (regex, 0=full match)"`
-	Path           string `json:"path,omitempty" jsonschema_description:"Dot-notation JSON path (jsonPath)"`
-	StartDelimiter string `json:"startDelimiter,omitempty" jsonschema_description:"Start delimiter (between)"`
-	EndDelimiter   string `json:"endDelimiter,omitempty" jsonschema_description:"End delimiter (between)"`
+	// analyze* inputs
+	Response  string   `json:"response,omitempty" jsonschema_description:"Raw HTTP response (analyzeResponse)"`
+	Responses []string `json:"responses,omitempty" jsonschema_description:"Multiple raw HTTP responses (analyzeVariations, analyzeKeywords)"`
+	Keywords  []string `json:"keywords,omitempty" jsonschema_description:"Keywords to search for (analyzeKeywords)"`
+
+	// extract* inputs
+	Content        string `json:"content,omitempty" jsonschema_description:"Content to search in (extract* actions)"`
+	Pattern        string `json:"pattern,omitempty" jsonschema_description:"Regex pattern (extractRegex)"`
+	MaxMatches     int    `json:"maxMatches,omitempty" jsonschema_description:"Max matches to return (extractRegex, extractBetween)"`
+	Group          int    `json:"group,omitempty" jsonschema_description:"Capture group (extractRegex, 0=full match)"`
+	Path           string `json:"path,omitempty" jsonschema_description:"Dot-notation JSON path (extractJsonPath)"`
+	StartDelimiter string `json:"startDelimiter,omitempty" jsonschema_description:"Start delimiter (extractBetween)"`
+	EndDelimiter   string `json:"endDelimiter,omitempty" jsonschema_description:"End delimiter (extractBetween)"`
+
+	// diff* inputs
+	Response1     string   `json:"response1,omitempty" jsonschema_description:"First raw HTTP response (diffResponses, diffStructural) or JSON string (diffJson)"`
+	Response2     string   `json:"response2,omitempty" jsonschema_description:"Second raw HTTP response (diffResponses, diffStructural) or JSON string (diffJson)"`
+	ID1           string   `json:"id1,omitempty" jsonschema_description:"First captured request ID (diffById)"`
+	ID2           string   `json:"id2,omitempty" jsonschema_description:"Second captured request ID (diffById)"`
+	IgnoreHeaders []string `json:"ignoreHeaders,omitempty" jsonschema_description:"Header names to ignore (diffResponses, diffById, diffStructural)"`
 }
 
-func (backend *Backend) extractHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args ConsolidatedExtractArgs
+func (backend *Backend) responseAnalysisHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ConsolidatedResponseAnalysisArgs
 	if err := request.BindArguments(&args); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	switch args.Action {
-	case "regex":
-		// Delegate: ExtractRegexArgs uses json:"content", json:"pattern",
-		// json:"maxMatches", json:"group" -- all match.
-		return backend.extractRegexHandler(ctx, request)
-	case "jsonPath":
-		// Delegate: ExtractJsonPathArgs uses json:"content", json:"path" -- all match.
-		return backend.extractJsonPathHandler(ctx, request)
-	case "between":
-		// Delegate: ExtractBetweenArgs uses json:"content", json:"startDelimiter",
-		// json:"endDelimiter", json:"maxMatches" -- all match.
-		return backend.extractBetweenHandler(ctx, request)
-	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: regex, jsonPath, between"), nil
-	}
-}
-
-// ========================== 12. analyze ==========================
-
-// ConsolidatedAnalyzeArgs is the union argument struct for the analyze tool.
-type ConsolidatedAnalyzeArgs struct {
-	Action    string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: response, variations, keywords"`
-	Response  string   `json:"response,omitempty" jsonschema_description:"Raw HTTP response (response)"`
-	Responses []string `json:"responses,omitempty" jsonschema_description:"Multiple raw HTTP responses (variations, keywords)"`
-	Keywords  []string `json:"keywords,omitempty" jsonschema_description:"Keywords to search for (keywords)"`
-}
-
-func (backend *Backend) analyzeHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args ConsolidatedAnalyzeArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	switch args.Action {
-	case "response":
-		// Delegate: AnalyzeResponseArgs uses json:"response" -- matches.
+	// analyze*
+	case "analyzeResponse":
 		return backend.analyzeResponseHandler(ctx, request)
-	case "variations":
-		// Delegate: AnalyzeResponseVariationsArgs uses json:"responses" -- matches.
+	case "analyzeVariations":
 		return backend.analyzeResponseVariationsHandler(ctx, request)
-	case "keywords":
-		// Delegate: AnalyzeResponseKeywordsArgs uses json:"responses", json:"keywords" -- all match.
+	case "analyzeKeywords":
 		return backend.analyzeResponseKeywordsHandler(ctx, request)
-	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: response, variations, keywords"), nil
-	}
-}
 
-// ========================== 13. compare ==========================
+	// extract*
+	case "extractRegex":
+		return backend.extractRegexHandler(ctx, request)
+	case "extractJsonPath":
+		return backend.extractJsonPathHandler(ctx, request)
+	case "extractBetween":
+		return backend.extractBetweenHandler(ctx, request)
 
-// ConsolidatedCompareArgs is the union argument struct for the compare tool.
-type ConsolidatedCompareArgs struct {
-	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: responses, byId, structural, jsonDiff"`
-	Response1     string   `json:"response1,omitempty" jsonschema_description:"First raw HTTP response (responses, structural) or JSON string (jsonDiff)"`
-	Response2     string   `json:"response2,omitempty" jsonschema_description:"Second raw HTTP response (responses, structural) or JSON string (jsonDiff)"`
-	ID1           string   `json:"id1,omitempty" jsonschema_description:"First request ID from PocketBase (byId)"`
-	ID2           string   `json:"id2,omitempty" jsonschema_description:"Second request ID from PocketBase (byId)"`
-	IgnoreHeaders []string `json:"ignoreHeaders,omitempty" jsonschema_description:"Header names to ignore in comparison (responses, byId, structural)"`
-}
-
-func (backend *Backend) compareHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args ConsolidatedCompareArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	switch args.Action {
-	case "responses":
-		// Delegate: CompareResponsesArgs uses json:"response1", json:"response2",
-		// json:"ignoreHeaders" -- all match.
+	// diff*
+	case "diffResponses":
 		return backend.compareResponsesHandler(ctx, request)
-	case "byId":
-		// Delegate: CompareTrafficByIdArgs uses json:"id1", json:"id2",
-		// json:"ignoreHeaders" -- all match.
+	case "diffById":
 		return backend.compareTrafficByIdHandler(ctx, request)
-	case "structural":
-		// Header-by-header + body structure diff
+	case "diffStructural":
 		return backend.structuralDiffHandler(ctx, args.Response1, args.Response2, args.IgnoreHeaders)
-	case "jsonDiff":
-		// Standalone JSON tree diff (response1/response2 hold JSON strings)
+	case "diffJson":
 		return backend.jsonDiffHandler(ctx, args.Response1, args.Response2)
+
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: responses, byId, structural, jsonDiff"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: analyzeResponse, analyzeVariations, analyzeKeywords, extractRegex, extractJsonPath, extractBetween, diffResponses, diffById, diffStructural, diffJson"), nil
 	}
 }
