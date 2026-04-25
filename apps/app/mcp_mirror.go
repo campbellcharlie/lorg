@@ -162,12 +162,19 @@ func (backend *Backend) loadMirrorBaseline(args MirrorArgs) (*mirrorBaseline, er
 	if err != nil || rec == nil {
 		return nil, fmt.Errorf("row not found: %s", args.RowID)
 	}
-	raw := rec.GetString("req")
+	// _data.req stores the cross-reference row id, NOT the raw HTTP.
+	// Source of truth for the raw request bytes is _req[id].raw.
+	var raw string
+	reqRec, err := backend.DB.FindRecordById("_req", args.RowID)
+	if err == nil && reqRec != nil {
+		raw = reqRec.GetString("raw")
+	}
+	// Fall back to _data.req only if it actually looks like a request
+	// line (older / migrated rows may have stored raw there directly).
 	if raw == "" {
-		// Fall back to the _req table
-		reqRec, err := backend.DB.FindRecordById("_req", args.RowID)
-		if err == nil && reqRec != nil {
-			raw = reqRec.GetString("raw")
+		candidate := rec.GetString("req")
+		if looksLikeRequestLineStart(candidate) {
+			raw = candidate
 		}
 	}
 	if raw == "" {
@@ -260,6 +267,20 @@ func loadMirrorFromProjectDB(id string) *mirrorBaseline {
 	return &mirrorBaseline{rawRequest: raw, host: host, port: port, tls: tls, http2: false}
 }
 
+// looksLikeRequestLineStart returns true when s opens with what could be
+// an HTTP request line ("METHOD path HTTP/x"). Cheap shape check.
+func looksLikeRequestLineStart(s string) bool {
+	if s == "" {
+		return false
+	}
+	// Take just the first line for the check.
+	first := s
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		first = s[:i]
+	}
+	return looksLikeRequestLine(first)
+}
+
 func isNumeric(s string) bool {
 	if s == "" {
 		return false
@@ -291,6 +312,12 @@ func applyMutations(raw string, args MirrorArgs) (string, []string, error) {
 	}
 
 	lines := strings.Split(headerBlock, "\n")
+	// Strip trailing empty lines so newly-added headers don't get
+	// separated from the rest by a blank line — that would make the
+	// receiver parse them as the body instead of as headers.
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
 	if len(lines) == 0 {
 		return "", nil, fmt.Errorf("malformed request — no lines")
 	}
