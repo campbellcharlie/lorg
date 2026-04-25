@@ -198,19 +198,20 @@ func (backend *Backend) probeAuthHandler(ctx context.Context, request mcp.CallTo
 
 	hostPattern := "%" + strings.TrimSpace(args.Host) + "%"
 
-	// 1. Find requests that carried an auth-bearing credential. We pull the
-	//    raw request and inspect headers since req_json doesn't always store
-	//    a normalized headers map.
+	// 1. Find requests that carried an auth-bearing credential. _data.req
+	//    holds a cross-reference ID, not the raw bytes, so we JOIN _req
+	//    to read the actual HTTP for header inspection.
 	authQ := `
-		SELECT id,
-		       COALESCE(json_extract(req_json,'$.method'),'') AS method,
-		       COALESCE(json_extract(req_json,'$.path'),  '') AS path,
-		       COALESCE(json_extract(resp_json,'$.status'),0) AS status,
-		       req
-		FROM _data
-		WHERE host LIKE ?
-		  AND has_resp = TRUE
-		ORDER BY "index" DESC
+		SELECT d.id,
+		       COALESCE(json_extract(d.req_json,'$.method'),'') AS method,
+		       COALESCE(json_extract(d.req_json,'$.path'),  '') AS path,
+		       COALESCE(json_extract(d.resp_json,'$.status'),0) AS status,
+		       COALESCE(q.raw, '')                              AS raw
+		FROM _data d
+		LEFT JOIN _req q ON d.id = q.id
+		WHERE d.host LIKE ?
+		  AND d.has_resp = TRUE
+		ORDER BY d."index" DESC
 		LIMIT 2000`
 
 	rows, err := backend.DB.Query(authQ, hostPattern)

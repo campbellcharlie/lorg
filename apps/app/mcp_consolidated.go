@@ -301,6 +301,8 @@ type ConsolidatedJwtArgs struct {
 	PrivateKey string   `json:"privateKey,omitempty" jsonschema_description:"RSA private key PEM (forge)"`
 	PublicKey  string   `json:"publicKey,omitempty" jsonschema_description:"RSA public key PEM (keyConfusion)"`
 	Wordlist   []string `json:"wordlist,omitempty" jsonschema_description:"Custom secrets to try (bruteforce)"`
+	Cases      []string `json:"cases,omitempty" jsonschema_description:"Case variants for noneAttack. Default: all 7. Pass [\"none\"] for the smallest payload."`
+	Formats    []string `json:"formats,omitempty" jsonschema_description:"Signature formats for noneAttack. Default: all 3 (empty_sig, no_dot, space_sig)."`
 }
 
 func (backend *Backend) jwtHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -651,11 +653,12 @@ type ConsolidatedHostArgs struct {
 	Page   flexInt `json:"page,omitempty" jsonschema_description:"Page number, 1-indexed (list, rows)"`
 
 	// sitemap
-	Path  string `json:"path,omitempty" jsonschema_description:"Path prefix to scope the sitemap (sitemap)"`
-	Depth int    `json:"depth,omitempty" jsonschema_description:"Sitemap depth, -1 for full (sitemap)"`
+	Path  string  `json:"path,omitempty" jsonschema_description:"Path prefix to scope the sitemap (sitemap)"`
+	Depth flexInt `json:"depth,omitempty" jsonschema_description:"Sitemap depth, -1 for full (sitemap)"`
 
 	// rows
-	Filter string `json:"filter,omitempty" jsonschema_description:"Substring filter for the host's request rows (rows)"`
+	Filter  string   `json:"filter,omitempty" jsonschema_description:"Substring filter for the host's request rows (rows)"`
+	Concise flexBool `json:"concise,omitempty" jsonschema_description:"Return one summary line per row (id, method, path, status, length) instead of full req/resp JSON. Use for cheap browsing of host activity (rows). Default: false."`
 
 	// setNote
 	Edit []NoteEditAction `json:"edit,omitempty" jsonschema_description:"Per-line edits for the host's note (setNote)"`

