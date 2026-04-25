@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -14,6 +15,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"golang.org/x/net/http2"
 )
+
+// raceResponseBodyCap bounds how much body we count/read per response. The
+// underlying connection is closed by the caller when it goes out of scope, so
+// any extra bytes are discarded by the kernel.
+const raceResponseBodyCap = 256 * 1024
 
 // ---------------------------------------------------------------------------
 // Input schemas
@@ -84,60 +90,72 @@ func sendAndRead(conn net.Conn, request []byte) (string, int, error) {
 		return "", 0, fmt.Errorf("write error: %v", err)
 	}
 
-	buf := make([]byte, 64*1024)
-	var response strings.Builder
-	totalRead := 0
-	for {
-		n, err := conn.Read(buf)
-		if n > 0 {
-			response.Write(buf[:n])
-			totalRead += n
-		}
-		if err != nil {
-			break
-		}
-		if totalRead > 256*1024 {
-			break
-		}
-	}
-
-	resp := response.String()
-	statusLine := ""
-	if idx := strings.Index(resp, "\r\n"); idx > 0 {
-		statusLine = resp[:idx]
-	} else if idx := strings.Index(resp, "\n"); idx > 0 {
-		statusLine = resp[:idx]
-	}
-
-	return statusLine, totalRead, nil
+	return readHTTPResponse(conn)
 }
 
 func sendAndReadResponse(conn net.Conn) (string, int, error) {
-	buf := make([]byte, 64*1024)
-	var response strings.Builder
+	return readHTTPResponse(conn)
+}
+
+// readHTTPResponse reads one HTTP/1.x response from conn and returns its
+// status line and body byte count. It handles HTTP/1.0 and HTTP/1.1, with
+// Content-Length, chunked transfer-encoding, or close-delimited framing —
+// whichever the response declares — without waiting for socket close.
+//
+// On a malformed or unparseable response it falls back to the legacy
+// drain-until-close behavior so callers still get something back instead of
+// an error.
+func readHTTPResponse(conn net.Conn) (string, int, error) {
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		// Fallback: read whatever bytes are buffered + on the wire so the
+		// caller still gets a length and partial status line. This mirrors
+		// the original drain-until-close behavior for non-HTTP traffic.
+		return drainNonHTTP(br)
+	}
+	defer resp.Body.Close()
+
+	statusLine := fmt.Sprintf("%s %s", resp.Proto, resp.Status)
+
+	limited := io.LimitReader(resp.Body, raceResponseBodyCap+1)
+	n, _ := io.Copy(io.Discard, limited)
+	if n > raceResponseBodyCap {
+		n = raceResponseBodyCap
+	}
+	return statusLine, int(n), nil
+}
+
+// drainNonHTTP is the fallback path for when the bytes on the wire don't
+// parse as an HTTP response (e.g. raw TCP echo, smuggling probe responses).
+// It returns the first line as the "status" and the total byte count.
+func drainNonHTTP(br *bufio.Reader) (string, int, error) {
+	var buf [64 * 1024]byte
+	var first strings.Builder
 	totalRead := 0
+	gotFirstLine := false
 	for {
-		n, err := conn.Read(buf)
+		n, err := br.Read(buf[:])
 		if n > 0 {
-			response.Write(buf[:n])
+			if !gotFirstLine {
+				chunk := buf[:n]
+				if idx := strings.IndexByte(string(chunk), '\n'); idx >= 0 {
+					first.Write(chunk[:idx])
+					gotFirstLine = true
+				} else {
+					first.Write(chunk)
+				}
+			}
 			totalRead += n
 		}
 		if err != nil {
 			break
 		}
-		if totalRead > 256*1024 {
+		if totalRead > raceResponseBodyCap {
 			break
 		}
 	}
-
-	resp := response.String()
-	statusLine := ""
-	if idx := strings.Index(resp, "\r\n"); idx > 0 {
-		statusLine = resp[:idx]
-	} else if idx := strings.Index(resp, "\n"); idx > 0 {
-		statusLine = resp[:idx]
-	}
-
+	statusLine := strings.TrimRight(first.String(), "\r")
 	return statusLine, totalRead, nil
 }
 

@@ -376,6 +376,15 @@ func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (
 
 	dataRecord.Load(m)
 
+	// Compute response fingerprint for clustering / anomaly tools — same
+	// scheme used by the proxy raw path so MCP-tool traffic and repeater
+	// traffic cluster together with proxy traffic.
+	if reqBody.Response != "" && userdata.RespJson.Status != 0 {
+		_, body := splitHTTPRaw(reqBody.Response)
+		fp := ComputeFingerprint(userdata.RespJson.Status, userdata.RespJson.Mime, []byte(body))
+		dataRecord.Set("fingerprint", fp)
+	}
+
 	err = backend.DB.SaveRecord(dataRecord)
 	if err != nil {
 		log.Printf("[SaveRequestToBackend] Error saving _data record: %v", err)

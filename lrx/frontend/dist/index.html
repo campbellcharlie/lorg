@@ -54,6 +54,24 @@
           <button id="traffic-refresh" class="btn btn-sm">Refresh</button>
           <span id="traffic-count" class="count-badge">0</span>
         </div>
+        <div class="chip-strip" id="traffic-chips">
+          <button class="chip" data-chip-type="method" data-chip="GET">GET</button>
+          <button class="chip" data-chip-type="method" data-chip="POST">POST</button>
+          <button class="chip" data-chip-type="method" data-chip="PUT">PUT</button>
+          <button class="chip" data-chip-type="method" data-chip="DELETE">DEL</button>
+          <span class="chip-sep"></span>
+          <button class="chip" data-chip-type="mime" data-chip="json">JSON</button>
+          <button class="chip" data-chip-type="mime" data-chip="html">HTML</button>
+          <button class="chip" data-chip-type="mime" data-chip="javascript">JS</button>
+          <button class="chip" data-chip-type="mime" data-chip="xml">XML</button>
+          <button class="chip" data-chip-type="mime" data-chip="image">Image</button>
+          <button class="chip" data-chip-type="mime" data-chip="other">Other</button>
+          <span class="chip-sep"></span>
+          <button class="chip chip-clear" id="chip-clear">Clear</button>
+          <span class="chip-sep"></span>
+          <span id="filter-presets" class="filter-presets"></span>
+          <button class="chip chip-save" id="chip-save-preset" title="Save current filter as preset">+ Save</button>
+        </div>
         <div class="table-container">
           <table id="traffic-table">
             <thead>
@@ -74,17 +92,51 @@
         <div id="resize-handle" class="resize-handle hidden"></div>
         <div id="traffic-detail" class="detail-pane hidden">
           <div class="detail-toolbar">
+            <div id="detail-status-strip" class="detail-status-strip">
+              <span class="dss-method" id="dss-method"></span>
+              <span class="dss-url" id="dss-url"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-status" id="dss-status"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-time" id="dss-time"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-size" id="dss-size"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-mime" id="dss-mime"></span>
+            </div>
             <button id="btn-send-to-repeater" class="btn btn-sm btn-primary">Send to Repeater</button>
+            <button id="btn-diff" class="btn btn-sm" disabled title="Mark two rows for diff first (right-click)">Diff A↔B</button>
           </div>
           <div class="detail-split">
             <div class="detail-split-pane" id="detail-pane-request">
-              <div class="pane-header">Request</div>
-              <pre id="detail-request-raw" class="raw-http"></pre>
+              <div class="pane-header">Request <span class="detail-format-toggle"><button class="req-fmt-btn active" data-fmt="pretty">Pretty</button><button class="req-fmt-btn" data-fmt="tree">Tree</button><button class="req-fmt-btn" data-fmt="raw">Raw</button><button class="req-fmt-btn" data-fmt="headers">Headers</button><button class="req-fmt-btn" data-fmt="cookies">Cookies</button></span></div>
+              <pre id="detail-request-raw" class="raw-http" tabindex="0"></pre>
+              <div class="find-bar hidden" data-target="detail-request-raw">
+                <input type="text" class="find-input" placeholder="Find in request">
+                <button class="find-toggle" data-toggle="regex" title="Regex (.*)">.*</button>
+                <button class="find-toggle" data-toggle="case"  title="Case sensitive (Aa)">Aa</button>
+                <button class="find-toggle" data-toggle="word"  title="Whole word (\b)">\b</button>
+                <span class="find-count">0/0</span>
+                <button class="find-prev" title="Previous (Shift+Enter)">↑</button>
+                <button class="find-next" title="Next (Enter)">↓</button>
+                <button class="find-close" title="Close (Esc)">×</button>
+              </div>
             </div>
             <div id="detail-split-handle" class="detail-split-handle"></div>
             <div class="detail-split-pane" id="detail-pane-response">
-              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button></span></div>
-              <pre id="detail-response-raw" class="raw-http"></pre>
+              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="tree">Tree</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button><button class="fmt-btn" data-fmt="cookies">Cookies</button><button class="fmt-btn" data-fmt="render">Render</button></span></div>
+              <pre id="detail-response-raw" class="raw-http" tabindex="0"></pre>
+              <div class="pane-footer-stats" id="resp-pane-stats"></div>
+              <div class="find-bar hidden" data-target="detail-response-raw">
+                <input type="text" class="find-input" placeholder="Find in response">
+                <button class="find-toggle" data-toggle="regex" title="Regex (.*)">.*</button>
+                <button class="find-toggle" data-toggle="case"  title="Case sensitive (Aa)">Aa</button>
+                <button class="find-toggle" data-toggle="word"  title="Whole word (\b)">\b</button>
+                <span class="find-count">0/0</span>
+                <button class="find-prev" title="Previous (Shift+Enter)">↑</button>
+                <button class="find-next" title="Next (Enter)">↓</button>
+                <button class="find-close" title="Close (Esc)">×</button>
+              </div>
             </div>
           </div>
         </div>
@@ -106,6 +158,10 @@
               <button id="rep-send" class="btn btn-primary">Send</button>
             </div>
             <div id="rep-note" class="repeater-note"></div>
+            <details class="rep-vars">
+              <summary>Variables (substituted into <code>{{name}}</code> placeholders before send)</summary>
+              <textarea id="rep-vars-input" class="rep-vars-input" placeholder="baseUrl = https://api.example.com&#10;token = eyJhbGc..." spellcheck="false"></textarea>
+            </details>
           </div>
           <div class="repeater-panes">
             <div class="repeater-pane">
@@ -165,6 +221,8 @@
                 <option value="rosepine">Rosé Pine</option>
                 <option value="midnight">Midnight Blue</option>
                 <option value="ember">Ember</option>
+                <option value="ayu-mirage">Ayu Mirage Plus</option>
+                <option value="ayu-light">Ayu Light</option>
               </select>
             </label>
           </div>
@@ -253,12 +311,63 @@
             <button id="scope-reset-btn" class="btn btn-sm" style="color:var(--red);">Reset All Scope Rules</button>
           </div>
 
+          <h2 class="settings-title" style="margin-top:28px;">Match &amp; Replace</h2>
+          <p class="settings-help">
+            Rewrite request/response content in flight. Type is one of:
+            <code>request_header</code>, <code>request_body</code>,
+            <code>response_header</code>, <code>response_body</code>.
+            Match is a Go regex, Replace supports <code>$1</code> capture groups.
+            Scope is an optional host substring filter (empty = all hosts).
+          </p>
+          <div id="mr-rules" class="mr-rules"></div>
+          <details class="mr-add" id="mr-add-form">
+            <summary>+ Add new rule</summary>
+            <div class="mr-add-grid">
+              <select id="mr-type">
+                <option value="request_header">Request header</option>
+                <option value="request_body">Request body</option>
+                <option value="response_header">Response header</option>
+                <option value="response_body">Response body</option>
+              </select>
+              <input id="mr-match" type="text" placeholder="Match (regex)">
+              <input id="mr-replace" type="text" placeholder="Replace (supports $1, $2...)">
+              <input id="mr-scope" type="text" placeholder="Scope (host substring, optional)">
+              <input id="mr-comment" type="text" placeholder="Comment (optional)">
+              <button id="mr-add-btn" class="btn btn-sm btn-primary">Add Rule</button>
+            </div>
+          </details>
+
           <h2 class="settings-title" style="margin-top:28px;">Proxy</h2>
           <div id="proxy-info" style="padding:6px 0; font-size:11px; color:var(--text-muted);">Loading...</div>
         </div>
       </div>
 
     </main>
+
+    <!-- Diff modal -->
+    <div id="diff-modal" class="diff-modal hidden">
+      <div class="diff-backdrop"></div>
+      <div class="diff-content">
+        <div class="diff-header">
+          <span id="diff-title">Response Diff</span>
+          <button class="diff-close" title="Close (Esc)">×</button>
+        </div>
+        <div class="diff-body">
+          <div class="diff-pane" id="diff-pane-a"><h5>A</h5><div id="diff-content-a"></div></div>
+          <div class="diff-pane" id="diff-pane-b"><h5>B</h5><div id="diff-content-b"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Command palette (Cmd/Ctrl+K) -->
+    <div id="cmd-palette" class="cmd-palette hidden" role="dialog" aria-label="Command palette">
+      <div class="cmd-palette-backdrop"></div>
+      <div class="cmd-palette-modal">
+        <input type="text" id="cmd-palette-input" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+        <ul id="cmd-palette-list" class="cmd-palette-list"></ul>
+        <div class="cmd-palette-hint">↑↓ navigate · Enter run · Esc close</div>
+      </div>
+    </div>
   </div>
 
   <!-- Context menu -->
@@ -267,6 +376,21 @@
     <button class="context-menu-item" data-action="copy-curl-proxy">Copy as curl (through proxy)</button>
     <button class="context-menu-item" data-action="copy-raw">Copy raw request</button>
     <button class="context-menu-item" data-action="send-repeater">Send to Repeater</button>
+    <button class="context-menu-item" data-action="filter-by-host">Filter by host</button>
+    <button class="context-menu-item" data-action="filter-by-path">Filter by path</button>
+    <button class="context-menu-item" data-action="diff-mark-a">Mark for diff (A)</button>
+    <button class="context-menu-item" data-action="diff-mark-b">Mark for diff (B)</button>
+    <div class="context-menu-item has-submenu">
+      Highlight
+      <div class="context-submenu">
+        <button class="context-submenu-item" data-action="hl-none"><span class="hl-swatch none"></span>None</button>
+        <button class="context-submenu-item" data-action="hl-yellow"><span class="hl-swatch yellow"></span>Yellow</button>
+        <button class="context-submenu-item" data-action="hl-orange"><span class="hl-swatch orange"></span>Orange</button>
+        <button class="context-submenu-item" data-action="hl-red"><span class="hl-swatch red"></span>Red</button>
+        <button class="context-submenu-item" data-action="hl-green"><span class="hl-swatch green"></span>Green</button>
+        <button class="context-submenu-item" data-action="hl-blue"><span class="hl-swatch blue"></span>Blue</button>
+      </div>
+    </div>
   </div>
 
   <script src="assets/app.js"></script>

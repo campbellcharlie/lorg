@@ -124,7 +124,9 @@ func (backend *Backend) handleSitemapNew(data *types.SitemapGet) error {
 						log.Println(err)
 					}
 				}
-				recordIDs = append(recordIDs, r.Id)
+				if r != nil {
+					recordIDs = append(recordIDs, r.Id)
+				}
 
 				// Increment counter for this tech
 				backend.CounterManager.Increment("tech:"+key, "", "")

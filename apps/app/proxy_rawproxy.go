@@ -903,6 +903,16 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 	dataRecord.Set("http", userdata["http"].(string))
 	dataRecord.Set("has_resp", userdata["has_resp"].(bool))
 	dataRecord.Set("resp_json", responseData)
+
+	// Compute response fingerprint for clustering / anomaly tools.
+	// Best-effort: any failure here must not block the save.
+	if status, ok := responseData["status"].(int); ok {
+		mime, _ := responseData["mime"].(string)
+		_, body := splitHTTPRaw(rawResponse)
+		fp := ComputeFingerprint(status, mime, []byte(body))
+		dataRecord.Set("fingerprint", fp)
+	}
+
 	if err := rp.backend.DB.SaveRecord(dataRecord); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to update _data record ID=%s: %v", userdata["id"].(string), err)
 	} else {

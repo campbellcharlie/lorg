@@ -51,30 +51,50 @@ func (d *LorgDB) tableColumns(table string) map[string]bool {
 }
 
 // Open opens (or creates) the SQLite database at dbPath and applies pragmas.
+//
+// Pragmas are passed via the DSN's _pragma query parameter so that every
+// pool connection receives them on init. Previously they were only applied
+// via post-open Exec, which only affected whichever pool connection
+// serviced that single Exec — every other connection in the pool had the
+// default busy_timeout=0 and would surface SQLITE_BUSY immediately under
+// concurrent writes (e.g. proxy traffic + UI queries hitting the same
+// table at the same time).
 func Open(dbPath string) (*LorgDB, error) {
 	// Ensure parent directory exists.
 	if dir := dbPath[:max(0, len(dbPath)-len("/data.db"))]; dir != "" {
 		_ = os.MkdirAll(dir, 0755)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// modernc.org/sqlite parses _pragma=key(val) from the DSN and applies
+	// each on connection init. Multiple _pragma params are honored.
+	dsn := "file:" + dbPath +
+		"?_pragma=journal_mode(WAL)" +
+		"&_pragma=busy_timeout(5000)" +
+		"&_pragma=foreign_keys(ON)" +
+		"&_pragma=synchronous(NORMAL)"
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("lorgdb: open %s: %w", dbPath, err)
 	}
 
-	// Pragmas matching the ProjectDB pattern.
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("lorgdb: %s: %w", pragma, err)
-		}
+	// Cap the pool. SQLite serializes writes at the file level no matter
+	// how many connections exist, so a huge pool just turns contention
+	// into thrash. With WAL journaling, readers are concurrent with the
+	// single writer, so a modest pool is plenty for a single-process app.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(4)
+
+	// Belt-and-suspenders: explicitly run the WAL pragma once to make
+	// sure the file mode is actually flipped (the per-connection variant
+	// in the DSN sets the mode for that connection only; the FIRST one
+	// to ask for WAL flips the file).
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("lorgdb: PRAGMA journal_mode=WAL: %w", err)
 	}
 
-	log.Printf("[LorgDB] Opened database: %s", dbPath)
+	log.Printf("[LorgDB] Opened database: %s (WAL, busy_timeout=5000ms, max_open=8)", dbPath)
 	return &LorgDB{db: db, dbPath: dbPath}, nil
 }
 

@@ -29,13 +29,125 @@ type TrafficListItem struct {
 // TrafficList registers GET /api/traffic/list -- a fast, direct-SQL endpoint
 // that bypasses PocketBase's generic records API for performance.
 // Supports ?perPage, ?page, ?host, and ?project filters.
+//
+// When the active projectDB has rows in its http_traffic table (the
+// burp-mcp-enhanced compat schema), prefer that — that's what the
+// project switcher in the UI loaded. Falls back to the lorgdb _data
+// table when no projectDB is loaded or it's empty.
 func (backend *Backend) TrafficList(e *echo.Echo) {
 	e.GET("/api/traffic/list", func(c echo.Context) error {
 		if err := requireLocalhost(c); err != nil {
 			return err
 		}
+		// Prefer the active projectDB if it has data — this is what the
+		// user just clicked in the dropdown.
+		if served, ok := tryServeProjectDBTraffic(c); ok {
+			return served
+		}
 		return servePocketBaseTraffic(c, backend)
 	})
+}
+
+// tryServeProjectDBTraffic returns (response, true) when an active
+// projectDB has http_traffic rows that should be shown. Returns
+// (nil, false) when there's no projectDB, it's not ready, or it's
+// empty — in which case the caller should fall back to lorgdb.
+func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
+	if projectDB == nil {
+		return nil, false
+	}
+	projectDB.mu.Lock()
+	db := projectDB.db
+	ready := projectDB.ready
+	currentName := projectDB.name
+	projectDB.mu.Unlock()
+	if db == nil || !ready {
+		return nil, false
+	}
+
+	var rowCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM http_traffic").Scan(&rowCount); err != nil {
+		return nil, false
+	}
+	if rowCount == 0 {
+		return nil, false
+	}
+
+	perPage, page, hostFilter := parseTrafficParams(c)
+	offset := (page - 1) * perPage
+
+	var conditions []string
+	var args []any
+	if hostFilter != "" {
+		conditions = append(conditions, "host LIKE ?")
+		args = append(args, "%"+hostFilter+"%")
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	var totalItems int
+	countArgs := append([]any{}, args...)
+	if err := db.QueryRow("SELECT COUNT(*) FROM http_traffic"+whereClause, countArgs...).Scan(&totalItems); err != nil {
+		totalItems = rowCount
+	}
+
+	q := `SELECT request_id, COALESCE(host,''), COALESCE(method,''), COALESCE(path,''),
+	             COALESCE(query,''), COALESCE(status_code,0), COALESCE(response_length,0),
+	             COALESCE(mime_type,''), COALESCE(extension,''), COALESCE(tool,''),
+	             COALESCE(timestamp,''), COALESCE(protocol,''), COALESCE(port,0)
+	      FROM http_traffic` + whereClause + `
+	      ORDER BY request_id DESC LIMIT ? OFFSET ?`
+	rowArgs := append(append([]any{}, args...), perPage, offset)
+
+	rows, err := db.Query(q, rowArgs...)
+	if err != nil {
+		return nil, false
+	}
+	defer rows.Close()
+
+	items := make([]TrafficListItem, 0, perPage)
+	for rows.Next() {
+		var (
+			id             int64
+			host, method   string
+			path, query    string
+			status         int
+			respLen        int64
+			mime, ext      string
+			tool, ts       string
+			protocol       string
+			port           int
+		)
+		if err := rows.Scan(&id, &host, &method, &path, &query, &status, &respLen, &mime, &ext, &tool, &ts, &protocol, &port); err != nil {
+			continue
+		}
+
+		// Map http_traffic row → TrafficListItem with synthesized
+		// req_json / resp_json so the UI's existing renderer keeps
+		// working without UI-side changes.
+		req := map[string]any{"method": method, "path": path, "query": query, "ext": ext}
+		resp := map[string]any{"status": status, "length": respLen, "mime": mime}
+		reqB, _ := json.Marshal(req)
+		respB, _ := json.Marshal(resp)
+
+		items = append(items, TrafficListItem{
+			ID:          fmt.Sprintf("%d", id),
+			Index:       int(id),
+			Project:     currentName,
+			Host:        host,
+			Port:        fmt.Sprintf("%d", port),
+			IsHTTPS:     protocol == "https",
+			HasResp:     status > 0,
+			GeneratedBy: tool,
+			ReqJSON:     reqB,
+			RespJSON:    respB,
+			Created:     ts,
+		})
+	}
+
+	return c.JSON(http.StatusOK, trafficResponse(items, page, perPage, totalItems)), true
 }
 
 // servePocketBaseTraffic queries the PocketBase _data collection.
