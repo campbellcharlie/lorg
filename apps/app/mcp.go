@@ -431,19 +431,11 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
-		mcp.NewTool("extract",
-			mcp.WithDescription("Extract data from content. Actions: regex (with capture groups), jsonPath (dot-notation), between (delimiters)"),
-			mcp.WithInputSchema[ConsolidatedExtractArgs](),
+		mcp.NewTool("responseAnalysis",
+			mcp.WithDescription("Inspect, extract from, or diff HTTP responses. Actions: analyzeResponse|analyzeVariations|analyzeKeywords (parse headers/cookies/tech, find invariants, track keywords across many responses), extractRegex|extractJsonPath|extractBetween (pull values out of content), diffResponses|diffById|diffStructural|diffJson (compare two responses by raw text, captured row id, structure, or JSON tree)."),
+			mcp.WithInputSchema[ConsolidatedResponseAnalysisArgs](),
 		),
-		backend.extractHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("analyze",
-			mcp.WithDescription("Analyze HTTP responses. Actions: response (security headers, cookies, tech), variations (invariant vs varying), keywords (track presence)"),
-			mcp.WithInputSchema[ConsolidatedAnalyzeArgs](),
-		),
-		backend.analyzeHandler,
+		backend.responseAnalysisHandler,
 	)
 
 	s.AddTool(
@@ -452,14 +444,6 @@ func (backend *Backend) mcpInit() {
 			mcp.WithInputSchema[OOBArgs](),
 		),
 		backend.oobHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("compare",
-			mcp.WithDescription("Diff HTTP responses. Actions: responses (raw strings), byId (PocketBase activeIDs), structural (header-by-header + body), jsonDiff (JSON tree diff)"),
-			mcp.WithInputSchema[ConsolidatedCompareArgs](),
-		),
-		backend.compareHandler,
 	)
 
 	s.AddTool(
