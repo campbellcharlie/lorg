@@ -567,6 +567,12 @@
       var saved = localStorage.getItem('lorg-rep-vars');
       if (saved) ta.value = saved;
     } catch (e) {}
+    // Persist on every keystroke too — previously vars were only
+    // saved when Send was clicked (parseRepeaterVars runs there),
+    // so closing the tab between edits lost them.
+    ta.addEventListener('input', function() {
+      try { localStorage.setItem('lorg-rep-vars', ta.value); } catch (e) {}
+    });
   }
 
   // ===========================================================
