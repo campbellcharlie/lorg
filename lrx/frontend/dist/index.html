@@ -74,17 +74,43 @@
         <div id="resize-handle" class="resize-handle hidden"></div>
         <div id="traffic-detail" class="detail-pane hidden">
           <div class="detail-toolbar">
+            <div id="detail-status-strip" class="detail-status-strip">
+              <span class="dss-method" id="dss-method"></span>
+              <span class="dss-url" id="dss-url"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-status" id="dss-status"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-time" id="dss-time"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-size" id="dss-size"></span>
+              <span class="dss-sep">·</span>
+              <span class="dss-mime" id="dss-mime"></span>
+            </div>
             <button id="btn-send-to-repeater" class="btn btn-sm btn-primary">Send to Repeater</button>
           </div>
           <div class="detail-split">
             <div class="detail-split-pane" id="detail-pane-request">
               <div class="pane-header">Request <span class="detail-format-toggle"><button class="req-fmt-btn active" data-fmt="pretty">Pretty</button><button class="req-fmt-btn" data-fmt="raw">Raw</button><button class="req-fmt-btn" data-fmt="headers">Headers</button></span></div>
-              <pre id="detail-request-raw" class="raw-http"></pre>
+              <pre id="detail-request-raw" class="raw-http" tabindex="0"></pre>
+              <div class="find-bar hidden" data-target="detail-request-raw">
+                <input type="text" class="find-input" placeholder="Find in request">
+                <span class="find-count">0/0</span>
+                <button class="find-prev" title="Previous (Shift+Enter)">↑</button>
+                <button class="find-next" title="Next (Enter)">↓</button>
+                <button class="find-close" title="Close (Esc)">×</button>
+              </div>
             </div>
             <div id="detail-split-handle" class="detail-split-handle"></div>
             <div class="detail-split-pane" id="detail-pane-response">
-              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button></span></div>
-              <pre id="detail-response-raw" class="raw-http"></pre>
+              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button><button class="fmt-btn" data-fmt="cookies">Cookies</button></span></div>
+              <pre id="detail-response-raw" class="raw-http" tabindex="0"></pre>
+              <div class="find-bar hidden" data-target="detail-response-raw">
+                <input type="text" class="find-input" placeholder="Find in response">
+                <span class="find-count">0/0</span>
+                <button class="find-prev" title="Previous (Shift+Enter)">↑</button>
+                <button class="find-next" title="Next (Enter)">↓</button>
+                <button class="find-close" title="Close (Esc)">×</button>
+              </div>
             </div>
           </div>
         </div>

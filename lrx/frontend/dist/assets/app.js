@@ -358,6 +358,7 @@
     detailPane._detailSource = 'none';
 
     if (detail) {
+      detailPane._currentId = id;
       detailPane._rawRequest = detail.request || '';
       detailPane._rawResponse = detail.response || '';
       detailPane._detailSource = detail.source || 'none';
@@ -379,6 +380,51 @@
       detailPane.dataset.port = row.port || (row.is_https ? '443' : '80');
       detailPane.dataset.tls = row.is_https ? 'true' : 'false';
     }
+
+    populateStatusStrip(row, detail);
+  }
+
+  // Populate the at-a-glance status strip in the detail toolbar from the
+  // selected row + fetched detail. Inspired by Postman's response header
+  // bar — at-a-glance method/url/status/time/size/mime instead of having
+  // to hunt for it across the table row and pane headers.
+  function populateStatusStrip(row, detail) {
+    var methodEl = $('#dss-method');
+    var urlEl    = $('#dss-url');
+    var statusEl = $('#dss-status');
+    var timeEl   = $('#dss-time');
+    var sizeEl   = $('#dss-size');
+    var mimeEl   = $('#dss-mime');
+    if (!methodEl) return;
+
+    // Row fields land nested in req_json / resp_json (see renderTraffic).
+    // Fall back to flat keys for tools that flatten the shape.
+    var req  = (row && row.req_json)  || {};
+    var resp = (row && row.resp_json) || {};
+    var method = req.method  || row && row.method || '';
+    var path   = req.path    || req.url || row && row.path || '';
+    var status = resp.status || (row && row.status) || 0;
+    var length = resp.length || (row && (row.length || row.resp_length)) || 0;
+    var mime   = resp.mime   || (row && row.mime) || '';
+
+    methodEl.textContent = method;
+    methodEl.className = 'dss-method method-' + (method || '').toLowerCase();
+    urlEl.textContent = path;
+
+    // Status badge
+    statusEl.textContent = status ? String(status) : '—';
+    statusEl.className = 'dss-status';
+    if (status >= 200 && status < 300) statusEl.classList.add('s2xx');
+    else if (status >= 300 && status < 400) statusEl.classList.add('s3xx');
+    else if (status >= 400 && status < 500) statusEl.classList.add('s4xx');
+    else if (status >= 500) statusEl.classList.add('s5xx');
+
+    // Timing — backend doesn't always supply it; show — if absent.
+    var elapsedMs = detail && (detail.elapsed_ms || detail.elapsedMs);
+    timeEl.textContent = elapsedMs ? Math.round(elapsedMs) + ' ms' : '— ms';
+
+    sizeEl.textContent = length ? formatBytes(length) : '—';
+    mimeEl.textContent = mime || '—';
   }
 
   // --- Format toggles ---
@@ -397,6 +443,23 @@
     $$(btnSelector).forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === format); });
 
     if (format === 'pretty') {
+      // Image preview path — for image/* content-type, show the image
+      // itself instead of trying to highlight binary garbage. Lifted
+      // from Burp's Render tab.
+      var ct = extractCT(raw);
+      if (ct && ct.toLowerCase().indexOf('image/') === 0) {
+        var detail = $('#traffic-detail');
+        var id = detail && detail._currentId;
+        var part = el.id === 'detail-request-raw' ? 'request' : 'response';
+        if (id) {
+          var src = '/api/traffic/' + encodeURIComponent(id) + '/body?part=' + part;
+          el.innerHTML = '<div class="image-preview-wrap">' +
+            '<div class="image-preview-meta">' + escapeHtml(ct) + '</div>' +
+            '<img class="image-preview" src="' + src + '" alt="response body">' +
+          '</div>';
+          return;
+        }
+      }
       el.innerHTML = highlightHTTP(raw);
     } else if (format === 'raw') {
       el.textContent = raw;
@@ -405,7 +468,132 @@
       if (headerEnd < 0) headerEnd = raw.indexOf('\n\n');
       var headers = headerEnd >= 0 ? raw.substring(0, headerEnd) : raw;
       el.innerHTML = highlightHTTP(headers);
+    } else if (format === 'cookies') {
+      el.innerHTML = renderCookiesView(raw);
     }
+  }
+
+  // renderCookiesView parses a raw HTTP message and produces an HTML
+  // table of cookies. Two sources:
+  //   - Set-Cookie headers in a response (with attributes)
+  //   - Cookie header in a request (just name=value pairs)
+  // The view highlights missing security flags (HttpOnly, Secure,
+  // SameSite) for response cookies — common security review surface.
+  function renderCookiesView(raw) {
+    if (!raw) return '<div class="cookies-view"><div class="empty">No data</div></div>';
+    var sep = raw.indexOf('\r\n\r\n');
+    if (sep < 0) sep = raw.indexOf('\n\n');
+    var headers = sep >= 0 ? raw.substring(0, sep) : raw;
+    var lines = headers.split(/\r?\n/);
+
+    var setCookies = [];
+    var reqCookies = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var ci = line.indexOf(':');
+      if (ci <= 0) continue;
+      var name = line.substring(0, ci).trim().toLowerCase();
+      var value = line.substring(ci + 1).trim();
+      if (name === 'set-cookie') {
+        setCookies.push(parseSetCookie(value));
+      } else if (name === 'cookie') {
+        // Single header may contain multiple cookies separated by ';'
+        value.split(';').forEach(function(pair) {
+          var eq = pair.indexOf('=');
+          if (eq > 0) {
+            reqCookies.push({
+              name: pair.substring(0, eq).trim(),
+              value: pair.substring(eq + 1).trim(),
+            });
+          }
+        });
+      }
+    }
+
+    var html = '<div class="cookies-view">';
+    if (setCookies.length === 0 && reqCookies.length === 0) {
+      html += '<div class="empty">No cookies in this message.</div>';
+    }
+    if (setCookies.length > 0) {
+      html += '<h4>Set-Cookie (' + setCookies.length + ')</h4>';
+      html += '<table><thead><tr>' +
+        '<th>Name</th><th>Value</th><th>Domain</th><th>Path</th>' +
+        '<th>Expires</th><th>HttpOnly</th><th>Secure</th><th>SameSite</th>' +
+        '</tr></thead><tbody>';
+      setCookies.forEach(function(c) {
+        html += '<tr>' +
+          '<td>' + escapeHtml(c.name) + '</td>' +
+          '<td>' + escapeHtml(c.value || '') + '</td>' +
+          '<td>' + escapeHtml(c.domain || '—') + '</td>' +
+          '<td>' + escapeHtml(c.path || '—') + '</td>' +
+          '<td>' + escapeHtml(c.expires || c.maxAge || 'Session') + '</td>' +
+          '<td class="' + (c.httpOnly ? 'flag-on' : 'flag-off') + '">' + (c.httpOnly ? 'yes' : 'no') + '</td>' +
+          '<td class="' + (c.secure   ? 'flag-on' : 'flag-off') + '">' + (c.secure   ? 'yes' : 'no') + '</td>' +
+          '<td class="' + (c.sameSite ? 'flag-on' : 'flag-off') + '">' + escapeHtml(c.sameSite || '—') + '</td>' +
+        '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    if (reqCookies.length > 0) {
+      html += '<h4>Cookie (' + reqCookies.length + ')</h4>';
+      html += '<table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody>';
+      reqCookies.forEach(function(c) {
+        html += '<tr><td>' + escapeHtml(c.name) + '</td><td>' + escapeHtml(c.value) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // parseSetCookie parses one Set-Cookie header value into a structured
+  // record. Cookie name/value comes first, then ;-separated attributes.
+  function parseSetCookie(raw) {
+    var parts = raw.split(';');
+    var first = parts.shift() || '';
+    var eq = first.indexOf('=');
+    var c = {
+      name: eq > 0 ? first.substring(0, eq).trim() : first.trim(),
+      value: eq > 0 ? first.substring(eq + 1).trim() : '',
+      httpOnly: false,
+      secure: false,
+    };
+    parts.forEach(function(attr) {
+      var av = attr.trim();
+      var aeq = av.indexOf('=');
+      var key = (aeq > 0 ? av.substring(0, aeq) : av).trim().toLowerCase();
+      var val = aeq > 0 ? av.substring(aeq + 1).trim() : '';
+      switch (key) {
+        case 'domain':   c.domain = val; break;
+        case 'path':     c.path = val; break;
+        case 'expires':  c.expires = val; break;
+        case 'max-age':  c.maxAge = val + 's'; break;
+        case 'samesite': c.sameSite = val; break;
+        case 'httponly': c.httpOnly = true; break;
+        case 'secure':   c.secure = true; break;
+      }
+    });
+    return c;
+  }
+
+  // extractCT pulls Content-Type out of a raw HTTP message (headers part).
+  // Returns the bare media type without parameters.
+  function extractCT(raw) {
+    if (!raw) return '';
+    var sep = raw.indexOf('\r\n\r\n');
+    if (sep < 0) sep = raw.indexOf('\n\n');
+    var headers = sep >= 0 ? raw.substring(0, sep) : raw;
+    var lines = headers.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var ci = line.indexOf(':');
+      if (ci > 0 && line.substring(0, ci).toLowerCase() === 'content-type') {
+        var v = line.substring(ci + 1).trim();
+        var sc = v.indexOf(';');
+        return sc >= 0 ? v.substring(0, sc).trim() : v;
+      }
+    }
+    return '';
   }
 
   function renderResponseWithFormat(rawResp, format) {
@@ -416,6 +604,173 @@
   function renderRequestWithFormat(rawReq, format) {
     currentRequestFormat = format;
     renderHTTPWithFormat($('#detail-request-raw'), rawReq, format, '.req-fmt-btn');
+  }
+
+  // ===========================================================
+  // Find-in-pane (Cmd/Ctrl+F) — Burp/Postman-style.
+  //
+  // Strategy: walk the pane's text nodes, collect matches, wrap
+  // each in a <mark class="find-match"> while preserving the
+  // surrounding syntax-highlight spans. The pane's pre-find HTML
+  // is snapshotted so closing the find bar fully restores the
+  // original highlighting (no re-render of the response needed).
+  // ===========================================================
+  var findState = {
+    bar: null,
+    pane: null,
+    paneEl: null,
+    snapshot: null,
+    matches: [],
+    current: -1,
+  };
+
+  function initFindInPane() {
+    document.addEventListener('keydown', function(e) {
+      // Cmd/Ctrl+F when focus is inside the detail panel: open find
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        var detail = document.getElementById('traffic-detail');
+        if (!detail || detail.classList.contains('hidden')) return;
+        // Pick the most recently focused pane, or fall back to response
+        var pane = document.activeElement && document.activeElement.closest && document.activeElement.closest('.detail-split-pane');
+        if (!pane) pane = document.getElementById('detail-pane-response');
+        var bar = pane.querySelector('.find-bar');
+        if (!bar) return;
+        e.preventDefault();
+        openFindBar(bar);
+        return;
+      }
+      // Esc closes any open find bar
+      if (e.key === 'Escape') {
+        var open = document.querySelector('.find-bar:not(.hidden)');
+        if (open) closeFindBar(open);
+      }
+    });
+
+    // Wire each pane's bar
+    Array.prototype.slice.call(document.querySelectorAll('.find-bar')).forEach(function(bar) {
+      var input = bar.querySelector('.find-input');
+      var prevBtn = bar.querySelector('.find-prev');
+      var nextBtn = bar.querySelector('.find-next');
+      var closeBtn = bar.querySelector('.find-close');
+      input.addEventListener('input', function() { performFind(bar, input.value); });
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          stepFind(bar, e.shiftKey ? -1 : 1);
+        }
+      });
+      prevBtn.addEventListener('click', function() { stepFind(bar, -1); });
+      nextBtn.addEventListener('click', function() { stepFind(bar, 1); });
+      closeBtn.addEventListener('click', function() { closeFindBar(bar); });
+    });
+  }
+
+  function openFindBar(bar) {
+    bar.classList.remove('hidden');
+    var input = bar.querySelector('.find-input');
+    // Snapshot the pane's current rendered HTML so we can restore on close.
+    var paneEl = document.getElementById(bar.dataset.target);
+    if (!paneEl) return;
+    findState.bar = bar;
+    findState.paneEl = paneEl;
+    findState.snapshot = paneEl.innerHTML;
+    findState.matches = [];
+    findState.current = -1;
+    input.focus();
+    input.select();
+    if (input.value) performFind(bar, input.value);
+  }
+
+  function closeFindBar(bar) {
+    bar.classList.add('hidden');
+    if (findState.paneEl && findState.snapshot !== null) {
+      findState.paneEl.innerHTML = findState.snapshot;
+    }
+    findState.bar = null;
+    findState.paneEl = null;
+    findState.snapshot = null;
+    findState.matches = [];
+    findState.current = -1;
+    var countEl = bar.querySelector('.find-count');
+    if (countEl) countEl.textContent = '0/0';
+  }
+
+  function performFind(bar, query) {
+    var paneEl = findState.paneEl;
+    if (!paneEl) return;
+    // Restore baseline before re-marking
+    if (findState.snapshot !== null) paneEl.innerHTML = findState.snapshot;
+    var countEl = bar.querySelector('.find-count');
+    findState.matches = [];
+    findState.current = -1;
+    if (!query) {
+      countEl.textContent = '0/0';
+      return;
+    }
+    // Walk text nodes and wrap matches in <mark>. Avoid recursing into
+    // already-marked nodes — but since we just restored the snapshot,
+    // there are none.
+    var lower = query.toLowerCase();
+    var marks = [];
+    walkTextNodes(paneEl, function(textNode) {
+      var text = textNode.nodeValue;
+      var lc = text.toLowerCase();
+      var idx = lc.indexOf(lower);
+      if (idx < 0) return;
+      var pieces = document.createDocumentFragment();
+      var pos = 0;
+      while (idx >= 0) {
+        if (idx > pos) pieces.appendChild(document.createTextNode(text.substring(pos, idx)));
+        var mark = document.createElement('mark');
+        mark.className = 'find-match';
+        mark.textContent = text.substr(idx, query.length);
+        pieces.appendChild(mark);
+        marks.push(mark);
+        pos = idx + query.length;
+        idx = lc.indexOf(lower, pos);
+      }
+      if (pos < text.length) pieces.appendChild(document.createTextNode(text.substring(pos)));
+      textNode.parentNode.replaceChild(pieces, textNode);
+    });
+    findState.matches = marks;
+    if (marks.length > 0) {
+      findState.current = 0;
+      marks[0].classList.add('find-current');
+      marks[0].scrollIntoView({ block: 'center' });
+    }
+    countEl.textContent = (marks.length ? '1' : '0') + '/' + marks.length;
+  }
+
+  function stepFind(bar, dir) {
+    if (findState.matches.length === 0) return;
+    var prev = findState.matches[findState.current];
+    if (prev) prev.classList.remove('find-current');
+    findState.current = (findState.current + dir + findState.matches.length) % findState.matches.length;
+    var next = findState.matches[findState.current];
+    next.classList.add('find-current');
+    next.scrollIntoView({ block: 'center' });
+    var countEl = bar.querySelector('.find-count');
+    if (countEl) countEl.textContent = (findState.current + 1) + '/' + findState.matches.length;
+  }
+
+  // walkTextNodes invokes cb for every Text node under root, ignoring
+  // <script>, <style>, and existing <mark.find-match> nodes.
+  function walkTextNodes(root, cb) {
+    var stack = [root];
+    while (stack.length) {
+      var n = stack.pop();
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) {
+          // Text node
+          cb(c);
+        } else if (c.nodeType === 1) {
+          var tag = c.tagName;
+          if (tag === 'SCRIPT' || tag === 'STYLE') continue;
+          if (tag === 'MARK' && c.classList && c.classList.contains('find-match')) continue;
+          stack.push(c);
+        }
+      }
+    }
   }
 
   // --- Repeater ---
@@ -1446,6 +1801,8 @@
     });
 
     // Response format toggle
+    initFindInPane();
+
     document.addEventListener('click', function(e) {
       if (e.target.classList.contains('fmt-btn')) {
         var detailPane = $('#traffic-detail');

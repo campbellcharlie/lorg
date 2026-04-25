@@ -1096,21 +1096,225 @@ button.confirm-pending {
 }
 
 /* ============================================================
+   Detail toolbar status strip — at-a-glance request summary
+   inspired by Postman's response header bar. Method + path on
+   the left, status / time / size / mime separated by middots.
+   ============================================================ */
+.detail-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dss-method {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.dss-method.method-get    { color: var(--accent); }
+.dss-method.method-post   { color: var(--blue); }
+.dss-method.method-put    { color: var(--orange); }
+.dss-method.method-delete { color: var(--red); }
+.dss-method.method-patch  { color: var(--purple, #a855f7); }
+.dss-url {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dss-sep {
+  color: var(--text-ghost, #3f3f46);
+  flex-shrink: 0;
+}
+.dss-status {
+  font-weight: 600;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.dss-status.s2xx { color: var(--accent); background: var(--accent-dim, rgba(45, 212, 168, 0.1)); }
+.dss-status.s3xx { color: var(--blue);   background: rgba(96, 165, 250, 0.1); }
+.dss-status.s4xx { color: var(--orange); background: rgba(251, 146, 60, 0.1); }
+.dss-status.s5xx { color: var(--red);    background: rgba(239, 68, 68, 0.1); }
+.dss-time, .dss-size, .dss-mime {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.detail-toolbar {
+  gap: 12px;
+}
+
+/* ============================================================
+   Find-in-pane bar — Cmd/Ctrl+F search lifted from Burp Pro.
+   Floats at the bottom of the focused pane, shows match count,
+   supports Enter/Shift+Enter for next/prev and Esc to close.
+   ============================================================ */
+.detail-split-pane {
+  position: relative;
+}
+.find-bar {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-surface, #1e1e22);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+.find-bar.hidden { display: none; }
+.find-input {
+  background: var(--bg, #18181b);
+  border: 1px solid transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  outline: none;
+  width: 200px;
+}
+.find-input:focus {
+  border-color: var(--accent);
+}
+.find-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  min-width: 32px;
+  text-align: center;
+}
+.find-bar button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  padding: 0;
+  line-height: 1;
+}
+.find-bar button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+.find-bar .find-close {
+  font-size: 16px;
+}
+mark.find-match {
+  background: rgba(251, 191, 36, 0.35);
+  color: inherit;
+  padding: 0;
+  border-radius: 1px;
+}
+mark.find-match.find-current {
+  background: rgba(251, 191, 36, 0.85);
+  color: var(--bg, #18181b);
+  font-weight: 600;
+}
+
+/* Image preview pane — shown for image/* response bodies in Pretty mode.
+   Wrap is scrollable so large images don't clip the surrounding chrome. */
+.image-preview-wrap {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+.image-preview-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.image-preview {
+  max-width: 100%;
+  height: auto;
+  background: repeating-conic-gradient(rgba(255,255,255,0.04) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 4px;
+}
+
+/* ============================================================
+   Cookies view — Burp/Postman-style table parsed from Set-Cookie
+   response headers and Cookie request headers. Highlights missing
+   security flags (HttpOnly, Secure, SameSite) so security work
+   doesn't require eyeballing the raw header text.
+   ============================================================ */
+.cookies-view {
+  padding: 8px 12px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.cookies-view h4 {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin: 8px 0 6px 0;
+}
+.cookies-view table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 12px;
+}
+.cookies-view th, .cookies-view td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  vertical-align: top;
+  word-break: break-all;
+}
+.cookies-view th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.03);
+}
+.cookies-view .flag-on  { color: var(--accent); font-weight: 600; }
+.cookies-view .flag-off { color: var(--red, #ef4444); }
+.cookies-view .empty {
+  color: var(--text-ghost);
+  font-style: italic;
+  padding: 8px;
+}
+
+/* ============================================================
    Scrollbar
    ============================================================ */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 7px;   /* +30% from 5px for easier targeting */
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.10);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* ============================================================

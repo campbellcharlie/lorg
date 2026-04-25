@@ -17,8 +17,54 @@ type TrafficDetailResponse struct {
 	Source   string `json:"source"` // "raw", "json", or "none"
 }
 
-// TrafficDetail registers GET /api/traffic/:id/detail
+// TrafficDetail registers GET /api/traffic/:id/detail and
+// GET /api/traffic/:id/body (raw body with original content-type, used by
+// the UI for image preview / hex dumps without re-parsing the raw HTTP).
 func (backend *Backend) TrafficDetail(e *echo.Echo) {
+	// /api/traffic/:id/body?part=response  -> raw response body bytes
+	// /api/traffic/:id/body?part=request   -> raw request body bytes
+	// Sets Content-Type from the captured headers so an <img src> tag
+	// just works for image/* responses.
+	e.GET("/api/traffic/:id/body", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		id := c.Param("id")
+		part := c.QueryParam("part")
+		if part == "" {
+			part = "response"
+		}
+
+		var rawTable, headerSrc string
+		if part == "request" {
+			rawTable = "_req"
+			headerSrc = "request"
+		} else {
+			rawTable = "_resp"
+			headerSrc = "response"
+		}
+		_ = headerSrc
+
+		rec, err := backend.DB.FindRecordById(rawTable, id)
+		if err != nil || rec == nil {
+			return c.NoContent(http.StatusNotFound)
+		}
+		raw := rec.GetString("raw")
+		if raw == "" {
+			return c.NoContent(http.StatusNotFound)
+		}
+
+		// Split headers / body. Use \r\n\r\n then \n\n as fallback.
+		headers, body := splitHTTPBody(raw)
+		ct := extractContentType(headers)
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		c.Response().Header().Set("Content-Type", ct)
+		c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+		return c.Blob(http.StatusOK, ct, []byte(body))
+	})
+
 	e.GET("/api/traffic/:id/detail", func(c echo.Context) error {
 		if err := requireLocalhost(c); err != nil {
 			return err
@@ -87,6 +133,37 @@ func (backend *Backend) TrafficDetail(e *echo.Echo) {
 			Source:   "json",
 		})
 	})
+}
+
+// splitHTTPBody splits a raw HTTP message into headers + body. Uses
+// \r\n\r\n then \n\n as fallback. Mirrors splitHTTPRaw in mcp_project.go
+// but lives here to avoid an import cycle in tests.
+func splitHTTPBody(raw string) (headers, body string) {
+	if raw == "" {
+		return "", ""
+	}
+	if idx := strings.Index(raw, "\r\n\r\n"); idx != -1 {
+		return raw[:idx], raw[idx+4:]
+	}
+	if idx := strings.Index(raw, "\n\n"); idx != -1 {
+		return raw[:idx], raw[idx+2:]
+	}
+	return raw, ""
+}
+
+// extractContentType pulls the Content-Type header value out of a raw
+// HTTP header block. Case-insensitive header name match.
+func extractContentType(headers string) string {
+	for _, line := range strings.Split(headers, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if i := strings.IndexByte(line, ':'); i > 0 {
+			name := strings.TrimSpace(line[:i])
+			if strings.EqualFold(name, "Content-Type") {
+				return strings.TrimSpace(line[i+1:])
+			}
+		}
+	}
+	return ""
 }
 
 // reconstructFromJSON attempts to build a raw HTTP string from parsed JSON data.
