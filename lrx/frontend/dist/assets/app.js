@@ -2019,19 +2019,92 @@
     }).join('');
   }
 
-  // Pretty-print JSON body if detected. Returns the raw (unescaped) body string.
+  // Pretty-print body — JSON gets JSON.stringify(_, null, 2); HTML/XML gets
+  // a tag-per-line beautifier so the typical minified single-line response
+  // becomes navigable. Returns the raw (unescaped) body string.
   function prettyPrintBody(rawBody) {
     var trimmed = rawBody.trim();
+    // JSON
     if ((trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') &&
         (trimmed.charAt(trimmed.length - 1) === '}' || trimmed.charAt(trimmed.length - 1) === ']')) {
       try {
         var parsed = JSON.parse(trimmed);
         return JSON.stringify(parsed, null, 2);
       } catch (e) {
-        // Not valid JSON, return as-is
+        // Not valid JSON, fall through
       }
     }
+    // HTML / XML — detect by leading <
+    if (trimmed.charAt(0) === '<') {
+      try { return prettyPrintHTML(trimmed); }
+      catch (e) { /* fall through */ }
+    }
     return rawBody;
+  }
+
+  // Lightweight tag-per-line HTML/XML beautifier. Tracks nesting depth,
+  // skips depth changes for void/self-closing/doctype/comment/CDATA tags,
+  // and preserves the contents of <script> and <style> blocks verbatim
+  // so inline JS/CSS doesn't get mangled.
+  function prettyPrintHTML(html) {
+    // Pull out script/style blocks by content; replace with placeholders
+    // so the tag splitter doesn't touch their bodies.
+    var stash = [];
+    html = html.replace(/<(script|style)([^>]*)>([\s\S]*?)<\/\1>/gi, function(_, tag, attrs, body) {
+      stash.push({ tag: tag, attrs: attrs, body: body });
+      return '<' + tag + attrs + '>__LORG_HTMLSTASH_' + (stash.length - 1) + '__</' + tag + '>';
+    });
+
+    // One tag per line — break wherever a tag boundary meets the next.
+    // The look-ahead keeps text content attached to its surrounding tags.
+    var withBreaks = html.replace(/>(\s*)</g, '>\n<');
+
+    var lines = withBreaks.split('\n');
+    var out = [];
+    var depth = 0;
+    var indentUnit = '  ';
+    var voidRe = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr|!doctype|!--)$/i;
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/^\s+|\s+$/g, '');
+      if (!line) continue;
+
+      var nameMatch = line.match(/^<\/?([a-zA-Z!][a-zA-Z0-9-]*)/);
+      var name = nameMatch ? nameMatch[1] : '';
+      var isClose = /^<\//.test(line);
+      var isSelfClose = /\/>$/.test(line);
+      var isVoid = voidRe.test(name);
+      var isComment = /^<!--/.test(line);
+      var isProcessingOrDoctype = /^<[!?]/.test(line) && !isComment;
+
+      // Closing tag: dedent first, then emit.
+      if (isClose) {
+        depth = Math.max(0, depth - 1);
+        out.push(indentUnit.repeat(depth) + line);
+        continue;
+      }
+
+      out.push(indentUnit.repeat(depth) + line);
+
+      // Increase depth only for opening tags that aren't self-closing,
+      // void, doctype/comment, or end with their own close on the same
+      // line (e.g. "<title>foo</title>").
+      var hasInlineClose = new RegExp('</' + name + '\\s*>$', 'i').test(line);
+      if (!isClose && !isSelfClose && !isVoid && !isProcessingOrDoctype && !isComment && !hasInlineClose && name) {
+        depth++;
+      }
+    }
+
+    var result = out.join('\n');
+
+    // Restore script/style blocks. Their bodies stay on their own lines
+    // (no further indentation inside) so JS/CSS reads naturally.
+    result = result.replace(/__LORG_HTMLSTASH_(\d+)__/g, function(_, idx) {
+      var s = stash[parseInt(idx, 10)];
+      return s ? s.body : '';
+    });
+
+    return result;
   }
 
   function highlightFirstLine(line) {
