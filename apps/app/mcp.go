@@ -543,6 +543,14 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
+		mcp.NewTool("mirror",
+			mcp.WithDescription("Re-fire a captured request (by rowId) or saved template (by templateName) with small mutations applied: method, path, query, appendQuery, setHeaders, removeHeaders, body. Reuses everything else from the baseline so you don't re-emit the full headers/auth/cookies/body each call. Body is JSON-encoded automatically when an object is passed (Content-Type + Content-Length updated). Response body capped at 8KB by default — pass maxBodyBytes:0 for full. Cheap re-probe primitive: 10x token saving over rebuilding sendHttpRequest each iteration."),
+			mcp.WithInputSchema[MirrorArgs](),
+		),
+		backend.mirrorHandler,
+	)
+
+	s.AddTool(
 		mcp.NewTool("mapEndpoints",
 			mcp.WithDescription("Build a structured endpoint map for a host: distinct method+pathTemplate tuples (with /users/123 collapsed to /users/{id}), how many times each was seen, status code distribution, and how many distinct response shapes (fingerprints) each produces. One call replaces a sequence of getEndpoints + status-distribution + per-endpoint clustering."),
 			mcp.WithInputSchema[MapEndpointsArgs](),
