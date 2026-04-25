@@ -1,16 +1,16 @@
 # lorg
 
-**AI-powered penetration testing proxy** — 42 MCP tools, browser integration, and per-project SQLite databases.
+**AI-powered penetration testing proxy** — comprehensive MCP tooling, anti-detect browser integration, and per-project SQLite databases.
 
 *lorg* (Gaelic: track, trace, trail) is a security testing toolkit that combines an intercepting HTTP/HTTPS proxy with a comprehensive MCP (Model Context Protocol) server. Designed to be driven by AI agents like Claude Code, it provides everything needed for web application security assessments without requiring a Burp Suite license.
 
 ## Features
 
 - **Intercepting Proxy** — HTTP/1.1, HTTP/2, WebSocket with TLS fingerprint mimicry (uTLS)
-- **42 MCP Tools** — request sending, session management, JWT attacks, race conditions, GraphQL testing, scope enforcement, response analysis, and more
-- **Browser Integration** — CamoFox (anti-fingerprint Firefox) control via 4 pentest-focused tools (`browser`, `browserInteract`, `browserExec`, `browserSec`) including XSS verification and CSP bypass
+- **MCP Tooling** — request sending, session management, JWT attacks, race conditions, GraphQL testing, scope enforcement, response analysis, and more (`/mcp/health` lists the live surface)
+- **Browser Integration** — CamoFox (anti-fingerprint Firefox) driven by `browser` / `browserInteract` / `browserExec` / `browserSec` for XSS verification, CSP bypass, and DOM-sink testing
 - **Per-Project SQLite DB** — all traffic logged in real-time to burp-mcp-enhanced compatible databases
-- **Minimal Web UI** — traffic viewer, repeater, syntax highlighting, 10 color themes, resizable panes
+- **Minimal Web UI** — traffic viewer, repeater, syntax highlighting, multiple color themes, resizable panes
 - **Session Management** — multiple named sessions with cookie jars, CSRF auto-capture/injection
 - **No License Required** — fully open source, runs headless or with UI
 
