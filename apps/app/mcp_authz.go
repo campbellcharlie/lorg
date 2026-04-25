@@ -33,7 +33,7 @@ var (
 // ---------------------------------------------------------------------------
 
 type AuthzTestArgs struct {
-	Action          string `json:"action" jsonschema:"required,enum=configure,run,results" jsonschema_description:"configure: set session names; run: replay traffic with swapped sessions; results: show findings"`
+	Action          string `json:"action" jsonschema:"required,enum=configure,enum=run,enum=results" jsonschema_description:"configure: set session names; run: replay traffic with swapped sessions; results: show findings"`
 	HighPrivSession string `json:"highPrivSession,omitempty" jsonschema_description:"Name of the high-privilege session (original requests)"`
 	LowPrivSession  string `json:"lowPrivSession,omitempty" jsonschema_description:"Name of the low-privilege session to swap in"`
 	Unauthenticated bool   `json:"unauthenticated,omitempty" jsonschema_description:"Also test with no cookies/auth headers"`
@@ -142,13 +142,9 @@ func (backend *Backend) authzRunHandler(args AuthzTestArgs) (*mcp.CallToolResult
 	lowCookies := authzExtractCookies(lowPrivRecord)
 	lowHeaders := authzExtractHeaders(lowPrivRecord)
 
-	// Query traffic from projectDB
-	if projectDB == nil || projectDB.db == nil {
-		return mcp.NewToolResultError("project database not initialized"), nil
-	}
-
-	projectDB.mu.Lock()
-
+	// Query traffic from lorgdb. The project SQLite uses a different schema
+	// (http_traffic / http_messages); the _data / _raw tables only exist in
+	// lorgdb. Querying projectDB here was a copy-paste bug.
 	var query string
 	var queryArgs []any
 	if args.Host != "" {
@@ -159,9 +155,8 @@ func (backend *Backend) authzRunHandler(args AuthzTestArgs) (*mcp.CallToolResult
 		queryArgs = []any{limit}
 	}
 
-	rows, err := projectDB.db.Query(query, queryArgs...)
+	rows, err := backend.DB.Query(query, queryArgs...)
 	if err != nil {
-		projectDB.mu.Unlock()
 		return mcp.NewToolResultError(fmt.Sprintf("query error: %v", err)), nil
 	}
 
@@ -187,21 +182,24 @@ func (backend *Backend) authzRunHandler(args AuthzTestArgs) (*mcp.CallToolResult
 	}
 	rows.Close()
 
-	// Get raw requests
+	// Pull raw requests from lorgdb's _req table (mirrors the storage layout
+	// the proxy capture path writes to).
 	type rawEntry struct {
 		id      string
 		request string
 	}
 	var rawEntries []rawEntry
 	for _, e := range entries {
-		var rawReq string
-		err := projectDB.db.QueryRow(`SELECT request FROM _raw WHERE id = ?`, e.id).Scan(&rawReq)
-		if err != nil {
+		reqRec, rerr := backend.DB.FindRecordById("_req", e.id)
+		if rerr != nil || reqRec == nil {
 			continue
 		}
-		rawEntries = append(rawEntries, rawEntry{id: e.id, request: rawReq})
+		raw := reqRec.GetString("raw")
+		if raw == "" {
+			continue
+		}
+		rawEntries = append(rawEntries, rawEntry{id: e.id, request: raw})
 	}
-	projectDB.mu.Unlock()
 
 	// Run authorization tests
 	var results []authzResult

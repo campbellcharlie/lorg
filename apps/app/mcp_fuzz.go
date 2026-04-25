@@ -42,7 +42,7 @@ var activeFuzz = &fuzzState{}
 // ---------------------------------------------------------------------------
 
 type FuzzArgs struct {
-	Action      string              `json:"action" jsonschema:"required,enum=configure,start,stop,status,results" jsonschema_description:"configure: set up fuzzer; start: begin fuzzing; stop: halt; status: progress; results: get findings"`
+	Action      string              `json:"action" jsonschema:"required,enum=configure,enum=start,enum=stop,enum=status,enum=results" jsonschema_description:"configure: set up fuzzer; start: begin fuzzing; stop: halt; status: progress; results: get findings"`
 	Host        string              `json:"host,omitempty" jsonschema_description:"Target host"`
 	Port        int                 `json:"port,omitempty" jsonschema_description:"Target port (default 80, or 443 with TLS)"`
 	TLS         bool                `json:"tls,omitempty" jsonschema_description:"Use TLS"`
