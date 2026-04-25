@@ -578,7 +578,53 @@ func (backend *Backend) graphqlHandler(ctx context.Context, request mcp.CallTool
 	}
 }
 
-// ========================== 11. responseAnalysis ==========================
+// ========================== 11. intercept ==========================
+//
+// One tool that absorbs interceptToggle/interceptPrintRowsInDetails/
+// interceptGetRawRequestAndResponse/interceptAction. Action names are
+// the leaves of the original tools (toggle/list/getRaw/forward/drop)
+// to keep them flat for the LLM. Sub-handler arg structs don't carry
+// their own "action" field, so re-binding is safe.
+type ConsolidatedInterceptArgs struct {
+	Action string `json:"action" jsonschema:"required" jsonschema_description:"Operation: toggle (enable/disable on a proxy), list (intercepted rows for a proxy), getRaw (one record's raw req/resp), forward (pass through, optionally with edits), drop (block)"`
+
+	// toggle: id = proxy ID. forward/drop/getRaw: id = intercept record ID.
+	ID     string `json:"id,omitempty" jsonschema_description:"Proxy ID (toggle) or intercept record ID (getRaw, forward, drop)"`
+	Enable bool   `json:"enable,omitempty" jsonschema_description:"true to enable, false to disable (toggle)"`
+
+	// list
+	ProxyID string `json:"proxyId,omitempty" jsonschema_description:"Proxy ID to list intercepted rows for (list)"`
+
+	// forward/drop edit fields
+	IsReqEdited  bool   `json:"isReqEdited,omitempty" jsonschema_description:"True if the request was edited (forward)"`
+	IsRespEdited bool   `json:"isRespEdited,omitempty" jsonschema_description:"True if the response was edited (forward)"`
+	ReqEdited    string `json:"reqEdited,omitempty" jsonschema_description:"Raw edited HTTP request (forward, if isReqEdited)"`
+	RespEdited   string `json:"respEdited,omitempty" jsonschema_description:"Raw edited HTTP response (forward, if isRespEdited)"`
+}
+
+func (backend *Backend) interceptHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ConsolidatedInterceptArgs
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	switch args.Action {
+	case "toggle":
+		return backend.interceptToggleHandler(ctx, request)
+	case "list":
+		return backend.interceptReadHandler(ctx, request)
+	case "getRaw":
+		return backend.interceptGetRawHandler(ctx, request)
+	case "forward", "drop":
+		// interceptActionHandler re-reads "action" from the raw JSON, which
+		// is the same forward/drop value — safe to re-dispatch.
+		return backend.interceptActionHandler(ctx, request)
+	default:
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: toggle, list, getRaw, forward, drop"), nil
+	}
+}
+
+// ========================== 12. responseAnalysis ==========================
 //
 // One tool that absorbs the previous extract/analyze/compare dispatchers
 // (which themselves were already 3-way action dispatchers). Action names
