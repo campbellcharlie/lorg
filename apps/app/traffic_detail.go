@@ -77,6 +77,13 @@ func (backend *Backend) TrafficDetail(e *echo.Echo) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 		}
 
+		// If an active projectDB has this id (numeric request_id from
+		// http_traffic), serve from there — that's where the listed
+		// traffic actually came from when the user switched DBs.
+		if resp, ok := tryServeProjectDBDetail(id); ok {
+			return c.JSON(http.StatusOK, resp)
+		}
+
 		// 1. Try _req / _resp collections first (proxy-generated traffic stores raw here)
 		var rawReq, rawResp string
 		var reqCreated, respCreated string
@@ -161,6 +168,128 @@ func computeElapsedMs(reqTS, respTS string) int64 {
 		return 0
 	}
 	return d
+}
+
+// tryServeProjectDBDetail reconstructs a raw HTTP request/response pair
+// for a numeric http_traffic.request_id from the active projectDB. Returns
+// (nil, false) when there's no projectDB, the id isn't numeric, or the
+// row doesn't exist.
+func tryServeProjectDBDetail(id string) (*TrafficDetailResponse, bool) {
+	if projectDB == nil {
+		return nil, false
+	}
+	projectDB.mu.Lock()
+	db := projectDB.db
+	ready := projectDB.ready
+	projectDB.mu.Unlock()
+	if db == nil || !ready {
+		return nil, false
+	}
+
+	// http_traffic.request_id is INTEGER, but the UI passes us a string.
+	// Reject anything non-numeric so we don't quote-inject.
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return nil, false
+		}
+	}
+
+	var (
+		method, host, path, query string
+		protocol                  string
+		port                      int
+		status                    int
+		respLen                   int64
+		mime, ts                  string
+	)
+	err := db.QueryRow(`SELECT COALESCE(method,''), COALESCE(host,''), COALESCE(path,''),
+		COALESCE(query,''), COALESCE(protocol,''), COALESCE(port,0),
+		COALESCE(status_code,0), COALESCE(response_length,0),
+		COALESCE(mime_type,''), COALESCE(timestamp,'')
+		FROM http_traffic WHERE request_id = ?`, id).Scan(
+		&method, &host, &path, &query, &protocol, &port, &status, &respLen, &mime, &ts,
+	)
+	if err != nil {
+		return nil, false
+	}
+
+	var reqHeaders, respHeaders string
+	var reqBody, respBody []byte
+	_ = db.QueryRow(`SELECT COALESCE(request_headers,''), COALESCE(request_body, x''),
+		COALESCE(response_headers,''), COALESCE(response_body, x'')
+		FROM http_messages WHERE request_id = ?`, id).Scan(
+		&reqHeaders, &reqBody, &respHeaders, &respBody,
+	)
+
+	// http_messages.request_headers usually already includes the request
+	// line. Only synthesize a "METHOD path HTTP/1.1" prefix if the stored
+	// headers don't begin with one.
+	pathPart := path
+	if query != "" {
+		pathPart = path + "?" + query
+	}
+	var rawReq string
+	if reqHeaders != "" {
+		trimmed := strings.TrimLeft(reqHeaders, "\r\n")
+		firstLine := trimmed
+		if i := strings.IndexAny(trimmed, "\r\n"); i >= 0 {
+			firstLine = trimmed[:i]
+		}
+		if looksLikeRequestLine(firstLine) {
+			rawReq = strings.TrimRight(reqHeaders, "\r\n") + "\r\n\r\n"
+		} else {
+			rawReq = method + " " + pathPart + " HTTP/1.1\r\n" +
+				strings.TrimRight(reqHeaders, "\r\n") + "\r\n\r\n"
+		}
+	} else {
+		rawReq = method + " " + pathPart + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n"
+	}
+	if len(reqBody) > 0 {
+		rawReq += string(reqBody)
+	}
+
+	// Same logic for the response: status line may already be in
+	// response_headers.
+	statusText := http.StatusText(status)
+	statusLine := "HTTP/1.1 " + fmt.Sprintf("%d", status) + " " + statusText
+	var rawResp string
+	if respHeaders != "" {
+		trimmed := strings.TrimLeft(respHeaders, "\r\n")
+		firstLine := trimmed
+		if i := strings.IndexAny(trimmed, "\r\n"); i >= 0 {
+			firstLine = trimmed[:i]
+		}
+		if strings.HasPrefix(firstLine, "HTTP/") {
+			rawResp = strings.TrimRight(respHeaders, "\r\n") + "\r\n\r\n"
+		} else {
+			rawResp = statusLine + "\r\n" + strings.TrimRight(respHeaders, "\r\n") + "\r\n\r\n"
+		}
+	} else {
+		rawResp = statusLine + "\r\n\r\n"
+	}
+	if len(respBody) > 0 {
+		rawResp += string(respBody)
+	}
+
+	_ = mime
+	_ = respLen
+
+	return &TrafficDetailResponse{
+		ID:       id,
+		Request:  rawReq,
+		Response: rawResp,
+		Source:   "projectDB",
+	}, true
+}
+
+// looksLikeRequestLine returns true when s starts with "<METHOD> <path> HTTP/".
+// Cheap shape check — we don't need to validate the full grammar.
+func looksLikeRequestLine(s string) bool {
+	parts := strings.SplitN(s, " ", 3)
+	if len(parts) < 3 {
+		return false
+	}
+	return strings.HasPrefix(parts[2], "HTTP/")
 }
 
 // splitHTTPBody splits a raw HTTP message into headers + body. Uses
