@@ -9,14 +9,12 @@ import (
 
 func LaunchBrowser(browserType string, proxyAddress string, customCertPath string, profileDir string, startURL string) (*exec.Cmd, error) {
 	if browserType == "" {
-		browserType = "chrome" // Default to Chrome
+		browserType = "firefox" // Default to Firefox (CamoFox is the supported pentest browser)
 	}
 
 	browserType = strings.ToLower(browserType)
 
 	switch browserType {
-	case "chrome":
-		return launchChrome(proxyAddress, customCertPath, profileDir, startURL)
 	case "firefox":
 		return launchFirefox(proxyAddress, customCertPath, profileDir)
 	case "safari":
