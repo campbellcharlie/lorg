@@ -71,67 +71,11 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
-		mcp.NewTool("hostPrintSitemap",
-			mcp.WithDescription("Get the sitemap for a host"),
-			mcp.WithInputSchema[HostPrintSitemapArgs](),
+		mcp.NewTool("host",
+			mcp.WithDescription("Host inventory + per-host details in one tool. Actions: list (paged hosts with tech/labels), info (one host), sitemap (URL tree under path), rows (request rows for a host), getNote/setNote (legacy single note), modifyLabels (add/remove/toggle), modifyNotes (add/update/remove). Replaces listHosts/getHostInfo/hostPrintSitemap/hostPrintRowsInDetails/getNoteForHost/setNoteForHost/modifyHostLabels/modifyHostNotes."),
+			mcp.WithInputSchema[ConsolidatedHostArgs](),
 		),
-		backend.hostPrintSitemapHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("hostPrintRowsInDetails",
-			mcp.WithDescription("Get the table for a host"),
-			mcp.WithInputSchema[HostPrintRowsArgs](),
-		),
-		backend.hostPrintRowsInDetailsHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("listHosts",
-			mcp.WithDescription("List all hosts with their technologies (as names) and labels (as names)"),
-			mcp.WithInputSchema[ListHostsArgs](),
-		),
-		backend.listHostsHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("getHostInfo",
-			mcp.WithDescription("Get detailed info for a specific host by ID, including technologies (as names), labels (as names), and notes"),
-			mcp.WithInputSchema[GetHostInfoArgs](),
-		),
-		backend.getHostInfoHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("getNoteForHost",
-			mcp.WithDescription("Get the note for a host"),
-			mcp.WithInputSchema[GetNoteForHostArgs](),
-		),
-		backend.getNoteForHostHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("setNoteForHost",
-			mcp.WithDescription("Set the note for a host"),
-			mcp.WithInputSchema[SetNoteForHostArgs](),
-		),
-		backend.setNoteForHostHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("modifyHostLabels",
-			mcp.WithDescription("Add or remove labels from a host"),
-			mcp.WithInputSchema[ModifyHostLabelsArgs](),
-		),
-		backend.modifyHostLabelsHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("modifyHostNotes",
-			mcp.WithDescription("Add, update, or remove notes for a host"),
-			mcp.WithInputSchema[ModifyHostNotesArgs](),
-		),
-		backend.modifyHostNotesHandler,
+		backend.hostHandler,
 	)
 
 	// =====================================================================

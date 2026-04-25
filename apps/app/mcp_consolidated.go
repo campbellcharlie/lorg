@@ -578,7 +578,67 @@ func (backend *Backend) graphqlHandler(ctx context.Context, request mcp.CallTool
 	}
 }
 
-// ========================== 11. intercept ==========================
+// ========================== 11. host ==========================
+//
+// Folds 8 previous tools (listHosts, getHostInfo, hostPrintSitemap,
+// hostPrintRowsInDetails, getNoteForHost, setNoteForHost,
+// modifyHostLabels, modifyHostNotes) into one. The nested
+// HostLabelAction.Action / HostNoteAction.Action fields don't clash
+// with the top-level dispatcher action because they're inside arrays.
+type ConsolidatedHostArgs struct {
+	Action string `json:"action" jsonschema:"required" jsonschema_description:"Operation: list (paged hosts), info (one host's tech/labels/notes), sitemap (URL tree under path), rows (request rows for a host), getNote (legacy single note), setNote (legacy single note), modifyLabels (add/remove/toggle labels), modifyNotes (add/update/remove notes)"`
+
+	// Common
+	Host string `json:"host,omitempty" jsonschema_description:"Host (info, sitemap, rows, getNote, setNote, modifyLabels, modifyNotes). For modify*, include the protocol (e.g. http://example.com)."`
+
+	// list
+	Search string `json:"search,omitempty" jsonschema_description:"Search filter for host names (list)"`
+	Page   int    `json:"page,omitempty" jsonschema_description:"Page number, 1-indexed (list, rows)"`
+
+	// sitemap
+	Path  string `json:"path,omitempty" jsonschema_description:"Path prefix to scope the sitemap (sitemap)"`
+	Depth int    `json:"depth,omitempty" jsonschema_description:"Sitemap depth, -1 for full (sitemap)"`
+
+	// rows
+	Filter string `json:"filter,omitempty" jsonschema_description:"Substring filter for the host's request rows (rows)"`
+
+	// setNote
+	Edit []NoteEditAction `json:"edit,omitempty" jsonschema_description:"Per-line edits for the host's note (setNote)"`
+
+	// modifyLabels / modifyNotes
+	Labels []HostLabelAction `json:"labels,omitempty" jsonschema_description:"Label actions to apply (modifyLabels). Each entry has its own action field: add|remove|toggle."`
+	Notes  []HostNoteAction  `json:"notes,omitempty" jsonschema_description:"Note actions to apply (modifyNotes). Each entry has its own action field: add|update|remove."`
+}
+
+func (backend *Backend) hostHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ConsolidatedHostArgs
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	switch args.Action {
+	case "list":
+		return backend.listHostsHandler(ctx, request)
+	case "info":
+		return backend.getHostInfoHandler(ctx, request)
+	case "sitemap":
+		return backend.hostPrintSitemapHandler(ctx, request)
+	case "rows":
+		return backend.hostPrintRowsInDetailsHandler(ctx, request)
+	case "getNote":
+		return backend.getNoteForHostHandler(ctx, request)
+	case "setNote":
+		return backend.setNoteForHostHandler(ctx, request)
+	case "modifyLabels":
+		return backend.modifyHostLabelsHandler(ctx, request)
+	case "modifyNotes":
+		return backend.modifyHostNotesHandler(ctx, request)
+	default:
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: list, info, sitemap, rows, getNote, setNote, modifyLabels, modifyNotes"), nil
+	}
+}
+
+// ========================== 12. intercept ==========================
 //
 // One tool that absorbs interceptToggle/interceptPrintRowsInDetails/
 // interceptGetRawRequestAndResponse/interceptAction. Action names are
