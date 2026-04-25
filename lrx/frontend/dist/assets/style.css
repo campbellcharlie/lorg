@@ -1120,6 +1120,42 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
   white-space: inherit;
 }
 
+/* Collapsible long-line marker — click to expand giant inline content
+   (minified <script>, base64 data URLs, etc.) without scrolling forever. */
+.rh-collapsed-marker {
+  cursor: pointer;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0 6px;
+  border-radius: 3px;
+  font-style: normal;
+  user-select: none;
+  display: inline-block;
+}
+.rh-collapsed-marker:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
+}
+.rh-collapsed-icon {
+  display: inline-block;
+  width: 1em;
+  color: var(--accent);
+}
+.rh-collapsed-meta {
+  color: var(--text-ghost);
+  font-style: italic;
+  font-size: 0.9em;
+}
+.rh-line.rh-expanded .rh-collapsed-marker {
+  background: transparent;
+  padding: 0;
+  margin-right: 4px;
+}
+.rh-line.rh-expanded .rh-collapsed-meta {
+  display: none;
+}
+.rh-collapsed-content[hidden] { display: none; }
+
 /* Two-click confirm state for destructive buttons (e.g. Reset Scope).
    Visually distinct so the user knows the next click commits. */
 button.confirm-pending {

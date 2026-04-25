@@ -509,6 +509,32 @@
   function cssEscape(s) { return s.replace(/([^a-zA-Z0-9_-])/g, '\\$1'); }
 
   // ===========================================================
+  // Long-line collapse — click the placeholder to swap in the
+  // hidden full content, click again to collapse. Event-delegated
+  // so it works on dynamically rendered .rh-line blocks.
+  // ===========================================================
+  function initLineCollapse() {
+    document.addEventListener('click', function(e) {
+      var marker = e.target.closest('.rh-collapsed-marker');
+      if (!marker) return;
+      var line = marker.closest('.rh-line');
+      if (!line) return;
+      var content = line.querySelector('.rh-collapsed-content');
+      if (!content) return;
+      var expanded = line.classList.toggle('rh-expanded');
+      if (expanded) {
+        content.removeAttribute('hidden');
+        var icon = marker.querySelector('.rh-collapsed-icon');
+        if (icon) icon.textContent = '▾';
+      } else {
+        content.setAttribute('hidden', 'hidden');
+        var icon2 = marker.querySelector('.rh-collapsed-icon');
+        if (icon2) icon2.textContent = '▸';
+      }
+    });
+  }
+
+  // ===========================================================
   // Repeater variables — parse "key = value" lines from the
   // textarea, then replace {{key}} occurrences in the target.
   // Stored in localStorage so they survive reloads.
@@ -1828,15 +1854,38 @@
     return false;
   }
 
+  // Lines longer than this get auto-collapsed in the rendered view. Picked
+  // empirically — header lines, normal body lines, JSON object lines all
+  // come in under 800; minified <script>/<style> blobs, base64 data URLs,
+  // and other "this is one ridiculous line" content all blow well past it.
+  var LONG_LINE_CHARS = 800;
+
   function addLineNumbers(html) {
-    // Wrap each logical line in its own block element so the wrap CSS can
-    // apply a per-line hanging indent: the gutter sits in the negative
-    // text-indent, and any wrapped continuation hangs under the content
-    // column instead of running back under the line numbers.
     var lines = html.split('\n');
     return lines.map(function(line, idx) {
-      return '<div class="rh-line"><span class="line-num">' + (idx + 1) + '</span>' + line + '</div>';
+      return wrapOneLine(line, idx + 1);
     }).join('');
+  }
+
+  // Wrap a single logical line in an .rh-line div. If its escaped-HTML
+  // length exceeds LONG_LINE_CHARS, swap in a click-to-expand marker
+  // and stash the full content in a sibling node hidden by default.
+  function wrapOneLine(line, lineNum) {
+    var prefix = '<div class="rh-line">';
+    var lineNumSpan = lineNum != null ? '<span class="line-num">' + lineNum + '</span>' : '';
+    if (line.length > LONG_LINE_CHARS) {
+      var visibleLen = line.replace(/<[^>]*>/g, '').length;
+      var preview = line.replace(/<[^>]*>/g, '').slice(0, 60);
+      return prefix + lineNumSpan +
+        '<span class="rh-collapsed-marker" role="button" tabindex="0">' +
+          '<span class="rh-collapsed-icon">▸</span> ' +
+          escapeHtml(preview) + '… ' +
+          '<span class="rh-collapsed-meta">[' + visibleLen + ' chars — click to expand]</span>' +
+        '</span>' +
+        '<span class="rh-collapsed-content" hidden>' + line + '</span>' +
+        '</div>';
+    }
+    return prefix + lineNumSpan + line + '</div>';
   }
 
   // ===========================================================
@@ -2015,7 +2064,7 @@
   function wrapLinesNoNumbers(html) {
     var lines = html.split('\n');
     return lines.map(function(line) {
-      return '<div class="rh-line">' + line + '</div>';
+      return wrapOneLine(line, null);
     }).join('');
   }
 
@@ -2775,6 +2824,7 @@
     initMatchReplace();
     initFilterPresets();
     initDiffMarks();
+    initLineCollapse();
     restoreRepeaterVars();
 
     document.addEventListener('click', function(e) {
