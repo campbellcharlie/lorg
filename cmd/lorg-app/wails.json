@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "lorg",
+  "outputfilename": "lorg",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "lorg",
+    "email": ""
+  },
+  "info": {
+    "companyName": "lorg",
+    "productName": "lorg",
+    "productVersion": "0.28.1",
+    "copyright": "",
+    "comments": "AI-powered penetration testing proxy"
+  }
+}

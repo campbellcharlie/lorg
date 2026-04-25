@@ -48,6 +48,26 @@ type MirrorArgs struct {
 	HTTP2         *bool             `json:"http2,omitempty" jsonschema_description:"Override HTTP version (defaults to baseline)"`
 	Note          string            `json:"note,omitempty" jsonschema_description:"Note to attach to the saved row"`
 	MaxBodyBytes  int               `json:"maxBodyBytes,omitempty" jsonschema_description:"Cap response body in returned summary (default 8192). Use 0 for no cap."`
+
+	// Batch mode: when non-empty, fire len(batch) requests against the
+	// same baseline. Each entry's mutations layer on top of the
+	// top-level singleton mutations (singleton = common base, entry =
+	// per-iteration override). One MCP round-trip → N HTTP requests.
+	Batch []MirrorBatchEntry `json:"batch,omitempty" jsonschema_description:"Fire multiple iterations in one call. Each entry's mutations override the top-level singleton mutations for that iteration. Returns one summary row per iteration. Use this instead of N separate mirror calls — amortizes the per-call MCP overhead."`
+}
+
+// MirrorBatchEntry is a single iteration's mutation set in batch mode.
+// All fields mirror the singleton MirrorArgs fields (minus baseline
+// pickers and connection overrides — those are batch-wide).
+type MirrorBatchEntry struct {
+	Method        string            `json:"method,omitempty" jsonschema_description:"Override method for this iteration"`
+	Path          string            `json:"path,omitempty" jsonschema_description:"Override path for this iteration"`
+	Query         string            `json:"query,omitempty" jsonschema_description:"Replace query string for this iteration"`
+	AppendQuery   map[string]string `json:"appendQuery,omitempty" jsonschema_description:"Add/overwrite query params for this iteration"`
+	SetHeaders    map[string]string `json:"setHeaders,omitempty" jsonschema_description:"Add/replace headers for this iteration"`
+	RemoveHeaders []string          `json:"removeHeaders,omitempty" jsonschema_description:"Drop headers for this iteration"`
+	Body          json.RawMessage   `json:"body,omitempty" jsonschema_description:"Replace body for this iteration"`
+	Note          string            `json:"note,omitempty" jsonschema_description:"Note attached to this iteration's saved row"`
 }
 
 type mirrorBaseline struct {
@@ -75,13 +95,7 @@ func (backend *Backend) mirrorHandler(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError(fmt.Sprintf("baseline load failed: %v", err)), nil
 	}
 
-	// Apply mutations to the raw HTTP message.
-	mutated, summary, err := applyMutations(base.rawRequest, args)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("mutation failed: %v", err)), nil
-	}
-
-	// Resolve final connection params (mutations override baseline).
+	// Resolve connection params once (batch entries can't override these).
 	host := base.host
 	if args.HostOverride != "" {
 		host = args.HostOverride
@@ -97,6 +111,21 @@ func (backend *Backend) mirrorHandler(ctx context.Context, request mcp.CallToolR
 	http2 := base.http2
 	if args.HTTP2 != nil {
 		http2 = *args.HTTP2
+	}
+	maxBody := args.MaxBodyBytes
+	if maxBody == 0 {
+		maxBody = 8192
+	}
+
+	// Batch mode: fire one request per entry, return per-iteration summaries.
+	if len(args.Batch) > 0 {
+		return backend.runMirrorBatch(base, args, host, port, tls, http2, maxBody)
+	}
+
+	// Singleton mode (original behavior).
+	mutated, summary, err := applyMutations(base.rawRequest, args)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("mutation failed: %v", err)), nil
 	}
 
 	resp, err := backend.sendRepeaterLogic(&RepeaterSendRequest{
@@ -114,22 +143,143 @@ func (backend *Backend) mirrorHandler(ctx context.Context, request mcp.CallToolR
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Truncate response body in the JSON summary so the LLM doesn't have
-	// to read megabytes back. Default cap 8KB; pass 0 to disable.
-	maxBody := args.MaxBodyBytes
-	if maxBody == 0 {
-		maxBody = 8192
-	}
 	respPreview, truncated := truncateBody(resp.Response, maxBody)
 
 	return mcpJSONResult(map[string]any{
-		"id":              resp.UserData.ID,
-		"time":            resp.Time,
+		"id":               resp.UserData.ID,
+		"time":             resp.Time,
 		"mutationsApplied": summary,
-		"response":        respPreview,
+		"response":         respPreview,
 		"responseTruncatedAt": ifTrue(truncated, maxBody),
-		"originalLength":  len(resp.Response),
+		"originalLength":   len(resp.Response),
 	})
+}
+
+// runMirrorBatch fires one request per Batch entry against the same
+// baseline. Each entry's mutations layer on top of the top-level
+// singleton mutations: singleton acts as the common base (e.g. an
+// auth header), entries provide per-iteration overrides (e.g. paths).
+//
+// Returns a compact per-iteration summary — id, status, length,
+// mutationsApplied, time. No response bodies (those'd dwarf the
+// summary). Use getRequestResponseFromID with any returned id to
+// pull the full bytes if needed.
+func (backend *Backend) runMirrorBatch(
+	base *mirrorBaseline,
+	args MirrorArgs,
+	host string, port int, tls bool, http2 bool, _ int,
+) (*mcp.CallToolResult, error) {
+	urlStr := scheme(tls) + "://" + host + ":" + strconv.Itoa(port)
+	results := make([]map[string]any, 0, len(args.Batch))
+	successCount := 0
+
+	for i, entry := range args.Batch {
+		merged := mergeMirrorEntry(args, entry)
+		mutated, summary, err := applyMutations(base.rawRequest, merged)
+		if err != nil {
+			results = append(results, map[string]any{
+				"index": i,
+				"error": "mutation failed: " + err.Error(),
+			})
+			continue
+		}
+
+		resp, err := backend.sendRepeaterLogic(&RepeaterSendRequest{
+			Host:        host,
+			Port:        strconv.Itoa(port),
+			TLS:         tls,
+			Request:     mutated,
+			Timeout:     30,
+			HTTP2:       http2,
+			Url:         urlStr,
+			GeneratedBy: "ai/mcp/mirror",
+			Note:        merged.Note,
+		})
+		if err != nil {
+			results = append(results, map[string]any{
+				"index": i,
+				"error": err.Error(),
+			})
+			continue
+		}
+
+		successCount++
+		statusLine := ""
+		if i := strings.Index(resp.Response, "\r\n"); i > 0 {
+			statusLine = resp.Response[:i]
+		}
+		results = append(results, map[string]any{
+			"index":            i,
+			"id":               resp.UserData.ID,
+			"statusLine":       statusLine,
+			"responseLength":   len(resp.Response),
+			"time":             resp.Time,
+			"mutationsApplied": summary,
+		})
+	}
+
+	return mcpJSONResult(map[string]any{
+		"baseline":        baselineLabel(args),
+		"totalIterations": len(args.Batch),
+		"successCount":    successCount,
+		"errorCount":      len(args.Batch) - successCount,
+		"iterations":      results,
+		"hint":            "Bodies omitted to keep the summary cheap. Use getRequestResponseFromID with any iteration's id to pull full bytes.",
+	})
+}
+
+// mergeMirrorEntry creates a per-iteration MirrorArgs that combines the
+// caller's singleton mutations with this entry's per-iteration overrides.
+// Entry fields win; singleton fills in the gaps.
+func mergeMirrorEntry(base MirrorArgs, entry MirrorBatchEntry) MirrorArgs {
+	out := base
+	out.Batch = nil // single-iteration view
+	if entry.Method != "" {
+		out.Method = entry.Method
+	}
+	if entry.Path != "" {
+		out.Path = entry.Path
+	}
+	if entry.Query != "" {
+		out.Query = entry.Query
+	}
+	if len(entry.AppendQuery) > 0 {
+		merged := map[string]string{}
+		for k, v := range base.AppendQuery {
+			merged[k] = v
+		}
+		for k, v := range entry.AppendQuery {
+			merged[k] = v
+		}
+		out.AppendQuery = merged
+	}
+	if len(entry.SetHeaders) > 0 {
+		merged := map[string]string{}
+		for k, v := range base.SetHeaders {
+			merged[k] = v
+		}
+		for k, v := range entry.SetHeaders {
+			merged[k] = v
+		}
+		out.SetHeaders = merged
+	}
+	if len(entry.RemoveHeaders) > 0 {
+		out.RemoveHeaders = append(append([]string{}, base.RemoveHeaders...), entry.RemoveHeaders...)
+	}
+	if len(entry.Body) > 0 {
+		out.Body = entry.Body
+	}
+	if entry.Note != "" {
+		out.Note = entry.Note
+	}
+	return out
+}
+
+func baselineLabel(args MirrorArgs) string {
+	if args.RowID != "" {
+		return "rowId:" + args.RowID
+	}
+	return "templateName:" + args.TemplateName
 }
 
 // loadMirrorBaseline pulls the raw request + connection params from either

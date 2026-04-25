@@ -145,3 +145,64 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+func TestMirror_BatchMerge_EntryWinsOverSingleton(t *testing.T) {
+	base := MirrorArgs{
+		Method:     "POST",
+		Path:       "/api/old",
+		SetHeaders: map[string]string{"Authorization": "Bearer X", "X-A": "1"},
+	}
+	entry := MirrorBatchEntry{
+		Path:       "/api/new",
+		SetHeaders: map[string]string{"X-A": "2"}, // override single key
+	}
+	merged := mergeMirrorEntry(base, entry)
+
+	if merged.Method != "POST" {
+		t.Errorf("entry method empty → singleton wins, got %q", merged.Method)
+	}
+	if merged.Path != "/api/new" {
+		t.Errorf("entry path should win, got %q", merged.Path)
+	}
+	if merged.SetHeaders["Authorization"] != "Bearer X" {
+		t.Errorf("singleton-only header missing, got %v", merged.SetHeaders)
+	}
+	if merged.SetHeaders["X-A"] != "2" {
+		t.Errorf("entry header should override singleton, got %v", merged.SetHeaders)
+	}
+	if merged.Batch != nil {
+		t.Errorf("merged single-iteration view shouldn't carry batch")
+	}
+}
+
+func TestMirror_BatchMerge_EmptyEntryInheritsAll(t *testing.T) {
+	base := MirrorArgs{
+		Method: "DELETE",
+		Path:   "/api/x",
+		Note:   "from-singleton",
+	}
+	merged := mergeMirrorEntry(base, MirrorBatchEntry{})
+
+	if merged.Method != "DELETE" || merged.Path != "/api/x" || merged.Note != "from-singleton" {
+		t.Errorf("empty entry should inherit all singleton fields, got %+v", merged)
+	}
+}
+
+func TestMirror_BatchMerge_AppendQueryAndRemoveHeadersAreUnioned(t *testing.T) {
+	base := MirrorArgs{
+		AppendQuery:   map[string]string{"a": "1"},
+		RemoveHeaders: []string{"Cookie"},
+	}
+	entry := MirrorBatchEntry{
+		AppendQuery:   map[string]string{"b": "2"},
+		RemoveHeaders: []string{"Authorization"},
+	}
+	merged := mergeMirrorEntry(base, entry)
+
+	if merged.AppendQuery["a"] != "1" || merged.AppendQuery["b"] != "2" {
+		t.Errorf("appendQuery should union both, got %v", merged.AppendQuery)
+	}
+	if !contains(merged.RemoveHeaders, "Cookie") || !contains(merged.RemoveHeaders, "Authorization") {
+		t.Errorf("removeHeaders should concat both, got %v", merged.RemoveHeaders)
+	}
+}

@@ -198,8 +198,16 @@ func (backend *Backend) hostPrintSitemapHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// Resolve bare hostnames ("localhost") to the canonical scheme://host
+	// form ("http://localhost") so sitemapFetchLogic can derive the right
+	// per-host table name. Same trick the rows/info/notes handlers use.
+	host := trimHost(args.Host)
+	if rec, err := resolveHostRecord(backend, host); err == nil && rec != nil {
+		host = rec.GetString("host")
+	}
+
 	data := &types.SitemapFetch{
-		Host:  trimHost(args.Host),
+		Host:  host,
 		Path:  args.Path,
 		Depth: int(args.Depth),
 	}

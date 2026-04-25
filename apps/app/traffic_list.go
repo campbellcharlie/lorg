@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -233,8 +234,44 @@ func parseTrafficParams(c echo.Context) (perPage, page int, hostFilter string) {
 			page = n
 		}
 	}
-	hostFilter = c.QueryParam("host")
+	hostFilter = normalizeHostFilter(c.QueryParam("host"))
 	return
+}
+
+// normalizeHostFilter strips scheme and port from a host filter string so
+// "https://httpbin.org" / "https://httpbin.org:443" / "httpbin.org" all
+// match the same SQL LIKE pattern. The hosts collection stores values
+// like "https://httpbin.org" (full URL) but http_traffic.host and
+// _data.host store the bare "httpbin.org" form, so without
+// normalization a click on a sidebar host produces zero matches.
+func normalizeHostFilter(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	if u, err := url.Parse(s); err == nil && u.Host != "" {
+		// Strip port if present.
+		h := u.Hostname()
+		if h != "" {
+			return h
+		}
+	}
+	// No scheme — still strip a trailing :port if any.
+	if i := strings.LastIndex(s, ":"); i > 0 && i < len(s)-1 {
+		// Only trim if the suffix is digits (looks like a port).
+		port := s[i+1:]
+		allDigits := port != ""
+		for _, r := range port {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 func emptyTrafficResponse(page, perPage int) map[string]interface{} {
