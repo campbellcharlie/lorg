@@ -19,36 +19,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type SearchTrafficArgs struct {
-	Host   string `json:"host,omitempty" jsonschema_description:"Filter by host"`
-	Path   string `json:"path,omitempty" jsonschema_description:"Filter by URL path substring"`
-	Method string `json:"method,omitempty" jsonschema_description:"Filter by HTTP method"`
-	Status int    `json:"status,omitempty" jsonschema_description:"Filter by response status code"`
-	Query  string `json:"query,omitempty" jsonschema_description:"Search in request/response raw content"`
-	Limit  int    `json:"limit" jsonschema:"required" jsonschema_description:"Max results (max 200)"`
-	Offset int    `json:"offset,omitempty" jsonschema_description:"Offset for pagination"`
-}
-
-type SearchTrafficRegexArgs struct {
-	Pattern string `json:"pattern" jsonschema:"required" jsonschema_description:"Regex pattern to search"`
-	Source  string `json:"source" jsonschema:"required" jsonschema_description:"Where to search: request, response, or both"`
-	Host    string `json:"host,omitempty" jsonschema_description:"Filter by host"`
-	Limit   int    `json:"limit" jsonschema:"required" jsonschema_description:"Max results (max 100)"`
-}
-
-type GetTrafficStatsArgs struct{}
-
-type GetStatusDistributionArgs struct {
-	Host string `json:"host,omitempty" jsonschema_description:"Filter by host"`
-}
-
-type GetEndpointsArgs struct {
-	Host  string `json:"host,omitempty" jsonschema_description:"Filter by host"`
-	Limit int    `json:"limit" jsonschema:"required" jsonschema_description:"Max results (max 500)"`
-}
-
-type GetParametersArgs struct {
-	Host  string `json:"host,omitempty" jsonschema_description:"Filter by host"`
-	Limit int    `json:"limit" jsonschema:"required" jsonschema_description:"Max results (max 500)"`
+	Host        string `json:"host,omitempty" jsonschema_description:"Filter by host (substring match)"`
+	Path        string `json:"path,omitempty" jsonschema_description:"Filter by URL path substring"`
+	Method      string `json:"method,omitempty" jsonschema_description:"Filter by HTTP method"`
+	Status      int    `json:"status,omitempty" jsonschema_description:"Filter by response status code"`
+	Query       string `json:"query,omitempty" jsonschema_description:"Search in request/response raw content (substring by default; regex when regex=true)"`
+	Regex       bool   `json:"regex,omitempty" jsonschema_description:"Treat query as a Go regex pattern instead of a literal substring"`
+	RegexSource string `json:"regexSource,omitempty" jsonschema_description:"For regex queries, which side to search: request, response, or both (default: both)"`
+	Limit       int    `json:"limit" jsonschema:"required" jsonschema_description:"Max results (max 200)"`
+	Offset      int    `json:"offset,omitempty" jsonschema_description:"Offset for pagination (cursor-style)"`
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +42,19 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 
 	if args.Limit <= 0 || args.Limit > 200 {
 		args.Limit = 200
+	}
+
+	// Regex mode delegates to the existing regex handler — same engine,
+	// just exposed through the unified tool surface.
+	if args.Regex {
+		if args.Query == "" {
+			return mcp.NewToolResultError("query is required when regex=true. Pass a Go regex pattern, e.g. \"X-[A-Za-z-]+\""), nil
+		}
+		src := args.RegexSource
+		if src == "" {
+			src = "both"
+		}
+		return backend.runTrafficRegexSearch(args.Host, args.Query, src, args.Limit)
 	}
 
 	// Build SQL WHERE clause with positional params
@@ -160,35 +152,29 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 	})
 }
 
-func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args SearchTrafficRegexArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+// runTrafficRegexSearch is the regex-mode body of searchTraffic. Kept as
+// a separate function so the unified searchTrafficHandler can delegate to
+// it cleanly.
+func (backend *Backend) runTrafficRegexSearch(host, pattern, source string, limit int) (*mcp.CallToolResult, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
 	}
-
-	if args.Limit <= 0 || args.Limit > 100 {
-		args.Limit = 100
+	if source != "request" && source != "response" && source != "both" {
+		return mcp.NewToolResultError("regexSource must be 'request', 'response', or 'both'. Got: " + source), nil
 	}
-
-	if args.Source != "request" && args.Source != "response" && args.Source != "both" {
-		return mcp.NewToolResultError("source must be 'request', 'response', or 'both'"), nil
-	}
-
-	re, err := regexp.Compile(args.Pattern)
+	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid regex pattern: %v", err)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("invalid regex pattern: %v. Example: \"X-[A-Za-z-]+\"", err)), nil
 	}
 
-	// Fetch _data records, optionally filtered by host
 	where := "1=1"
 	var queryArgs []any
-	if args.Host != "" {
+	if host != "" {
 		where = "host LIKE ?"
-		queryArgs = append(queryArgs, "%"+args.Host+"%")
+		queryArgs = append(queryArgs, "%"+host+"%")
 	}
 
-	// Fetch a larger batch since not all records will match the regex.
-	fetchLimit := args.Limit * 10
+	fetchLimit := limit * 10
 	if fetchLimit > 2000 {
 		fetchLimit = 2000
 	}
@@ -198,17 +184,16 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch data records: %v", err)), nil
 	}
 
-	items := make([]map[string]any, 0, args.Limit)
+	items := make([]map[string]any, 0, limit)
 	for _, rec := range dataRecords {
-		if len(items) >= args.Limit {
+		if len(items) >= limit {
 			break
 		}
-
 		id := rec.GetString("id")
-		host := rec.GetString("host")
+		hostVal := rec.GetString("host")
 		matchContext := ""
 
-		if args.Source == "request" || args.Source == "both" {
+		if source == "request" || source == "both" {
 			reqRec, _ := backend.DB.FindRecordById("_req", id)
 			if reqRec != nil {
 				raw := reqRec.GetString("raw")
@@ -218,8 +203,7 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 				}
 			}
 		}
-
-		if matchContext == "" && (args.Source == "response" || args.Source == "both") {
+		if matchContext == "" && (source == "response" || source == "both") {
 			respRec, _ := backend.DB.FindRecordById("_resp", id)
 			if respRec != nil {
 				raw := respRec.GetString("raw")
@@ -229,11 +213,10 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 				}
 			}
 		}
-
 		if matchContext != "" {
 			items = append(items, map[string]any{
 				"id":           id,
-				"host":         host,
+				"host":         hostVal,
 				"matchContext": matchContext,
 			})
 		}
@@ -242,242 +225,7 @@ func (backend *Backend) searchTrafficRegexHandler(ctx context.Context, request m
 	return mcpJSONResult(map[string]any{
 		"totalItems": len(items),
 		"items":      items,
-	})
-}
-
-func (backend *Backend) getTrafficStatsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	allRecords, err := backend.DB.FindRecords("_data", "1=1")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch data records: %v", err)), nil
-	}
-
-	totalRequests := len(allRecords)
-	hostCounts := map[string]int{}
-	methodCounts := map[string]int{}
-
-	for _, rec := range allRecords {
-		host := rec.GetString("host")
-		if host != "" {
-			hostCounts[host]++
-		}
-
-		reqJSON := asMap(rec.Get("req_json"))
-		method := mapStr(reqJSON, "method")
-		if method != "" {
-			methodCounts[method]++
-		}
-	}
-
-	hosts := make([]map[string]any, 0, len(hostCounts))
-	for host, count := range hostCounts {
-		hosts = append(hosts, map[string]any{
-			"host":  host,
-			"count": count,
-		})
-	}
-
-	return mcpJSONResult(map[string]any{
-		"totalRequests": totalRequests,
-		"hosts":         hosts,
-		"methods":       methodCounts,
-	})
-}
-
-func (backend *Backend) getStatusDistributionHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args GetStatusDistributionArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	var recs []*lorgdb.Record
-	var err error
-	if args.Host != "" {
-		recs, err = backend.DB.FindRecordsSorted("_data", "host LIKE ?", `"index" DESC`, 0, 0, "%"+args.Host+"%")
-	} else {
-		recs, err = backend.DB.FindRecords("_data", "1=1")
-	}
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
-	}
-
-	records := wrapRecords(recs)
-
-	statusCounts := map[int]int{}
-	for _, rec := range records {
-		respJSON := asMap(rec.Get("resp_json"))
-		status := int(mapFloat(respJSON, "status"))
-		if status != 0 {
-			statusCounts[status]++
-		}
-	}
-
-	distribution := make([]map[string]any, 0, len(statusCounts))
-	total := 0
-	for status, count := range statusCounts {
-		distribution = append(distribution, map[string]any{
-			"status": status,
-			"count":  count,
-		})
-		total += count
-	}
-
-	return mcpJSONResult(map[string]any{
-		"distribution": distribution,
-		"total":        total,
-	})
-}
-
-func (backend *Backend) getEndpointsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args GetEndpointsArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	if args.Limit <= 0 || args.Limit > 500 {
-		args.Limit = 500
-	}
-
-	var sql string
-	var queryArgs []any
-
-	if args.Host != "" {
-		sql = `SELECT req_json FROM _data WHERE host LIKE ? ORDER BY "index" DESC`
-		queryArgs = append(queryArgs, "%"+args.Host+"%")
-	} else {
-		sql = `SELECT req_json FROM _data ORDER BY "index" DESC`
-	}
-
-	rows, err := backend.DB.Query(sql, queryArgs...)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query endpoints: %v", err)), nil
-	}
-	defer rows.Close()
-
-	// Deduplicate by method+path and count occurrences
-	type endpointKey struct {
-		Method string
-		Path   string
-	}
-	counts := map[endpointKey]int{}
-	for rows.Next() {
-		var reqJSON string
-		if err := rows.Scan(&reqJSON); err != nil {
-			continue
-		}
-		parsed := parseReqJSONString(reqJSON)
-		if parsed == nil {
-			continue
-		}
-		method := mapStr(parsed, "method")
-		path := mapStr(parsed, "path")
-		if path == "" {
-			continue
-		}
-		key := endpointKey{Method: method, Path: path}
-		counts[key]++
-	}
-
-	endpoints := make([]map[string]any, 0, len(counts))
-	for key, count := range counts {
-		endpoints = append(endpoints, map[string]any{
-			"path":   key.Path,
-			"method": key.Method,
-			"count":  count,
-		})
-		if len(endpoints) >= args.Limit {
-			break
-		}
-	}
-
-	return mcpJSONResult(map[string]any{
-		"endpoints": endpoints,
-		"total":     len(endpoints),
-	})
-}
-
-func (backend *Backend) getParametersHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args GetParametersArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	if args.Limit <= 0 || args.Limit > 500 {
-		args.Limit = 500
-	}
-
-	var sql string
-	var queryArgs []any
-
-	if args.Host != "" {
-		sql = `SELECT req_json FROM _data WHERE has_params = 1 AND host LIKE ? ORDER BY "index" DESC`
-		queryArgs = append(queryArgs, "%"+args.Host+"%")
-	} else {
-		sql = `SELECT req_json FROM _data WHERE has_params = 1 ORDER BY "index" DESC`
-	}
-
-	rows, err := backend.DB.Query(sql, queryArgs...)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to query parameters: %v", err)), nil
-	}
-	defer rows.Close()
-
-	type paramInfo struct {
-		Name         string
-		ExampleValue string
-		Count        int
-	}
-	paramMap := map[string]*paramInfo{}
-
-	for rows.Next() {
-		var reqJSON string
-		if err := rows.Scan(&reqJSON); err != nil {
-			continue
-		}
-		parsed := parseReqJSONString(reqJSON)
-		if parsed == nil {
-			continue
-		}
-		queryStr := mapStr(parsed, "query")
-		if queryStr == "" {
-			continue
-		}
-
-		values, err := url.ParseQuery(queryStr)
-		if err != nil {
-			continue
-		}
-		for name, vals := range values {
-			if pi, exists := paramMap[name]; exists {
-				pi.Count++
-			} else {
-				exampleValue := ""
-				if len(vals) > 0 {
-					exampleValue = vals[0]
-				}
-				paramMap[name] = &paramInfo{
-					Name:         name,
-					ExampleValue: exampleValue,
-					Count:        1,
-				}
-			}
-		}
-	}
-
-	parameters := make([]map[string]any, 0, len(paramMap))
-	for _, pi := range paramMap {
-		parameters = append(parameters, map[string]any{
-			"name":         pi.Name,
-			"exampleValue": pi.ExampleValue,
-			"count":        pi.Count,
-		})
-		if len(parameters) >= args.Limit {
-			break
-		}
-	}
-
-	return mcpJSONResult(map[string]any{
-		"parameters": parameters,
-		"total":      len(parameters),
+		"hasMore":    len(items) >= limit,
 	})
 }
 
