@@ -61,17 +61,22 @@ func (c *trafficLoggingConfig) shouldLog(generatedBy string) bool {
 		return true
 	}
 
-	// Map generatedBy to source category
+	// Map generatedBy to source category. AI/MCP traffic is routed through
+	// the repeater path so its generated_by carries BOTH prefixes (e.g.
+	// "repeater/ai/mcp/http"). The ai/mcp substring check has to run
+	// BEFORE the repeater/ prefix check or MCP traffic would be classified
+	// as plain "repeater" — same root cause as the mapGeneratedByToTool
+	// fix in commit 0a54f0e.
 	source := "other"
 	switch {
+	case strings.Contains(generatedBy, "ai/mcp"):
+		source = "mcp"
 	case strings.HasPrefix(generatedBy, "proxy/"):
 		source = "proxy"
-	case strings.HasPrefix(generatedBy, "repeater/"):
-		source = "repeater"
-	case strings.HasPrefix(generatedBy, "ai/mcp/"):
-		source = "mcp"
 	case strings.Contains(generatedBy, "template"):
 		source = "template"
+	case strings.HasPrefix(generatedBy, "repeater/"):
+		source = "repeater"
 	}
 
 	return c.sources[source]

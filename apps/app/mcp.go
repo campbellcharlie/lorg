@@ -322,7 +322,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("mirror",
-			mcp.WithDescription("Re-fire a captured request (by rowId) or saved template (by templateName) with small mutations applied: method, path, query, appendQuery, setHeaders, removeHeaders, body. Reuses everything else from the baseline so you don't re-emit the full headers/auth/cookies/body each call. Body is JSON-encoded automatically when an object is passed (Content-Type + Content-Length updated). Response body capped at 8KB by default — pass maxBodyBytes:0 for full. Cheap re-probe primitive: 10x token saving over rebuilding sendHttpRequest each iteration."),
+			mcp.WithDescription("Re-fire a captured request (by rowId) or saved template (by templateName) with small mutations applied: method, path, query, appendQuery, setHeaders, removeHeaders, body. Reuses everything else from the baseline so you don't re-emit the full headers/auth/cookies/body each call. Body is JSON-encoded automatically when an object is passed (Content-Type + Content-Length updated). Response body capped at 8KB by default — pass maxBodyBytes:0 for full. Cheap re-probe primitive: 10x token saving over rebuilding sendHttpRequest each iteration. For multi-iteration sweeps, pass `batch:[{path:'/users/1'},{path:'/users/2'},...]` — fires N requests server-side in one MCP round-trip and returns one summary row per iteration. Each batch entry's mutations layer on top of the top-level singleton mutations (singleton = common base, entry = per-iteration override)."),
 			mcp.WithInputSchema[MirrorArgs](),
 		),
 		backend.mirrorHandler,

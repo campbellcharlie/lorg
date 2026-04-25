@@ -19,6 +19,13 @@ builds*/
 build/
 bin/
 
+# Wails uses cmd/lorg-app/build/ for both source assets (appicon.png,
+# Info.plist template) and build output (build/bin/lorg.app). Keep
+# the source assets tracked; the build/bin/ output is already
+# excluded by the generic 'build/' rule above.
+!cmd/lorg-app/build/
+cmd/lorg-app/build/bin/
+
 # Node.js dependencies
 node_modules/
 **/node_modules/
@@ -70,3 +77,35 @@ audit/
 
 # Local MCP test infrastructure — test server, test plan, results
 .test-server/
+
+# Wails CLI generates this when invoked without an existing frontend
+cmd/lorg-app/frontend/wailsjs/
+
+# Code-signing material — defense-in-depth so private keys, certs,
+# CSRs, and notarization profiles can never be committed by accident.
+# Real signing artifacts live OUTSIDE the repo at ~/.lorg-signing/.
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*.csr
+*.pem
+.lorg-signing/
+
+# App-specific passwords / API keys / Apple Connect tokens.
+*.appspecific
+AuthKey_*.p8
+notary*.json
+
+# The lorg CA cert lives in ~/.config/lorg/ and is auto-generated;
+# don't track if anyone moves it into the repo
+ca.key
+ca.crt
+
+# Stale backups of swapped-out binaries
+*.old
+
+# Release artifacts (built locally for `make release` then uploaded
+# to GitHub via `make publish` — no need to track them).
+dist/
