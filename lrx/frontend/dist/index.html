@@ -54,6 +54,21 @@
           <button id="traffic-refresh" class="btn btn-sm">Refresh</button>
           <span id="traffic-count" class="count-badge">0</span>
         </div>
+        <div class="chip-strip" id="traffic-chips">
+          <button class="chip" data-chip-type="method" data-chip="GET">GET</button>
+          <button class="chip" data-chip-type="method" data-chip="POST">POST</button>
+          <button class="chip" data-chip-type="method" data-chip="PUT">PUT</button>
+          <button class="chip" data-chip-type="method" data-chip="DELETE">DEL</button>
+          <span class="chip-sep"></span>
+          <button class="chip" data-chip-type="mime" data-chip="json">JSON</button>
+          <button class="chip" data-chip-type="mime" data-chip="html">HTML</button>
+          <button class="chip" data-chip-type="mime" data-chip="javascript">JS</button>
+          <button class="chip" data-chip-type="mime" data-chip="xml">XML</button>
+          <button class="chip" data-chip-type="mime" data-chip="image">Image</button>
+          <button class="chip" data-chip-type="mime" data-chip="other">Other</button>
+          <span class="chip-sep"></span>
+          <button class="chip chip-clear" id="chip-clear">Clear</button>
+        </div>
         <div class="table-container">
           <table id="traffic-table">
             <thead>
@@ -104,6 +119,7 @@
             <div class="detail-split-pane" id="detail-pane-response">
               <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="tree">Tree</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button><button class="fmt-btn" data-fmt="cookies">Cookies</button><button class="fmt-btn" data-fmt="render">Render</button><button class="fmt-btn" data-fmt="hex">Hex</button></span></div>
               <pre id="detail-response-raw" class="raw-http" tabindex="0"></pre>
+              <div class="pane-footer-stats" id="resp-pane-stats"></div>
               <div class="find-bar hidden" data-target="detail-response-raw">
                 <input type="text" class="find-input" placeholder="Find in response">
                 <span class="find-count">0/0</span>
@@ -285,6 +301,16 @@
       </div>
 
     </main>
+
+    <!-- Command palette (Cmd/Ctrl+K) -->
+    <div id="cmd-palette" class="cmd-palette hidden" role="dialog" aria-label="Command palette">
+      <div class="cmd-palette-backdrop"></div>
+      <div class="cmd-palette-modal">
+        <input type="text" id="cmd-palette-input" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+        <ul id="cmd-palette-list" class="cmd-palette-list"></ul>
+        <div class="cmd-palette-hint">↑↓ navigate · Enter run · Esc close</div>
+      </div>
+    </div>
   </div>
 
   <!-- Context menu -->

@@ -105,6 +105,12 @@
     applyClientFilter();
   }
 
+  // Chip filter state — sets of method names and mime tokens that the
+  // user has clicked. Empty set means "no filter from this dimension"
+  // (i.e. don't constrain on it). Multiple selections within the same
+  // dimension are OR'd; across dimensions they AND.
+  var chipFilters = { method: new Set(), mime: new Set() };
+
   function applyClientFilter() {
     var filterText = $('#traffic-filter').value.trim();
     var aiOnly = $('#filter-ai-only').checked;
@@ -133,6 +139,32 @@
       });
     }
 
+    // Method chip filter (OR within the chip set)
+    if (chipFilters.method.size > 0) {
+      filtered = filtered.filter(function(row) {
+        var m = (row.req_json && row.req_json.method) || row.method || '';
+        return chipFilters.method.has(m.toUpperCase());
+      });
+    }
+
+    // Mime chip filter (OR within the chip set). "other" matches anything
+    // that doesn't fall in our known buckets.
+    if (chipFilters.mime.size > 0) {
+      var known = ['json', 'html', 'javascript', 'xml', 'image'];
+      filtered = filtered.filter(function(row) {
+        var mime = ((row.resp_json && row.resp_json.mime) || row.mime || '').toLowerCase();
+        for (var token of chipFilters.mime) {
+          if (token === 'other') {
+            var matchedKnown = known.some(function(k) { return mime.indexOf(k) >= 0; });
+            if (!matchedKnown && mime !== '') return true;
+          } else if (mime.indexOf(token) >= 0) {
+            return true;
+          }
+        }
+        return false;
+      });
+    }
+
     // Parse and apply text filter
     if (filterText) {
       filtered = filtered.filter(function(row) {
@@ -142,6 +174,211 @@
 
     trafficData = filtered;
     renderTraffic();
+  }
+
+  // ===========================================================
+  // Command palette (Cmd/Ctrl+K) — Caido / VSCode / Linear-style.
+  // Registry of available commands; each is an object with id,
+  // label, optional hint string, and a run function.
+  // ===========================================================
+  var paletteCommands = [];
+  var paletteVisible = [];
+  var paletteIndex = 0;
+
+  function buildPaletteCommands() {
+    paletteCommands = [
+      { id: 'view-traffic',   label: 'Switch to Traffic',   hint: 'Cmd+1', run: function() { switchView('traffic'); } },
+      { id: 'view-repeater',  label: 'Switch to Repeater',  hint: 'Cmd+2', run: function() { switchView('repeater'); } },
+      { id: 'view-intercept', label: 'Switch to Intercept', hint: 'Cmd+3', run: function() { switchView('intercept'); } },
+      { id: 'view-settings',  label: 'Switch to Settings',  hint: 'Cmd+4', run: function() { switchView('settings'); } },
+      { id: 'send-repeater',  label: 'Send selected request to Repeater', hint: 'Cmd+R', run: function() {
+        var btn = document.getElementById('btn-send-to-repeater');
+        if (btn) btn.click();
+      }},
+      { id: 'refresh',        label: 'Refresh traffic list', hint: 'Cmd+Shift+R', run: function() {
+        var btn = document.getElementById('traffic-refresh');
+        if (btn) btn.click();
+      }},
+      { id: 'find-in-pane',   label: 'Find in request/response', hint: 'Cmd+F', run: function() {
+        var pane = document.getElementById('detail-pane-response');
+        var bar = pane && pane.querySelector('.find-bar');
+        if (bar) openFindBar(bar);
+      }},
+      { id: 'toggle-intercept', label: 'Toggle intercept', hint: 'Cmd+P', run: function() {
+        var btn = document.getElementById('intercept-toggle');
+        if (btn) btn.click();
+      }},
+      { id: 'clear-chips',    label: 'Clear chip filters', run: function() {
+        var btn = document.getElementById('chip-clear');
+        if (btn) btn.click();
+      }},
+      { id: 'reset-scope',    label: 'Reset scope (two-click)', run: function() {
+        var btn = document.getElementById('scope-reset-btn');
+        if (btn) { switchView('settings'); setTimeout(function(){ btn.click(); }, 200); }
+      }},
+    ];
+  }
+
+  function initCommandPalette() {
+    buildPaletteCommands();
+
+    var palette = document.getElementById('cmd-palette');
+    var input = document.getElementById('cmd-palette-input');
+    var list = document.getElementById('cmd-palette-list');
+    if (!palette || !input || !list) return;
+
+    function renderList(query) {
+      var q = (query || '').trim().toLowerCase();
+      paletteVisible = q
+        ? paletteCommands.filter(function(c) { return fuzzyMatch(c.label.toLowerCase(), q); })
+        : paletteCommands.slice();
+      paletteIndex = 0;
+      if (paletteVisible.length === 0) {
+        list.innerHTML = '<li class="cmd-empty">No matching commands</li>';
+        return;
+      }
+      list.innerHTML = paletteVisible.map(function(c, i) {
+        var hint = c.hint ? '<span class="cmd-shortcut">' + escapeHtml(c.hint) + '</span>' : '';
+        return '<li class="' + (i === 0 ? 'active' : '') + '" data-idx="' + i + '">' +
+          '<span>' + escapeHtml(c.label) + '</span>' + hint + '</li>';
+      }).join('');
+    }
+
+    function setActive(newIdx) {
+      paletteIndex = (newIdx + paletteVisible.length) % paletteVisible.length;
+      Array.prototype.slice.call(list.querySelectorAll('li')).forEach(function(li, i) {
+        li.classList.toggle('active', i === paletteIndex);
+        if (i === paletteIndex) li.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    function execute(idx) {
+      var cmd = paletteVisible[idx];
+      closePalette();
+      if (cmd && typeof cmd.run === 'function') cmd.run();
+    }
+
+    function openPalette() {
+      palette.classList.remove('hidden');
+      input.value = '';
+      renderList('');
+      input.focus();
+    }
+    function closePalette() {
+      palette.classList.add('hidden');
+    }
+
+    // Public helper for the global shortcut listener.
+    palette._open = openPalette;
+    palette._close = closePalette;
+
+    input.addEventListener('input', function() { renderList(input.value); });
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(paletteIndex + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(paletteIndex - 1); }
+      else if (e.key === 'Enter')  { e.preventDefault(); execute(paletteIndex); }
+      else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+    });
+    list.addEventListener('click', function(e) {
+      var li = e.target.closest('li[data-idx]');
+      if (li) execute(parseInt(li.dataset.idx, 10));
+    });
+    palette.querySelector('.cmd-palette-backdrop').addEventListener('click', closePalette);
+  }
+
+  // Tiny non-recursive fuzzy: each query char must appear in order
+  // somewhere in the candidate. Cheap and good enough for palette-size
+  // command lists. Anchored prefix match wins by being naturally
+  // earlier in the result list since we just preserve registration order.
+  function fuzzyMatch(s, q) {
+    var i = 0, j = 0;
+    while (i < s.length && j < q.length) {
+      if (s.charCodeAt(i) === q.charCodeAt(j)) j++;
+      i++;
+    }
+    return j === q.length;
+  }
+
+  // ===========================================================
+  // Global keyboard shortcuts — Caido-inspired.
+  // Cmd/Ctrl+K   open command palette
+  // Cmd/Ctrl+1-4 switch view
+  // Cmd/Ctrl+R   send selected request to repeater
+  // Cmd/Ctrl+P   toggle intercept
+  // ===========================================================
+  function initGlobalShortcuts() {
+    document.addEventListener('keydown', function(e) {
+      var mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      // Don't hijack typing inside an input/textarea unless it's a
+      // shortcut that's traditionally fine to fire there (Cmd+K, Cmd+R).
+      var t = e.target;
+      var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        var palette = document.getElementById('cmd-palette');
+        if (!palette) return;
+        if (palette.classList.contains('hidden')) palette._open();
+        else palette._close();
+        return;
+      }
+
+      if (typing) return;
+
+      var viewMap = { '1': 'traffic', '2': 'repeater', '3': 'intercept', '4': 'settings' };
+      if (viewMap[e.key]) {
+        e.preventDefault();
+        switchView(viewMap[e.key]);
+        return;
+      }
+
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        var btn = document.getElementById('btn-send-to-repeater');
+        if (btn && !document.getElementById('traffic-detail').classList.contains('hidden')) btn.click();
+        return;
+      }
+
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        var ibtn = document.getElementById('intercept-toggle');
+        if (ibtn) ibtn.click();
+        return;
+      }
+    });
+  }
+
+  // Wire chip clicks once on init.
+  function initChipStrip() {
+    var strip = document.getElementById('traffic-chips');
+    if (!strip) return;
+    strip.addEventListener('click', function(e) {
+      var btn = e.target.closest('.chip');
+      if (!btn) return;
+      if (btn.id === 'chip-clear') {
+        chipFilters.method.clear();
+        chipFilters.mime.clear();
+        Array.prototype.slice.call(strip.querySelectorAll('.chip.active')).forEach(function(b) {
+          b.classList.remove('active');
+        });
+        applyClientFilter();
+        return;
+      }
+      var type = btn.dataset.chipType;
+      var token = btn.dataset.chip;
+      if (!type || !token) return;
+      var bucket = chipFilters[type];
+      if (bucket.has(token)) {
+        bucket.delete(token);
+        btn.classList.remove('active');
+      } else {
+        bucket.add(token);
+        btn.classList.add('active');
+      }
+      applyClientFilter();
+    });
   }
 
   // Smart filter parser: supports status:200, method:GET, path:/api, host:example,
@@ -425,6 +662,16 @@
 
     sizeEl.textContent = length ? formatBytes(length) : '—';
     mimeEl.textContent = mime || '—';
+
+    // Caido-style at-a-glance footer in the response pane: shows
+    // the same size/time at the bottom-right of the pane so it stays
+    // visible while scrolling the body.
+    var footerStats = $('#resp-pane-stats');
+    if (footerStats) {
+      var bytes = length ? formatBytes(length) : '—';
+      var ms = elapsedMs ? Math.round(elapsedMs) + ' ms' : '— ms';
+      footerStats.textContent = bytes + ' · ' + ms;
+    }
   }
 
   // --- Format toggles ---
@@ -1944,6 +2191,9 @@
 
     // Response format toggle
     initFindInPane();
+    initChipStrip();
+    initCommandPalette();
+    initGlobalShortcuts();
 
     document.addEventListener('click', function(e) {
       if (e.target.classList.contains('fmt-btn')) {

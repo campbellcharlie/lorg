@@ -484,12 +484,17 @@ html, body {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* Selected */
+/* Selected — Caido-style prominent left bar so the active row is
+   obvious even at a glance from across the screen. 3px (was 2px),
+   slightly stronger background. */
 #traffic-table tr.selected td {
   background: var(--accent-dim);
 }
 #traffic-table tr.selected td:first-child {
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+#traffic-table tr.selected:hover td {
+  background: var(--accent-dim);
 }
 
 /* Sortable headers */
@@ -1426,6 +1431,170 @@ mark.find-match.find-current {
   color: var(--text-ghost);
   font-style: italic;
   border-top: 1px dotted var(--border, #2a2a30);
+}
+
+/* ============================================================
+   Filter chips above the traffic table — Caido-style.
+   Multi-select, additive. Visual on/off with a colored fill
+   when active. Method and mime sections separated by a thin
+   divider, with a "Clear" chip on the far right.
+   ============================================================ */
+.chip-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  background: var(--bg-surface, #1c1c20);
+  flex-wrap: wrap;
+}
+.chip {
+  background: transparent;
+  border: 1px solid var(--border, #2a2a30);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.chip:hover {
+  border-color: var(--text-secondary);
+  color: var(--text);
+}
+.chip.active {
+  background: var(--accent-dim, rgba(45, 212, 168, 0.12));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chip-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border, #2a2a30);
+  margin: 0 4px;
+  display: inline-block;
+}
+.chip-clear {
+  margin-left: auto;
+  color: var(--text-ghost);
+}
+.chip-clear:hover {
+  color: var(--red, #ef4444);
+  border-color: var(--red, #ef4444);
+}
+
+/* Pane-footer at-a-glance stats — Caido-style "1.4K · 142ms" pinned
+   to bottom-right of the response pane. Doesn't take pointer events
+   so it never interferes with selection / scrolling. */
+.pane-footer-stats {
+  position: absolute;
+  bottom: 6px;
+  right: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg, #18181b);
+  padding: 2px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  opacity: 0.85;
+  z-index: 5;
+}
+
+/* ============================================================
+   Command palette (Cmd/Ctrl+K) — Caido/VSCode/Linear pattern.
+   Centered modal with fuzzy-search input + result list.
+   ============================================================ */
+.cmd-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cmd-palette.hidden { display: none; }
+.cmd-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.cmd-palette-modal {
+  position: relative;
+  width: 560px;
+  max-width: 90vw;
+  background: var(--bg-surface, #1c1c20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+#cmd-palette-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  padding: 14px 16px;
+}
+.cmd-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.cmd-palette-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.cmd-palette-list li.active {
+  background: var(--accent-dim, rgba(45, 212, 168, 0.12));
+  color: var(--accent);
+}
+.cmd-palette-list li .cmd-shortcut {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-ghost);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.cmd-palette-list li.active .cmd-shortcut {
+  background: rgba(45, 212, 168, 0.15);
+  color: var(--accent);
+}
+.cmd-palette-list .cmd-empty {
+  padding: 12px 16px;
+  color: var(--text-ghost);
+  font-style: italic;
+  text-align: center;
+}
+.cmd-palette-hint {
+  border-top: 1px solid var(--border, #2a2a30);
+  padding: 6px 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-ghost);
+  text-align: right;
 }
 
 /* ============================================================
