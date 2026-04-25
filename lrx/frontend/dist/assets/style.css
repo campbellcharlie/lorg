@@ -2154,6 +2154,72 @@ mark.find-match.find-current {
 [data-theme="ember"] .method-post { color: #4fc3f7; }
 [data-theme="ember"] .status-2xx, [data-theme="ember"] .hl-status-2xx { color: #81c784; }
 
+/* Ayu Mirage Plus — the warm dark sibling in the Ayu family.
+   Background sits between true dark and washed-out, accent leans
+   amber (Ayu's signature) with cyan tags and lime-green strings. */
+[data-theme="ayu-mirage"] {
+  --bg: #1f2430; --bg-surface: #171b24; --bg-elevated: #272d38; --bg-hover: #2f3543; --bg-active: #383f4d;
+  --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.10); --border-focus: rgba(255,204,102,0.5);
+  --text: #cbccc6; --text-secondary: #a6acb9; --text-tertiary: #5c6773; --text-ghost: #3e4b59;
+  --accent: #ffcc66; --accent-hover: #ffd580; --accent-dim: rgba(255,204,102,0.12); --accent-glow: rgba(255,204,102,0.18);
+  --red: #ff3333; --orange: #ffa759; --blue: #5ccfe6; --yellow: #ffcc66; --purple: #d4bfff;
+}
+[data-theme="ayu-mirage"] .method-get  { color: #bae67e; }
+[data-theme="ayu-mirage"] .method-post { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .method-put  { color: #ffa759; }
+[data-theme="ayu-mirage"] .method-delete { color: #ff3333; }
+[data-theme="ayu-mirage"] .status-2xx, [data-theme="ayu-mirage"] .hl-status-2xx { color: #bae67e; }
+[data-theme="ayu-mirage"] .status-3xx, [data-theme="ayu-mirage"] .hl-status-3xx { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .status-4xx, [data-theme="ayu-mirage"] .hl-status-4xx { color: #ffa759; }
+[data-theme="ayu-mirage"] .status-5xx, [data-theme="ayu-mirage"] .hl-status-5xx { color: #ff3333; }
+
+/* Ayu Light — the daytime sibling. Inverts the dark assumptions
+   most other themes bake in: borders fade to black, scrollbars
+   are dark on light, hover states are subtle dark tints. */
+[data-theme="ayu-light"] {
+  --bg: #fafafa; --bg-surface: #f3f4f5; --bg-elevated: #e9ecef; --bg-hover: #e1e4e8; --bg-active: #d4d8dd;
+  --border: rgba(0,0,0,0.08); --border-light: rgba(0,0,0,0.12); --border-focus: rgba(255,153,64,0.5);
+  --text: #5c6773; --text-secondary: #828c99; --text-tertiary: #abb0b6; --text-ghost: #cbcdd0;
+  --accent: #ff9940; --accent-hover: #ffaf60; --accent-dim: rgba(255,153,64,0.12); --accent-glow: rgba(255,153,64,0.18);
+  --red: #f07171; --orange: #fa8d3e; --blue: #36a3d9; --yellow: #f2ae49; --purple: #a37acc;
+}
+[data-theme="ayu-light"] .method-get  { color: #86b300; }
+[data-theme="ayu-light"] .method-post { color: #36a3d9; }
+[data-theme="ayu-light"] .method-put  { color: #fa8d3e; }
+[data-theme="ayu-light"] .method-delete { color: #f07171; }
+[data-theme="ayu-light"] .status-2xx, [data-theme="ayu-light"] .hl-status-2xx { color: #86b300; }
+[data-theme="ayu-light"] .status-3xx, [data-theme="ayu-light"] .hl-status-3xx { color: #36a3d9; }
+[data-theme="ayu-light"] .status-4xx, [data-theme="ayu-light"] .hl-status-4xx { color: #fa8d3e; }
+[data-theme="ayu-light"] .status-5xx, [data-theme="ayu-light"] .hl-status-5xx { color: #f07171; }
+/* Light-mode overrides for elements that hardcode rgba(255,...)
+   assuming a dark canvas. Scrollbars + selection are the most
+   visible offenders. */
+[data-theme="ayu-light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+[data-theme="ayu-light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+[data-theme="ayu-light"] ::selection {
+  background: rgba(255, 153, 64, 0.25);
+  color: var(--text);
+}
+[data-theme="ayu-light"] .raw-http {
+  background: var(--bg);
+}
+[data-theme="ayu-light"] mark.find-match {
+  background: rgba(255, 153, 64, 0.30);
+  color: var(--text);
+}
+[data-theme="ayu-light"] mark.find-match.find-current {
+  background: rgba(255, 153, 64, 0.85);
+  color: #1a1a1a;
+}
+[data-theme="ayu-light"] .hex-ascii,
+[data-theme="ayu-light"] .pane-footer-stats {
+  background: rgba(0, 0, 0, 0.04);
+}
+
 /* ============================================================
    Intercept View
    ============================================================ */
