@@ -2160,9 +2160,9 @@ mark.find-match.find-current {
    keywords/storage are warm orange #ffad66. */
 [data-theme="ayu-mirage"] {
   --bg: #242936; --bg-surface: #1f242f; --bg-elevated: #282e3b; --bg-hover: #2d3343; --bg-active: #353b4a;
-  --border: rgba(204,202,194,0.08); --border-light: rgba(204,202,194,0.14); --border-focus: rgba(255,204,102,0.5);
+  --border: rgba(204,202,194,0.08); --border-light: rgba(204,202,194,0.14); --border-focus: rgba(213,255,128,0.5);
   --text: #cccac2; --text-secondary: #a6adba; --text-tertiary: #707a8c; --text-ghost: #475266;
-  --accent: #ffcc66; --accent-hover: #ffd173; --accent-dim: rgba(255,204,102,0.12); --accent-glow: rgba(255,204,102,0.18);
+  --accent: #d5ff80; --accent-hover: #e0ff99; --accent-dim: rgba(213,255,128,0.12); --accent-glow: rgba(213,255,128,0.18);
   --red: #ff6666; --orange: #ffad66; --blue: #5ccfe6; --yellow: #ffcc66; --purple: #dfbfff;
 }
 [data-theme="ayu-mirage"] .method-get  { color: #d5ff80; }
