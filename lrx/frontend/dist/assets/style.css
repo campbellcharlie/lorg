@@ -1285,6 +1285,25 @@ button.confirm-pending {
 .find-bar .find-close {
   font-size: 16px;
 }
+.find-bar .find-toggle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  border: 1px solid transparent;
+  width: auto;
+  padding: 0 5px;
+  min-width: 22px;
+}
+.find-bar .find-toggle.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.find-input.find-error {
+  border-color: var(--red, #ef4444) !important;
+  color: var(--red, #ef4444);
+}
 mark.find-match {
   background: rgba(251, 191, 36, 0.35);
   color: inherit;

@@ -1442,6 +1442,18 @@
       prevBtn.addEventListener('click', function() { stepFind(bar, -1); });
       nextBtn.addEventListener('click', function() { stepFind(bar, 1); });
       closeBtn.addEventListener('click', function() { closeFindBar(bar); });
+
+      // Sublime-style toggles: regex (.*), case-sensitive (Aa),
+      // whole-word (\b). State lives on the button's `aria-pressed`
+      // so it survives a re-render of the bar's DOM if that ever
+      // happens; performFind reads the current state on every input.
+      Array.prototype.slice.call(bar.querySelectorAll('.find-toggle')).forEach(function(btn){
+        btn.addEventListener('click', function(){
+          btn.classList.toggle('active');
+          performFind(bar, input.value);
+          input.focus();
+        });
+      });
     });
   }
 
@@ -1481,37 +1493,69 @@
     // Restore baseline before re-marking
     if (findState.snapshot !== null) paneEl.innerHTML = findState.snapshot;
     var countEl = bar.querySelector('.find-count');
+    var input = bar.querySelector('.find-input');
     findState.matches = [];
     findState.current = -1;
+    input.classList.remove('find-error');
     if (!query) {
       countEl.textContent = '0/0';
       return;
     }
-    // Walk text nodes and wrap matches in <mark>. Avoid recursing into
-    // already-marked nodes — but since we just restored the snapshot,
-    // there are none.
-    var lower = query.toLowerCase();
+
+    var regexOn = bar.querySelector('.find-toggle[data-toggle="regex"]').classList.contains('active');
+    var caseOn  = bar.querySelector('.find-toggle[data-toggle="case"]').classList.contains('active');
+    var wordOn  = bar.querySelector('.find-toggle[data-toggle="word"]').classList.contains('active');
+
+    // Build a single RegExp matcher whether the user typed a literal
+    // or an explicit regex. Literal chars get escaped; whole-word
+    // wraps with \b boundaries; case-insensitive uses the i flag.
+    var pattern;
+    if (regexOn) {
+      pattern = query;
+    } else {
+      pattern = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    if (wordOn) pattern = '\\b' + pattern + '\\b';
+    var flags = 'g' + (caseOn ? '' : 'i');
+    var re;
+    try {
+      re = new RegExp(pattern, flags);
+    } catch (e) {
+      input.classList.add('find-error');
+      countEl.textContent = '!/!';
+      return;
+    }
+
     var marks = [];
     walkTextNodes(paneEl, function(textNode) {
       var text = textNode.nodeValue;
-      var lc = text.toLowerCase();
-      var idx = lc.indexOf(lower);
-      if (idx < 0) return;
+      // Reset the regex's lastIndex per text node so 'g' state doesn't
+      // leak between nodes.
+      re.lastIndex = 0;
       var pieces = document.createDocumentFragment();
       var pos = 0;
-      while (idx >= 0) {
-        if (idx > pos) pieces.appendChild(document.createTextNode(text.substring(pos, idx)));
+      var m;
+      var found = false;
+      while ((m = re.exec(text)) !== null) {
+        found = true;
+        // Guard against zero-width matches (.*  on empty / lookahead)
+        if (m.index === re.lastIndex) {
+          re.lastIndex++;
+          continue;
+        }
+        if (m.index > pos) pieces.appendChild(document.createTextNode(text.substring(pos, m.index)));
         var mark = document.createElement('mark');
         mark.className = 'find-match';
-        mark.textContent = text.substr(idx, query.length);
+        mark.textContent = m[0];
         pieces.appendChild(mark);
         marks.push(mark);
-        pos = idx + query.length;
-        idx = lc.indexOf(lower, pos);
+        pos = m.index + m[0].length;
       }
+      if (!found) return;
       if (pos < text.length) pieces.appendChild(document.createTextNode(text.substring(pos)));
       textNode.parentNode.replaceChild(pieces, textNode);
     });
+
     findState.matches = marks;
     if (marks.length > 0) {
       findState.current = 0;
