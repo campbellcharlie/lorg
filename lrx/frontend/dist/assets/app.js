@@ -2376,37 +2376,97 @@
   }
 
   // --- Project Switcher ---
-  function loadProjectInfo() {
+  // On boot, surface the active DB name (from /api/project/list) so the
+  // top-bar label shows what's actually loaded instead of "All Traffic".
+  async function loadProjectInfo() {
     var projName = document.getElementById('project-name');
-    if (projName) projName.textContent = activeProjectFilter || 'All Traffic';
+    if (!projName) return;
+    var data = await api('/api/project/list', { silent: true });
+    var current = (data && data.currentName) || '';
+    projName.textContent = activeProjectFilter || current || 'All Traffic';
   }
 
   async function loadProjectList() {
     var container = document.getElementById('project-list');
     if (!container) return;
 
-    var data = await api('/api/project/active');
-    var projects = (data && data.projects) ? data.projects : [];
+    // Two sources, two sections:
+    //  1. /api/project/list — every .db file in the configured projects-dir
+    //     (the DB switcher; clicking activates a different DB).
+    //  2. /api/project/active — projects currently tagged on running
+    //     proxies in the active DB (the tag filter; click narrows the
+    //     traffic table to that tag without swapping the DB).
+    var [dbList, tagList] = await Promise.all([
+      api('/api/project/list'),
+      api('/api/project/active'),
+    ]);
+    var dbs = (dbList && dbList.projects) ? dbList.projects : [];
+    var currentDb = (dbList && dbList.currentName) || '';
+    var tags = (tagList && tagList.projects) ? tagList.projects : [];
 
-    // "All Traffic" option
+    var fmtSize = function(n) {
+      if (!n || n < 1024) return (n || 0) + 'B';
+      if (n < 1024*1024) return (n/1024).toFixed(0) + 'K';
+      return (n/1024/1024).toFixed(1) + 'M';
+    };
+
+    var html = '';
+
+    // --- DB switcher section ---
+    if (dbs.length > 0) {
+      html += '<div class="project-section-label">Switch database</div>';
+      html += dbs.map(function(p) {
+        var activeClass = p.active ? 'project-item active' : 'project-item';
+        return '<div class="' + activeClass + '" data-db-name="' + escapeAttr(p.name) + '" title="' + escapeAttr(p.path) + '">' +
+          '<span class="project-item-name">' + escapeHtml(p.name) + '</span>' +
+          '<span class="project-item-size">' + escapeHtml(fmtSize(p.size)) + '</span>' +
+          '</div>';
+      }).join('');
+    } else {
+      html += '<div class="project-section-label">No .db files in projects directory</div>';
+    }
+
+    // --- Tag filter section (only if there are tagged projects) ---
+    html += '<div class="project-section-label">Filter by tag</div>';
     var allActive = !activeProjectFilter ? 'project-item active' : 'project-item';
-    var html = '<div class="' + allActive + '" data-project-name="__all__" title="Show all traffic">' +
+    html += '<div class="' + allActive + '" data-project-name="__all__" title="Show all traffic in this DB">' +
       '<span class="project-item-name">All Traffic</span>' +
+      '<span class="project-item-size">' + escapeHtml(currentDb || '') + '</span>' +
       '</div>';
-
-    // Per-project entries
-    html += projects.map(function(p) {
-      var activeClass = activeProjectFilter === p.name ? 'project-item active' : 'project-item';
-      var detail = p.addr + (p.count ? ' \u00b7 ' + p.count + ' reqs' : '');
-      return '<div class="' + activeClass + '" data-project-name="' + escapeAttr(p.name) + '" title="Proxy: ' + escapeAttr(p.addr) + '">' +
-        '<span class="project-item-name">' + escapeHtml(p.name) + '</span>' +
-        '<span class="project-item-size">' + escapeHtml(detail) + '</span>' +
-        '</div>';
-    }).join('');
+    if (tags.length > 0) {
+      html += tags.map(function(p) {
+        var activeClass = activeProjectFilter === p.name ? 'project-item active' : 'project-item';
+        var detail = p.addr + (p.count ? ' \u00b7 ' + p.count + ' reqs' : '');
+        return '<div class="' + activeClass + '" data-project-name="' + escapeAttr(p.name) + '" title="Proxy: ' + escapeAttr(p.addr) + '">' +
+          '<span class="project-item-name">' + escapeHtml(p.name) + '</span>' +
+          '<span class="project-item-size">' + escapeHtml(detail) + '</span>' +
+          '</div>';
+      }).join('');
+    }
 
     container.innerHTML = html;
 
-    $$('.project-item', container).forEach(function(el) {
+    // DB switcher click — calls /api/project/switch then refreshes lists
+    $$('[data-db-name]', container).forEach(function(el) {
+      el.addEventListener('click', async function() {
+        var name = el.dataset.dbName;
+        var resp = await api('/api/project/switch', {
+          method: 'POST',
+          body: JSON.stringify({ name: name }),
+        });
+        if (resp) {
+          var projName = document.getElementById('project-name');
+          if (projName) projName.textContent = name;
+          activeProjectFilter = '';
+          closeProjectDropdown();
+          loadTraffic();
+          loadHosts();
+        }
+      });
+    });
+
+    // Tag filter click — client-side filter only
+    $$('[data-project-name]', container).forEach(function(el) {
       el.addEventListener('click', function() {
         if (el.dataset.projectName === '__all__') {
           switchToLive();

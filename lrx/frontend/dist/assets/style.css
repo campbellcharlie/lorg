@@ -253,8 +253,36 @@ html, body {
   margin-left: 4px;
 }
 .project-dropdown {
-  max-height: 200px;
+  max-height: 360px;
   overflow-y: auto;
+}
+.project-section-label {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-ghost);
+  padding: 8px 16px 4px 16px;
+  border-top: 1px solid var(--border, #2a2a30);
+}
+.project-section-label:first-child {
+  border-top: none;
+}
+/* Lay out the project-item as a horizontal row so name + size sit
+   side-by-side without overlapping. Override the column flex from the
+   base .project-item rule above. */
+.project-item {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+}
+.project-item .project-item-name {
+  flex: 1;
+  min-width: 0;
+}
+.project-item .project-item-size {
+  flex-shrink: 0;
+  margin-top: 0;
 }
 .project-list {
   padding: 2px 0;
