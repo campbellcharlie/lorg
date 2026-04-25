@@ -5,16 +5,18 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 // TrafficDetailResponse is returned by the unified traffic detail endpoint.
 type TrafficDetailResponse struct {
-	ID       string `json:"id"`
-	Request  string `json:"request"`
-	Response string `json:"response"`
-	Source   string `json:"source"` // "raw", "json", or "none"
+	ID        string `json:"id"`
+	Request   string `json:"request"`
+	Response  string `json:"response"`
+	Source    string `json:"source"` // "raw", "json", or "none"
+	ElapsedMs int64  `json:"elapsed_ms,omitempty"`
 }
 
 // TrafficDetail registers GET /api/traffic/:id/detail and
@@ -77,21 +79,25 @@ func (backend *Backend) TrafficDetail(e *echo.Echo) {
 
 		// 1. Try _req / _resp collections first (proxy-generated traffic stores raw here)
 		var rawReq, rawResp string
+		var reqCreated, respCreated string
 		reqRec, reqErr := backend.DB.FindRecordById("_req", id)
 		if reqErr == nil && reqRec != nil {
 			rawReq = reqRec.GetString("raw")
+			reqCreated = reqRec.Created
 		}
 		respRec, respErr := backend.DB.FindRecordById("_resp", id)
 		if respErr == nil && respRec != nil {
 			rawResp = respRec.GetString("raw")
+			respCreated = respRec.Created
 		}
 
 		if rawReq != "" || rawResp != "" {
 			return c.JSON(http.StatusOK, TrafficDetailResponse{
-				ID:       id,
-				Request:  rawReq,
-				Response: rawResp,
-				Source:   "raw",
+				ID:        id,
+				Request:   rawReq,
+				Response:  rawResp,
+				Source:    "raw",
+				ElapsedMs: computeElapsedMs(reqCreated, respCreated),
 			})
 		}
 
@@ -112,10 +118,11 @@ func (backend *Backend) TrafficDetail(e *echo.Echo) {
 		directResp := dataRec.GetString("resp")
 		if directReq != "" || directResp != "" {
 			return c.JSON(http.StatusOK, TrafficDetailResponse{
-				ID:       id,
-				Request:  directReq,
-				Response: directResp,
-				Source:   "raw",
+				ID:        id,
+				Request:   directReq,
+				Response:  directResp,
+				Source:    "raw",
+				ElapsedMs: computeElapsedMs(dataRec.Created, dataRec.Updated),
 			})
 		}
 
@@ -133,6 +140,27 @@ func (backend *Backend) TrafficDetail(e *echo.Echo) {
 			Source:   "json",
 		})
 	})
+}
+
+// computeElapsedMs returns the round-trip in milliseconds between the
+// captured-request timestamp and captured-response timestamp. Returns 0
+// when either side is missing or unparseable so the JSON marshaller
+// omits the field (omitempty on the struct).
+func computeElapsedMs(reqTS, respTS string) int64 {
+	if reqTS == "" || respTS == "" {
+		return 0
+	}
+	const layout = "2006-01-02 15:04:05.000Z"
+	t1, err1 := time.Parse(layout, reqTS)
+	t2, err2 := time.Parse(layout, respTS)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	d := t2.Sub(t1).Milliseconds()
+	if d < 0 {
+		return 0
+	}
+	return d
 }
 
 // splitHTTPBody splits a raw HTTP message into headers + body. Uses
