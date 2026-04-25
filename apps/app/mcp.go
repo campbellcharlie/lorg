@@ -157,35 +157,11 @@ func (backend *Backend) mcpInit() {
 	// --- Intercept tools ---
 
 	s.AddTool(
-		mcp.NewTool("interceptToggle",
-			mcp.WithDescription("Enable or disable request/response interception on a proxy. When disabled, all pending intercepts are automatically forwarded"),
-			mcp.WithInputSchema[InterceptToggleArgs](),
+		mcp.NewTool("intercept",
+			mcp.WithDescription("Manage proxy interception in one tool. Actions: toggle (enable/disable on a proxy), list (intercepted rows for a proxy), getRaw (raw req/resp for one record), forward (pass through, optional edits), drop (block). Replaces interceptToggle/interceptPrintRowsInDetails/interceptGetRawRequestAndResponse/interceptAction."),
+			mcp.WithInputSchema[ConsolidatedInterceptArgs](),
 		),
-		backend.interceptToggleHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("interceptPrintRowsInDetails",
-			mcp.WithDescription("List intercepted requests/responses for a proxy with full metadata (host, port, method, path, status, headers)"),
-			mcp.WithInputSchema[InterceptReadArgs](),
-		),
-		backend.interceptReadHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("interceptGetRawRequestAndResponse",
-			mcp.WithDescription("Get the raw HTTP request and response strings for a specific intercepted record, for reading or editing before forwarding"),
-			mcp.WithInputSchema[InterceptGetRawArgs](),
-		),
-		backend.interceptGetRawHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("interceptAction",
-			mcp.WithDescription("Take action on a pending intercept: forward (pass through, optionally with edits) or drop (block the request/response)"),
-			mcp.WithInputSchema[InterceptActionArgs](),
-		),
-		backend.interceptActionHandler,
+		backend.interceptHandler,
 	)
 
 	// --- Match & Replace ---
