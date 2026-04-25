@@ -253,8 +253,36 @@ html, body {
   margin-left: 4px;
 }
 .project-dropdown {
-  max-height: 200px;
+  max-height: 360px;
   overflow-y: auto;
+}
+.project-section-label {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-ghost);
+  padding: 8px 16px 4px 16px;
+  border-top: 1px solid var(--border, #2a2a30);
+}
+.project-section-label:first-child {
+  border-top: none;
+}
+/* Lay out the project-item as a horizontal row so name + size sit
+   side-by-side without overlapping. Override the column flex from the
+   base .project-item rule above. */
+.project-item {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+}
+.project-item .project-item-name {
+  flex: 1;
+  min-width: 0;
+}
+.project-item .project-item-size {
+  flex-shrink: 0;
+  margin-top: 0;
 }
 .project-list {
   padding: 2px 0;
@@ -484,12 +512,17 @@ html, body {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* Selected */
+/* Selected — Caido-style prominent left bar so the active row is
+   obvious even at a glance from across the screen. 3px (was 2px),
+   slightly stronger background. */
 #traffic-table tr.selected td {
   background: var(--accent-dim);
 }
 #traffic-table tr.selected td:first-child {
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+#traffic-table tr.selected:hover td {
+  background: var(--accent-dim);
 }
 
 /* Sortable headers */
@@ -1058,33 +1091,924 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
 .hl-html-attr { color: var(--accent); }
 .hl-html-value { color: #fbbf24; }
 
-/* Line numbers in request/response display */
+/* Line numbers in request/response display.
+   Both -webkit- and unprefixed user-select for cross-browser correctness;
+   without the prefix WebKit was including line numbers in copied selections. */
 .line-num {
   display: inline-block;
   min-width: 3ch;
   text-align: right;
   color: var(--text-ghost, #3f3f46);
   margin-right: 1.5ch;
+  -webkit-user-select: none;
   user-select: none;
   opacity: 0.5;
 }
+
+/* One block per logical source line. The hanging indent puts wrapped
+   content under the content column rather than under the gutter, so a
+   long wrapped line no longer slides back beneath the line-number area.
+   The :has() selector limits the indent to lines that actually have a
+   line-number gutter — large responses skip line numbers (DOM perf cap)
+   but still get rh-line divs, and we don't want to indent those since
+   there's no gutter for the indent to align under. */
+.raw-http .rh-line:has(.line-num) {
+  padding-left: 4.5ch;
+  text-indent: -4.5ch;
+}
+.raw-http .rh-line {
+  white-space: inherit;
+}
+
+/* Collapsible long-line marker — click to expand giant inline content
+   (minified <script>, base64 data URLs, etc.) without scrolling forever. */
+.rh-collapsed-marker {
+  cursor: pointer;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0 6px;
+  border-radius: 3px;
+  font-style: normal;
+  user-select: none;
+  display: inline-block;
+}
+.rh-collapsed-marker:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
+}
+.rh-collapsed-icon {
+  display: inline-block;
+  width: 1em;
+  color: var(--accent);
+}
+.rh-collapsed-meta {
+  color: var(--text-ghost);
+  font-style: italic;
+  font-size: 0.9em;
+}
+.rh-line.rh-expanded .rh-collapsed-marker {
+  background: transparent;
+  padding: 0;
+  margin-right: 4px;
+}
+.rh-line.rh-expanded .rh-collapsed-meta {
+  display: none;
+}
+.rh-collapsed-content[hidden] { display: none; }
+
+/* Two-click confirm state for destructive buttons (e.g. Reset Scope).
+   Visually distinct so the user knows the next click commits. */
+button.confirm-pending {
+  background: var(--red, #ef4444) !important;
+  color: var(--bg, #1a1a1a) !important;
+  border-color: var(--red, #ef4444) !important;
+}
+
+/* ============================================================
+   Detail toolbar status strip — at-a-glance request summary
+   inspired by Postman's response header bar. Method + path on
+   the left, status / time / size / mime separated by middots.
+   ============================================================ */
+.detail-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dss-method {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.dss-method.method-get    { color: var(--accent); }
+.dss-method.method-post   { color: var(--blue); }
+.dss-method.method-put    { color: var(--orange); }
+.dss-method.method-delete { color: var(--red); }
+.dss-method.method-patch  { color: var(--purple, #a855f7); }
+.dss-url {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dss-sep {
+  color: var(--text-ghost, #3f3f46);
+  flex-shrink: 0;
+}
+.dss-status {
+  font-weight: 600;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.dss-status.s2xx { color: var(--accent); background: var(--accent-dim, rgba(45, 212, 168, 0.1)); }
+.dss-status.s3xx { color: var(--blue);   background: rgba(96, 165, 250, 0.1); }
+.dss-status.s4xx { color: var(--orange); background: rgba(251, 146, 60, 0.1); }
+.dss-status.s5xx { color: var(--red);    background: rgba(239, 68, 68, 0.1); }
+.dss-time, .dss-size, .dss-mime {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.detail-toolbar {
+  gap: 12px;
+}
+
+/* ============================================================
+   Find-in-pane bar — Cmd/Ctrl+F search lifted from Burp Pro.
+   Floats at the bottom of the focused pane, shows match count,
+   supports Enter/Shift+Enter for next/prev and Esc to close.
+   ============================================================ */
+.detail-split-pane {
+  position: relative;
+}
+.find-bar {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-surface, #1e1e22);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+.find-bar.hidden { display: none; }
+.find-input {
+  background: var(--bg, #18181b);
+  border: 1px solid transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  outline: none;
+  width: 200px;
+}
+.find-input:focus {
+  border-color: var(--accent);
+}
+.find-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  min-width: 32px;
+  text-align: center;
+}
+.find-bar button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  padding: 0;
+  line-height: 1;
+}
+.find-bar button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+.find-bar .find-close {
+  font-size: 16px;
+}
+.find-bar .find-toggle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  border: 1px solid transparent;
+  width: auto;
+  padding: 0 5px;
+  min-width: 22px;
+}
+.find-bar .find-toggle.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.find-input.find-error {
+  border-color: var(--red, #ef4444) !important;
+  color: var(--red, #ef4444);
+}
+mark.find-match {
+  background: rgba(251, 191, 36, 0.35);
+  color: inherit;
+  padding: 0;
+  border-radius: 1px;
+}
+mark.find-match.find-current {
+  background: rgba(251, 191, 36, 0.85);
+  color: var(--bg, #18181b);
+  font-weight: 600;
+}
+
+/* Image preview pane — shown for image/* response bodies in Pretty mode.
+   Wrap is scrollable so large images don't clip the surrounding chrome. */
+.image-preview-wrap {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+.image-preview-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.image-preview {
+  max-width: 100%;
+  height: auto;
+  background: repeating-conic-gradient(rgba(255,255,255,0.04) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 4px;
+}
+
+/* ============================================================
+   Cookies view — Burp/Postman-style table parsed from Set-Cookie
+   response headers and Cookie request headers. Highlights missing
+   security flags (HttpOnly, Secure, SameSite) so security work
+   doesn't require eyeballing the raw header text.
+   ============================================================ */
+.cookies-view {
+  padding: 8px 12px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+}
+.cookies-view h4 {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin: 8px 0 6px 0;
+}
+.cookies-view table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 12px;
+}
+.cookies-view th, .cookies-view td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  vertical-align: top;
+  word-break: break-all;
+}
+.cookies-view th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.03);
+}
+.cookies-view .flag-on  { color: var(--accent); font-weight: 600; }
+.cookies-view .flag-off { color: var(--red, #ef4444); }
+.cookies-view .empty {
+  color: var(--text-ghost);
+  font-style: italic;
+  padding: 8px;
+}
+
+/* ============================================================
+   JSON Tree view — Postman-style collapsible tree.
+   <details>/<summary> for native disclosure semantics; styled
+   to remove default arrows and add our own ▸/▾ indicator.
+   ============================================================ */
+.tree-view {
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow: auto;
+  line-height: 1.5;
+}
+.tree-empty {
+  color: var(--text-ghost);
+  font-style: italic;
+  padding: 8px;
+}
+.tree-node {
+  margin: 0;
+}
+.tree-node > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-left: 14px;
+}
+.tree-node > summary::-webkit-details-marker { display: none; }
+.tree-node > summary::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  transition: transform 0.1s ease;
+}
+.tree-node[open] > summary::before {
+  content: '▾';
+}
+.tree-children {
+  margin-left: 14px;
+  border-left: 1px dotted var(--border, #2a2a30);
+  padding-left: 8px;
+}
+.tree-row {
+  padding-left: 14px;
+}
+.tree-key    { color: var(--whiskey, #e8b97a); }
+.tree-colon  { color: var(--text-ghost); }
+.tree-string { color: var(--accent); }
+.tree-number { color: var(--blue, #60a5fa); }
+.tree-bool   { color: var(--purple, #a855f7); font-weight: 600; }
+.tree-null   { color: var(--red, #ef4444); font-style: italic; }
+.tree-bracket { color: var(--text-secondary); font-weight: 600; }
+.tree-count  { color: var(--text-ghost); font-size: 10px; margin: 0 4px; }
+
+/* ============================================================
+   HTML render view — sandboxed iframe.
+   Sandbox is intentionally empty (no scripts, no forms, no
+   top-nav, no same-origin) so the preview can never harm the
+   host page.
+   When render mode is active the <pre> swaps to a flex column
+   layout (.rh-render-mode) so the iframe can fill the pane —
+   the default <pre> sizes to text content, which would leave
+   the iframe with whatever its 0-default height resolved to.
+   ============================================================ */
+.raw-http.rh-render-mode {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.render-view {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: white;
+}
+.render-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: white; /* most pages assume light bg */
+}
+.render-empty {
+  padding: 20px;
+  color: var(--text-ghost);
+  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+
+/* ============================================================
+   Filter chips above the traffic table — Caido-style.
+   Multi-select, additive. Visual on/off with a colored fill
+   when active. Method and mime sections separated by a thin
+   divider, with a "Clear" chip on the far right.
+   ============================================================ */
+.chip-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  background: var(--bg-surface, #1c1c20);
+  flex-wrap: wrap;
+}
+.chip {
+  background: transparent;
+  border: 1px solid var(--border, #2a2a30);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.chip:hover {
+  border-color: var(--text-secondary);
+  color: var(--text);
+}
+.chip.active {
+  background: var(--accent-dim, rgba(45, 212, 168, 0.12));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chip-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border, #2a2a30);
+  margin: 0 4px;
+  display: inline-block;
+}
+.chip-clear {
+  margin-left: auto;
+  color: var(--text-ghost);
+}
+.chip-clear:hover {
+  color: var(--red, #ef4444);
+  border-color: var(--red, #ef4444);
+}
+.filter-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-preset {
+  background: rgba(96, 165, 250, 0.06);
+  border-color: rgba(96, 165, 250, 0.25);
+  color: var(--blue, #60a5fa);
+}
+.chip-preset:hover {
+  background: rgba(96, 165, 250, 0.15);
+}
+.chip-save {
+  color: var(--text-ghost);
+  border-style: dashed;
+}
+.chip-save:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+/* ============================================================
+   Repeater variables panel — collapsed by default; key=value
+   per line. Values substitute into {{name}} in the request body
+   on Send.
+   ============================================================ */
+.rep-vars {
+  margin-top: 8px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.rep-vars summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-tertiary);
+}
+.rep-vars summary code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.rep-vars-input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--bg, #18181b);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-height: 60px;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+.rep-vars-input:focus { border-color: var(--accent); }
+
+/* Diff mark badges shown in the # column of the traffic table */
+.diff-mark {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  margin-left: 4px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.diff-mark-a { background: rgba(96, 165, 250, 0.25); color: var(--blue, #60a5fa); }
+.diff-mark-b { background: rgba(168, 85, 247, 0.25); color: var(--purple, #a855f7); }
+
+/* ============================================================
+   Diff modal — full-screen overlay showing two responses
+   side by side with line-level adds/removes highlighted.
+   ============================================================ */
+.diff-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.diff-modal.hidden { display: none; }
+.diff-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+}
+.diff-content {
+  position: relative;
+  width: 92vw;
+  height: 86vh;
+  background: var(--bg-surface, #1c1c20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text);
+}
+.diff-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+}
+.diff-close:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+.diff-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border, #2a2a30);
+  overflow: hidden;
+  min-height: 0;
+}
+.diff-pane {
+  background: var(--bg, #18181b);
+  overflow: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.diff-pane h5 {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin: 0 0 8px 0;
+}
+.diff-line {
+  white-space: pre-wrap;
+  padding: 0 4px;
+  border-left: 2px solid transparent;
+}
+.diff-line.add {
+  background: rgba(45, 212, 168, 0.10);
+  border-left-color: var(--accent);
+}
+.diff-line.del {
+  background: rgba(239, 68, 68, 0.10);
+  border-left-color: var(--red, #ef4444);
+}
+.diff-line.eq {
+  color: var(--text-tertiary);
+}
+
+/* Pane-footer at-a-glance stats — Caido-style "1.4K · 142ms" pinned
+   to bottom-right of the response pane. Doesn't take pointer events
+   so it never interferes with selection / scrolling. */
+.pane-footer-stats {
+  position: absolute;
+  bottom: 6px;
+  right: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg, #18181b);
+  padding: 2px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  opacity: 0.85;
+  z-index: 5;
+}
+
+/* ============================================================
+   Command palette (Cmd/Ctrl+K) — Caido/VSCode/Linear pattern.
+   Centered modal with fuzzy-search input + result list.
+   ============================================================ */
+.cmd-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cmd-palette.hidden { display: none; }
+.cmd-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.cmd-palette-modal {
+  position: relative;
+  width: 560px;
+  max-width: 90vw;
+  background: var(--bg-surface, #1c1c20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+#cmd-palette-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border, #2a2a30);
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  padding: 14px 16px;
+}
+.cmd-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.cmd-palette-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.cmd-palette-list li.active {
+  background: var(--accent-dim, rgba(45, 212, 168, 0.12));
+  color: var(--accent);
+}
+.cmd-palette-list li .cmd-shortcut {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-ghost);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.cmd-palette-list li.active .cmd-shortcut {
+  background: rgba(45, 212, 168, 0.15);
+  color: var(--accent);
+}
+.cmd-palette-list .cmd-empty {
+  padding: 12px 16px;
+  color: var(--text-ghost);
+  font-style: italic;
+  text-align: center;
+}
+.cmd-palette-hint {
+  border-top: 1px solid var(--border, #2a2a30);
+  padding: 6px 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-ghost);
+  text-align: right;
+}
+
+/* ============================================================
+   Match & Replace UI — table of rules with inline enable
+   toggle, edit, delete; collapsible add form.
+   ============================================================ */
+.settings-help {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin: 4px 0 12px 0;
+}
+.settings-help code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.mr-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.mr-rule {
+  display: grid;
+  grid-template-columns: 24px 110px 1fr 1fr 110px 24px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg, #18181b);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.mr-rule.disabled { opacity: 0.5; }
+.mr-rule .mr-type {
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mr-rule .mr-match,
+.mr-rule .mr-replace {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mr-rule .mr-replace { color: var(--blue, #60a5fa); }
+.mr-rule .mr-scope { color: var(--text-tertiary); font-size: 10px; }
+.mr-rule .mr-toggle {
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+.mr-rule .mr-toggle:hover { background: rgba(255,255,255,0.06); }
+.mr-rule .mr-toggle.on { color: var(--accent); }
+.mr-rule .mr-toggle.off { color: var(--text-ghost); }
+.mr-rule .mr-delete {
+  background: none;
+  border: none;
+  color: var(--text-ghost);
+  cursor: pointer;
+  font-size: 14px;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+}
+.mr-rule .mr-delete:hover { color: var(--red, #ef4444); background: rgba(239,68,68,0.1); }
+.mr-empty {
+  padding: 12px;
+  color: var(--text-ghost);
+  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-align: center;
+}
+.mr-add {
+  border: 1px dashed var(--border, #2a2a30);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.mr-add summary { cursor: pointer; user-select: none; }
+.mr-add-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr 180px 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.mr-add-grid input,
+.mr-add-grid select {
+  background: var(--bg, #18181b);
+  border: 1px solid var(--border, #2a2a30);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  outline: none;
+  min-width: 0;
+}
+.mr-add-grid input:focus,
+.mr-add-grid select:focus { border-color: var(--accent); }
+
+/* ============================================================
+   Row highlighting — applied to traffic rows by right-click.
+   Each color tints the row background while preserving the
+   selected-row left bar (which uses inset box-shadow).
+   ============================================================ */
+#traffic-table tr.hl-yellow td { background: rgba(251, 191, 36, 0.08); }
+#traffic-table tr.hl-orange td { background: rgba(251, 146, 60, 0.10); }
+#traffic-table tr.hl-red    td { background: rgba(239, 68, 68, 0.10); }
+#traffic-table tr.hl-green  td { background: rgba(45, 212, 168, 0.08); }
+#traffic-table tr.hl-blue   td { background: rgba(96, 165, 250, 0.10); }
+#traffic-table tr.selected.hl-yellow td,
+#traffic-table tr.selected.hl-orange td,
+#traffic-table tr.selected.hl-red td,
+#traffic-table tr.selected.hl-green td,
+#traffic-table tr.selected.hl-blue td {
+  background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
+}
+.context-menu-item.has-submenu::after {
+  content: '▸';
+  float: right;
+  color: var(--text-ghost);
+  font-size: 10px;
+}
+.context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  background: var(--bg-surface, #1c1c20);
+  border: 1px solid var(--border, #2a2a30);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  min-width: 130px;
+  padding: 4px 0;
+}
+.context-menu-item.has-submenu:hover .context-submenu { display: block; }
+.context-submenu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+.context-submenu-item:hover { background: var(--accent-dim); color: var(--accent); }
+.hl-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.hl-swatch.yellow { background: rgb(251, 191, 36); }
+.hl-swatch.orange { background: rgb(251, 146, 60); }
+.hl-swatch.red    { background: rgb(239, 68, 68); }
+.hl-swatch.green  { background: rgb(45, 212, 168); }
+.hl-swatch.blue   { background: rgb(96, 165, 250); }
+.hl-swatch.none   { background: transparent; border-style: dashed; }
 
 /* ============================================================
    Scrollbar
    ============================================================ */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 7px;   /* +30% from 5px for easier targeting */
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.10);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* ============================================================
@@ -1249,6 +2173,100 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
 [data-theme="ember"] .method-post { color: #4fc3f7; }
 [data-theme="ember"] .status-2xx, [data-theme="ember"] .hl-status-2xx { color: #81c784; }
 
+/* Ayu Mirage Plus — canonical palette from dempfi/ayu (v5).
+   Editor bg #242936, popup bg #282e3b, signature amber #ffcc66.
+   String green is bright lime #d5ff80, tags use cyan #5ccfe6,
+   keywords/storage are warm orange #ffad66. */
+[data-theme="ayu-mirage"] {
+  --bg: #242936; --bg-surface: #1f242f; --bg-elevated: #282e3b; --bg-hover: #2d3343; --bg-active: #353b4a;
+  --border: rgba(204,202,194,0.08); --border-light: rgba(204,202,194,0.14); --border-focus: rgba(213,255,128,0.5);
+  --text: #cccac2; --text-secondary: #a6adba; --text-tertiary: #707a8c; --text-ghost: #475266;
+  --accent: #d5ff80; --accent-hover: #e0ff99; --accent-dim: rgba(213,255,128,0.12); --accent-glow: rgba(213,255,128,0.18);
+  --red: #ff6666; --orange: #ffad66; --blue: #5ccfe6; --yellow: #ffcc66; --purple: #dfbfff;
+}
+[data-theme="ayu-mirage"] .method-get  { color: #d5ff80; }
+[data-theme="ayu-mirage"] .method-post { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .method-put  { color: #ffad66; }
+[data-theme="ayu-mirage"] .method-delete { color: #ff6666; }
+[data-theme="ayu-mirage"] .method-patch  { color: #dfbfff; }
+[data-theme="ayu-mirage"] .status-2xx, [data-theme="ayu-mirage"] .hl-status-2xx { color: #d5ff80; }
+[data-theme="ayu-mirage"] .status-3xx, [data-theme="ayu-mirage"] .hl-status-3xx { color: #73d0ff; }
+[data-theme="ayu-mirage"] .status-4xx, [data-theme="ayu-mirage"] .hl-status-4xx { color: #ffad66; }
+[data-theme="ayu-mirage"] .status-5xx, [data-theme="ayu-mirage"] .hl-status-5xx { color: #ff6666; }
+[data-theme="ayu-mirage"] .hl-method        { color: #ffad66; }
+[data-theme="ayu-mirage"] .hl-url           { color: #73d0ff; }
+[data-theme="ayu-mirage"] .hl-version       { color: #b8cfe680; }
+[data-theme="ayu-mirage"] .hl-header-name   { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .hl-header-value  { color: #cccac2; }
+[data-theme="ayu-mirage"] .hl-json-key      { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .hl-json-string   { color: #d5ff80; }
+[data-theme="ayu-mirage"] .hl-json-number   { color: #ffcc66; }
+[data-theme="ayu-mirage"] .hl-json-bool     { color: #dfbfff; }
+[data-theme="ayu-mirage"] .hl-json-null     { color: #f28779; }
+[data-theme="ayu-mirage"] .hl-html-tag      { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .hl-html-attr     { color: #ffd173; }
+[data-theme="ayu-mirage"] .hl-html-value    { color: #d5ff80; }
+
+/* Ayu Light — canonical palette from dempfi/ayu (v5).
+   Editor bg #fcfcfc, accent caret #ffaa33 (Ayu logo orange),
+   strings green #86b300, keywords/storage orange #fa8d3e,
+   types/tags cyan #55b4d4, entity names blue #22a4e6. */
+[data-theme="ayu-light"] {
+  --bg: #fcfcfc; --bg-surface: #f5f5f5; --bg-elevated: #ededed; --bg-hover: #e7e7e7; --bg-active: #dcdcdc;
+  --border: rgba(92,97,102,0.10); --border-light: rgba(92,97,102,0.16); --border-focus: rgba(255,170,51,0.5);
+  --text: #5c6166; --text-secondary: #787b80; --text-tertiary: #8a9199; --text-ghost: #c7c9cc;
+  --accent: #ffaa33; --accent-hover: #ffbb55; --accent-dim: rgba(255,170,51,0.14); --accent-glow: rgba(255,170,51,0.20);
+  --red: #f07171; --orange: #fa8d3e; --blue: #55b4d4; --yellow: #f2ae49; --purple: #a37acc;
+}
+[data-theme="ayu-light"] .method-get  { color: #86b300; }
+[data-theme="ayu-light"] .method-post { color: #55b4d4; }
+[data-theme="ayu-light"] .method-put  { color: #fa8d3e; }
+[data-theme="ayu-light"] .method-delete { color: #e65050; }
+[data-theme="ayu-light"] .method-patch  { color: #a37acc; }
+[data-theme="ayu-light"] .status-2xx, [data-theme="ayu-light"] .hl-status-2xx { color: #86b300; }
+[data-theme="ayu-light"] .status-3xx, [data-theme="ayu-light"] .hl-status-3xx { color: #22a4e6; }
+[data-theme="ayu-light"] .status-4xx, [data-theme="ayu-light"] .hl-status-4xx { color: #fa8d3e; }
+[data-theme="ayu-light"] .status-5xx, [data-theme="ayu-light"] .hl-status-5xx { color: #e65050; }
+[data-theme="ayu-light"] .hl-method        { color: #fa8d3e; }
+[data-theme="ayu-light"] .hl-url           { color: #22a4e6; }
+[data-theme="ayu-light"] .hl-version       { color: #787b80; }
+[data-theme="ayu-light"] .hl-header-name   { color: #55b4d4; }
+[data-theme="ayu-light"] .hl-header-value  { color: #5c6166; }
+[data-theme="ayu-light"] .hl-json-key      { color: #55b4d4; }
+[data-theme="ayu-light"] .hl-json-string   { color: #86b300; }
+[data-theme="ayu-light"] .hl-json-number   { color: #ffaa33; }
+[data-theme="ayu-light"] .hl-json-bool     { color: #a37acc; }
+[data-theme="ayu-light"] .hl-json-null     { color: #f07171; }
+[data-theme="ayu-light"] .hl-html-tag      { color: #55b4d4; }
+[data-theme="ayu-light"] .hl-html-attr     { color: #f2ae49; }
+[data-theme="ayu-light"] .hl-html-value    { color: #86b300; }
+/* Light-mode overrides — the rest of the UI assumes a dark canvas */
+[data-theme="ayu-light"] ::-webkit-scrollbar-thumb {
+  background: rgba(92, 97, 102, 0.18);
+}
+[data-theme="ayu-light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(92, 97, 102, 0.32);
+}
+[data-theme="ayu-light"] ::selection {
+  background: rgba(255, 170, 51, 0.28);
+  color: var(--text);
+}
+[data-theme="ayu-light"] .raw-http {
+  background: var(--bg);
+}
+[data-theme="ayu-light"] mark.find-match {
+  background: rgba(255, 170, 51, 0.32);
+  color: var(--text);
+}
+[data-theme="ayu-light"] mark.find-match.find-current {
+  background: #ffaa33;
+  color: #fcfcfc;
+}
+[data-theme="ayu-light"] .hex-ascii,
+[data-theme="ayu-light"] .pane-footer-stats {
+  background: rgba(92, 97, 102, 0.06);
+}
+
 /* ============================================================
    Intercept View
    ============================================================ */
@@ -1297,7 +2315,8 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   padding: 1px;
   margin-left: 8px;
 }
-.fmt-btn {
+.fmt-btn,
+.req-fmt-btn {
   background: none;
   border: none;
   color: var(--text-ghost);
@@ -1311,10 +2330,12 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   border-radius: 3px;
   transition: background var(--transition), color var(--transition);
 }
-.fmt-btn:hover {
+.fmt-btn:hover,
+.req-fmt-btn:hover {
   color: var(--text-secondary);
 }
-.fmt-btn.active {
+.fmt-btn.active,
+.req-fmt-btn.active {
   background: var(--accent-dim);
   color: var(--accent);
 }

@@ -526,6 +526,38 @@ func (backend *Backend) mcpInit() {
 		backend.gatherContextHandler,
 	)
 
+	s.AddTool(
+		mcp.NewTool("clusterResponses",
+			mcp.WithDescription("Group captured responses by structural fingerprint (status + mime + body shape + length bucket). Use to spot how many DISTINCT response shapes a target produces and find the largest clusters quickly."),
+			mcp.WithInputSchema[ClusterResponsesArgs](),
+		),
+		backend.clusterResponsesHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("findAnomalies",
+			mcp.WithDescription("On a given endpoint or host, list responses whose fingerprint differs from the modal one. Surfaces error pages, auth-bypass leakage, format changes, and anything else that doesn't match the dominant response shape."),
+			mcp.WithInputSchema[FindAnomaliesArgs](),
+		),
+		backend.findAnomaliesHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("mapEndpoints",
+			mcp.WithDescription("Build a structured endpoint map for a host: distinct method+pathTemplate tuples (with /users/123 collapsed to /users/{id}), how many times each was seen, status code distribution, and how many distinct response shapes (fingerprints) each produces. One call replaces a sequence of getEndpoints + status-distribution + per-endpoint clustering."),
+			mcp.WithInputSchema[MapEndpointsArgs](),
+		),
+		backend.mapEndpointsHandler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("probeAuth",
+			mcp.WithDescription("Surface the auth boundary of a host from captured traffic: endpoints that carried a credential (Bearer/Basic/Cookie/APIKey/AuthToken), 401/403 denial buckets, and a list of probe candidates ready to replay without auth for an access-control test. Read-only — emits no new traffic; agent decides what to probe next."),
+			mcp.WithInputSchema[ProbeAuthArgs](),
+		),
+		backend.probeAuthHandler,
+	)
+
 	// =====================================================================
 	// TRAFFIC SEARCH & ANALYSIS (kept individual — high-frequency tools)
 	// =====================================================================
