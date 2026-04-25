@@ -67,3 +67,6 @@ docs/lorg-pentester-guide.md
 
 # Runtime audit logs
 audit/
+
+# Local MCP test infrastructure — test server, test plan, results
+.test-server/
