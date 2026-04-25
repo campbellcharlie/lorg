@@ -1283,23 +1283,9 @@
     el.classList.toggle('rh-render-mode', format === 'render');
 
     if (format === 'pretty') {
-      // Image preview path — for image/* content-type, show the image
-      // itself instead of trying to highlight binary garbage. Lifted
-      // from Burp's Render tab.
-      var ct = extractCT(raw);
-      if (ct && ct.toLowerCase().indexOf('image/') === 0) {
-        var detail = $('#traffic-detail');
-        var id = detail && detail._currentId;
-        var part = el.id === 'detail-request-raw' ? 'request' : 'response';
-        if (id) {
-          var src = '/api/traffic/' + encodeURIComponent(id) + '/body?part=' + part;
-          el.innerHTML = '<div class="image-preview-wrap">' +
-            '<div class="image-preview-meta">' + escapeHtml(ct) + '</div>' +
-            '<img class="image-preview" src="' + src + '" alt="response body">' +
-          '</div>';
-          return;
-        }
-      }
+      // Always show the raw HTTP text in Pretty — never auto-fetch
+      // image/font/binary previews. The Render tab is the explicit
+      // opt-in for visual preview.
       el.innerHTML = highlightHTTP(raw);
     } else if (format === 'raw') {
       el.textContent = raw;
@@ -1313,6 +1299,21 @@
     } else if (format === 'tree') {
       el.innerHTML = renderTreeView(raw);
     } else if (format === 'render') {
+      // Image content-type → embed the image. HTML → sandboxed iframe.
+      var ctR = extractCT(raw);
+      if (ctR && ctR.toLowerCase().indexOf('image/') === 0) {
+        var detailR = $('#traffic-detail');
+        var idR = detailR && detailR._currentId;
+        var partR = el.id === 'detail-request-raw' ? 'request' : 'response';
+        if (idR) {
+          var srcR = '/api/traffic/' + encodeURIComponent(idR) + '/body?part=' + partR;
+          el.innerHTML = '<div class="image-preview-wrap">' +
+            '<div class="image-preview-meta">' + escapeHtml(ctR) + '</div>' +
+            '<img class="image-preview" src="' + srcR + '" alt="response body">' +
+          '</div>';
+          return;
+        }
+      }
       el.innerHTML = renderHTMLView(raw);
     }
   }
