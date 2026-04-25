@@ -195,15 +195,15 @@ func (p *ProjectDB) openLocked(name string) error {
 }
 
 // initProjectSchema creates the burp-mcp-enhanced schema tables if they do not
-// already exist. For an existing DB this is a safe no-op.
+// already exist, then runs any version-up migrations for existing DBs.
 func initProjectSchema(db *sql.DB, isNew bool) error {
 	if !isNew {
 		// Check if the schema already exists by looking for http_traffic table
 		var tableName string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='http_traffic'").Scan(&tableName)
 		if err == nil {
-			// Table exists -- schema is already initialized
-			return nil
+			// Table exists -- run migrations and return
+			return migrateProjectSchema(db)
 		}
 		// Table does not exist; fall through to create schema
 	}
@@ -214,13 +214,101 @@ func initProjectSchema(db *sql.DB, isNew bool) error {
 		}
 	}
 
-	// Insert schema_version record (version 4, matching burp-mcp-enhanced)
+	// New DBs are at the latest schema version (currently 5).
 	nowMs := time.Now().UnixMilli()
-	if _, err := db.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (4, ?)", nowMs); err != nil {
+	if _, err := db.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)", currentSchemaVersion, nowMs); err != nil {
 		return fmt.Errorf("failed to insert schema_version: %w", err)
 	}
 
 	return nil
+}
+
+// currentSchemaVersion is the latest schema version this build understands.
+//   v4: original burp-mcp-enhanced schema with `request_hash TEXT UNIQUE`
+//   v5: drops the UNIQUE so identical replayed requests aren't silently
+//       deduped (a fuzz/repeater workflow needs every iteration recorded).
+const currentSchemaVersion = 5
+
+// migrateProjectSchema brings an existing project DB up to currentSchemaVersion.
+// Each step is idempotent so running twice is a no-op.
+func migrateProjectSchema(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version").Scan(&version); err != nil {
+		// Older DBs may not have a schema_version table at all
+		version = 0
+	}
+
+	if version < 5 {
+		if err := migrateV5DropRequestHashUnique(db); err != nil {
+			return fmt.Errorf("v5 migration: %w", err)
+		}
+		if _, err := db.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (5, ?)", time.Now().UnixMilli()); err != nil {
+			return fmt.Errorf("v5 version stamp: %w", err)
+		}
+		log.Printf("[ProjectDB] migrated schema → v5 (dropped request_hash UNIQUE)")
+	}
+
+	return nil
+}
+
+// migrateV5DropRequestHashUnique rebuilds http_traffic without the UNIQUE
+// constraint on request_hash. SQLite can't ALTER away a UNIQUE constraint,
+// so the dance is: rename old → create new without UNIQUE → copy → drop old.
+func migrateV5DropRequestHashUnique(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmts := []string{
+		`ALTER TABLE http_traffic RENAME TO http_traffic_old_v4`,
+		`CREATE TABLE http_traffic (
+			request_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp     TEXT    NOT NULL,
+			tool          TEXT    NOT NULL,
+			method        TEXT    NOT NULL,
+			host          TEXT    NOT NULL,
+			path          TEXT,
+			query         TEXT,
+			param_count   INTEGER,
+			status_code   INTEGER,
+			response_length INTEGER,
+			request_time  TEXT,
+			comment       TEXT,
+			protocol      TEXT    NOT NULL,
+			port          INTEGER NOT NULL,
+			url           TEXT    NOT NULL,
+			ip_address    TEXT,
+			param_names   TEXT,
+			mime_type     TEXT,
+			extension     TEXT,
+			page_title    TEXT,
+			response_time TEXT,
+			connection_id TEXT,
+			content_type  TEXT,
+			request_hash  TEXT,
+			session_tag   TEXT,
+			notes         TEXT
+		)`,
+		`INSERT INTO http_traffic SELECT * FROM http_traffic_old_v4`,
+		`DROP TABLE http_traffic_old_v4`,
+		`CREATE INDEX IF NOT EXISTS idx_timestamp ON http_traffic(timestamp)`,
+		`CREATE INDEX IF NOT EXISTS idx_host ON http_traffic(host)`,
+		`CREATE INDEX IF NOT EXISTS idx_status_code ON http_traffic(status_code)`,
+		`CREATE INDEX IF NOT EXISTS idx_tool ON http_traffic(tool)`,
+		`CREATE INDEX IF NOT EXISTS idx_method ON http_traffic(method)`,
+		`CREATE INDEX IF NOT EXISTS idx_host_timestamp ON http_traffic(host, timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_session ON http_traffic(session_tag, timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_method_url ON http_traffic(method, url)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_hash ON http_traffic(request_hash)`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return fmt.Errorf("%w\n  SQL: %s", err, s)
+		}
+	}
+	return tx.Commit()
 }
 
 // LogTraffic writes a single traffic record to the project SQLite DB.
@@ -313,8 +401,10 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	// INSERT OR IGNORE prevents duplicates via the request_hash unique constraint
-	result, err := p.db.Exec(`INSERT OR IGNORE INTO http_traffic
+	// Insert every row — fuzz/repeater workflows want each iteration captured.
+	// Duplicate detection is still possible via request_hash + GROUP BY queries,
+	// but the dedup is no longer enforced at write time.
+	result, err := p.db.Exec(`INSERT INTO http_traffic
 		(timestamp, tool, method, host, path, query, param_count, status_code,
 		 response_length, protocol, port, url, mime_type, extension, page_title,
 		 content_type, request_hash, session_tag)
@@ -344,7 +434,6 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 
 	requestID, err := result.LastInsertId()
 	if err != nil || requestID == 0 {
-		// requestID == 0 means INSERT OR IGNORE skipped (duplicate hash)
 		return nil
 	}
 
@@ -647,7 +736,7 @@ var burpMCPSchema = []string{
     response_time TEXT,
     connection_id TEXT,
     content_type  TEXT,
-    request_hash  TEXT UNIQUE,
+    request_hash  TEXT,
     session_tag   TEXT,
     notes         TEXT
 )`,
@@ -732,6 +821,7 @@ var burpMCPSchema = []string{
 	`CREATE INDEX idx_host_timestamp ON http_traffic(host, timestamp DESC)`,
 	`CREATE INDEX idx_session ON http_traffic(session_tag, timestamp DESC)`,
 	`CREATE INDEX idx_method_url ON http_traffic(method, url)`,
+	`CREATE INDEX idx_request_hash ON http_traffic(request_hash)`,
 	`CREATE INDEX idx_traffic_tags_tag ON traffic_tags(tag)`,
 	`CREATE INDEX idx_traffic_tags_traffic_id ON traffic_tags(traffic_id)`,
 	`CREATE INDEX idx_raw_socket_timestamp ON raw_socket_traffic(timestamp)`,
