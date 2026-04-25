@@ -96,6 +96,14 @@ func serve(projectPath string) {
 	// Initialize match & replace rules
 	API.InitMatchReplace()
 
+	// Initialize the project DB cycler with the configured directory so
+	// the UI's project switcher is populated immediately on boot.
+	if conf.ProjectsDBDirectory != "" {
+		if err := app.InitProjectsDir(conf.ProjectsDBDirectory); err != nil {
+			log.Printf("[Startup] Project DB init failed: %v", err)
+		}
+	}
+
 	// Initialize proxy system
 	if err := API.InitializeProxy(); err != nil {
 		log.Printf("[Startup] Error initializing proxy: %v", err)

@@ -11,11 +11,12 @@ import (
 type Config struct {
 	HostAddr string
 
-	HomeDirectory     string // User's home directory
-	ConfigDirectory   string // Config directory
-	ProjectsDirectory string // Projects directory
-	CacheDirectory    string // Cache directory
-	TemplateDirectory string // Template directory
+	HomeDirectory       string // User's home directory
+	ConfigDirectory     string // Config directory
+	ProjectsDirectory   string // Internal config directory (intercepted.html, etc.)
+	ProjectsDBDirectory string // Where per-project .db files live for the UI switcher
+	CacheDirectory      string // Cache directory
+	TemplateDirectory   string // Template directory
 
 	ProjectID   string //  Active Project's ID
 	CWDirectory string //  Projects Directory + ProjectID

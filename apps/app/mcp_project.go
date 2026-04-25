@@ -26,6 +26,13 @@ import (
 // ProjectDB -- package-level singleton for live traffic recording
 // ---------------------------------------------------------------------------
 
+// InitProjectsDir is the canonical boot-time entry point for setting the
+// directory the UI project switcher should scan for .db files. Wraps
+// projectDB.Init so callers in cmd/ don't need to touch the singleton.
+func InitProjectsDir(dbDir string) error {
+	return projectDB.Init(dbDir)
+}
+
 // projectDB is the package-level singleton for live traffic recording.
 // Package-level because action-dispatch handlers access it without Backend reference.
 // Thread-safe: all methods on ProjectDB use internal mutex protection.

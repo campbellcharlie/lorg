@@ -19,6 +19,7 @@ var API app.Backend
 var HostAddress string
 var ProjectPath string
 var ProxyAddress string // removed, we use api now
+var ProjectsDir string  // directory containing per-project .db files for the UI switcher
 var showLogs bool
 
 func init() {
@@ -53,7 +54,8 @@ func initialize() {
 func main() {
 	flag.StringVar(&HostAddress, "host", "127.0.0.1:8090", "Host address to listen on")
 	flag.StringVar(&ProxyAddress, "proxy", "127.0.0.1:8888", "Proxy address to listen on")
-	flag.StringVar(&ProjectPath, "path", "", "Project directory path")
+	flag.StringVar(&ProjectPath, "path", "", "Project directory path (lorgdb storage)")
+	flag.StringVar(&ProjectsDir, "projects-dir", "", "Directory containing per-project .db files for the UI switcher (default: $HOME/.lorg/projects)")
 	flag.BoolVar(&showLogs, "log", false, "Show debug logs")
 	flag.StringVar(&conf.MCPToken, "mcp-token", "", "Bearer token for MCP endpoint authentication")
 	flag.BoolVar(&conf.EnableTerminal, "enable-terminal", false, "Enable xterm terminal routes (disabled by default)")
@@ -63,7 +65,19 @@ func main() {
 	if len(os.Args) > 1 {
 		initialize()
 
+		// Resolve projects-dir. Default: $HOME/.lorg/projects.
+		if strings.TrimSpace(ProjectsDir) == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				ProjectsDir = home + "/.lorg/projects"
+			}
+		}
+		if ProjectsDir != "" {
+			_ = os.MkdirAll(ProjectsDir, 0755)
+			conf.ProjectsDBDirectory = ProjectsDir
+		}
+
 		fmt.Println("Initializing done")
+		fmt.Println("Projects DB directory:", ProjectsDir)
 		serve(ProjectPath)
 	} else {
 		fmt.Println("No project path provided")
