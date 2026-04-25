@@ -1839,6 +1839,78 @@
     }).join('');
   }
 
+  // ===========================================================
+  // Canonical header ordering for the Pretty/Headers/Cookies views.
+  // Keeps the request-line / status-line first, then sorts the rest
+  // into three buckets: known-priority headers in a defined order,
+  // unknown headers alphabetically, and connection-class headers
+  // pinned to the bottom. Raw mode bypasses this so it stays
+  // faithful to the bytes on the wire.
+  // ===========================================================
+  var REQUEST_HEADER_ORDER = [
+    'host', 'user-agent', 'accept', 'accept-language', 'accept-encoding',
+    'referer', 'origin', 'authorization', 'cookie',
+    'content-type', 'content-length',
+  ];
+  var RESPONSE_HEADER_ORDER = [
+    'date', 'server', 'content-type', 'content-length',
+    'cache-control', 'last-modified', 'etag',
+    'set-cookie', 'location',
+  ];
+  var LATE_HEADERS = [
+    'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection',
+  ];
+
+  function canonicalizeHeaderOrder(headerBlock) {
+    if (!headerBlock) return headerBlock;
+    var lines = headerBlock.split('\n');
+    if (lines.length <= 2) return headerBlock;
+
+    var firstLine = lines[0];
+    var isResponse = /^HTTP\//i.test(firstLine);
+    var isRequest = !isResponse && /\sHTTP\/[\d.]+$/i.test(firstLine);
+    if (!isRequest && !isResponse) return headerBlock;
+
+    var priority = isRequest ? REQUEST_HEADER_ORDER : RESPONSE_HEADER_ORDER;
+    var priorityRank = {};
+    priority.forEach(function(name, idx) { priorityRank[name] = idx; });
+    var lateRank = {};
+    LATE_HEADERS.forEach(function(name, idx) { lateRank[name] = idx; });
+
+    var pri = [], other = [], late = [];
+    for (var i = 1; i < lines.length; i++) {
+      var line = lines[i];
+      if (line === '') continue; // skip stray blank lines mid-headers
+      var colon = line.indexOf(':');
+      if (colon <= 0) { other.push({ line: line, name: line.toLowerCase(), origIdx: i }); continue; }
+      var name = line.substring(0, colon).trim().toLowerCase();
+      var entry = { line: line, name: name, origIdx: i };
+      if (priorityRank.hasOwnProperty(name))      pri.push(entry);
+      else if (lateRank.hasOwnProperty(name))     late.push(entry);
+      else                                        other.push(entry);
+    }
+
+    pri.sort(function(a, b) {
+      var d = priorityRank[a.name] - priorityRank[b.name];
+      return d !== 0 ? d : a.origIdx - b.origIdx;
+    });
+    other.sort(function(a, b) {
+      // Alphabetical by header name; preserve original order for repeats
+      var d = a.name.localeCompare(b.name);
+      return d !== 0 ? d : a.origIdx - b.origIdx;
+    });
+    late.sort(function(a, b) {
+      var d = lateRank[a.name] - lateRank[b.name];
+      return d !== 0 ? d : a.origIdx - b.origIdx;
+    });
+
+    var ordered = [firstLine];
+    [pri, other, late].forEach(function(bucket) {
+      bucket.forEach(function(e) { ordered.push(e.line); });
+    });
+    return ordered.join('\n');
+  }
+
   function highlightHTTP(raw) {
     if (!raw) return '';
 
@@ -1850,6 +1922,11 @@
     var rawHeaders = headerEnd >= 0 ? normalized.substring(0, headerEnd) : normalized;
     var rawBody = headerEnd >= 0 ? normalized.substring(headerEnd + 2) : '';
     var bodyLen = rawBody.length;
+
+    // Reorder headers to a canonical order so scanning is consistent
+    // across requests (Burp habit: METHOD line / Host / User-Agent / ...).
+    // First line (request line / status line) is preserved in place.
+    rawHeaders = canonicalizeHeaderOrder(rawHeaders);
 
     // Detect binary content — show headers + placeholder instead of garbage
     if (rawBody.length > 0 && isBinaryContentType(rawHeaders)) {
