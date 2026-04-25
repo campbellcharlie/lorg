@@ -105,6 +105,9 @@ func (backend *Backend) RegisterRoutes(e *echo.Echo) {
 	// Match & Replace
 	backend.MatchReplaceEndpoints(e)
 
+	// MCP request templates (rich, in lorgdb _mcp_templates) — UI surface
+	backend.MCPTemplateEndpoints(e)
+
 	// Modify
 	backend.ModifyRequest(e)
 

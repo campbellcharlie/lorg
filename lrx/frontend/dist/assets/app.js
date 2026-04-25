@@ -407,6 +407,145 @@
   }
 
   // ===========================================================
+  // Templates UI — backed by /api/mcp-templates REST.
+  // Saves and lists rich request templates (the same _mcp_templates
+  // table the MCP `template` tool writes to). Right-click any
+  // captured request → "Save as Template…" opens the modal,
+  // which on save POSTs to /api/mcp-templates.
+  // ===========================================================
+  var pendingTemplateRowId = null;
+
+  function initTemplates() {
+    var modal = document.getElementById('tpl-modal');
+    if (!modal) return;
+    modal.querySelector('.cmd-palette-backdrop').addEventListener('click', closeTplModal);
+    document.getElementById('tpl-cancel').addEventListener('click', closeTplModal);
+    document.getElementById('tpl-save').addEventListener('click', saveTemplateFromRow);
+    loadTemplates();
+  }
+
+  async function loadTemplates() {
+    var container = document.getElementById('tpl-list');
+    if (!container) return;
+    var data = await api('/api/mcp-templates', { silent: true });
+    var tpls = (data && data.templates) || [];
+    if (tpls.length === 0) {
+      container.innerHTML = '<div class="mr-empty">No saved templates. Right-click a captured request → "Save as Template…" to create one.</div>';
+      return;
+    }
+    container.innerHTML = tpls.map(function(t) {
+      var meta = t.host + ':' + t.port + (t.tls ? ' TLS' : '') + ' · HTTP/' + t.http_version;
+      var detailBits = [];
+      if (t.inject_session) detailBits.push('inject-session');
+      if (t.json_escape_vars) detailBits.push('json-escape');
+      if (t.extract_regex) detailBits.push('extract /' + escapeAttr(t.extract_regex.slice(0, 24)) + '/');
+      var detail = detailBits.length ? ' · ' + detailBits.join(' · ') : '';
+      return '<div class="mr-rule" data-tpl-name="' + escapeAttr(t.name) + '" title="' + escapeAttr(t.description || '') + '">' +
+        '<span class="mr-toggle on" data-action="send" title="Send via Repeater">▶</span>' +
+        '<span class="mr-type">' + escapeHtml(t.name) + '</span>' +
+        '<span class="mr-match">' + escapeHtml(meta) + '</span>' +
+        '<span class="mr-replace">' + escapeHtml((t.description || '').slice(0, 60)) + '</span>' +
+        '<span class="mr-scope">' + escapeHtml(detail) + '</span>' +
+        '<button class="mr-delete" data-action="delete" title="Delete">×</button>' +
+      '</div>';
+    }).join('');
+    container.querySelectorAll('.mr-rule').forEach(function(row) {
+      var name = row.dataset.tplName;
+      row.querySelector('[data-action="send"]').addEventListener('click', function(){
+        loadTemplateIntoRepeater(name);
+      });
+      row.querySelector('[data-action="delete"]').addEventListener('click', async function() {
+        await api('/api/mcp-templates/' + encodeURIComponent(name), { method: 'DELETE' });
+        loadTemplates();
+      });
+    });
+  }
+
+  function openSaveAsTemplate(rowId) {
+    pendingTemplateRowId = rowId;
+    var modal = document.getElementById('tpl-modal');
+    if (!modal) return;
+    // Reset form
+    document.getElementById('tpl-name').value = '';
+    document.getElementById('tpl-desc').value = '';
+    document.getElementById('tpl-extract').value = '';
+    document.getElementById('tpl-inject-session').checked = false;
+    document.getElementById('tpl-json-escape').checked = false;
+    modal.classList.remove('hidden');
+    setTimeout(function(){ document.getElementById('tpl-name').focus(); }, 50);
+  }
+  function closeTplModal() {
+    document.getElementById('tpl-modal')?.classList.add('hidden');
+  }
+
+  async function saveTemplateFromRow() {
+    var name = document.getElementById('tpl-name').value.trim();
+    if (!name) { document.getElementById('tpl-name').focus(); return; }
+    if (!pendingTemplateRowId) { closeTplModal(); return; }
+
+    // Pull the raw request + host/port/tls/http from the row + detail
+    var detail = await api('/api/traffic/' + pendingTemplateRowId + '/detail');
+    if (!detail || !detail.request) { alert('Failed to load request'); return; }
+    var row = trafficData.find(function(r) { return r.id === pendingTemplateRowId; });
+    if (!row) { alert('Row not found in current view'); return; }
+
+    var host = (row.host || '').replace(/^https?:\/\//, '').split(':')[0];
+    var port = parseInt(row.port || (row.is_https ? 443 : 80), 10);
+    var tls  = !!row.is_https;
+    var httpVersion = (row.http && row.http.indexOf('2') >= 0) ? 2 : 1;
+
+    var body = {
+      name:             name,
+      tls:              tls,
+      host:             host,
+      port:             port,
+      http_version:     httpVersion,
+      request_template: detail.request,
+      description:      document.getElementById('tpl-desc').value,
+      extract_regex:    document.getElementById('tpl-extract').value,
+      extract_group:    document.getElementById('tpl-extract').value ? 1 : 0,
+      inject_session:   document.getElementById('tpl-inject-session').checked,
+      json_escape_vars: document.getElementById('tpl-json-escape').checked,
+    };
+    var resp = await api('/api/mcp-templates', { method: 'POST', body: JSON.stringify(body) });
+    if (resp && resp.success) {
+      closeTplModal();
+      loadTemplates();
+    } else {
+      alert('Save failed: ' + (resp && resp.error ? resp.error : 'unknown'));
+    }
+  }
+
+  // Load a template into the Repeater — so the user can fill ${VAR}s
+  // in the request textarea then hit Send like normal.
+  async function loadTemplateIntoRepeater(name) {
+    var data = await api('/api/mcp-templates');
+    var tpl = ((data && data.templates) || []).find(function(t){ return t.name === name; });
+    if (!tpl) { alert('Template not found'); return; }
+    switchView('repeater');
+    setTimeout(function(){
+      var setVal = function(el, v) {
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(el, v);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+      };
+      setVal(document.getElementById('rep-host'), tpl.host);
+      setVal(document.getElementById('rep-port'), String(tpl.port));
+      document.getElementById('rep-tls').checked = !!tpl.tls;
+      document.getElementById('rep-tls').dispatchEvent(new Event('change', {bubbles: true}));
+      var verSel = document.getElementById('rep-http-version');
+      verSel.value = String(tpl.http_version || 1);
+      verSel.dispatchEvent(new Event('change', {bubbles: true}));
+      var ta = document.getElementById('rep-request');
+      var taSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      taSetter.call(ta, tpl.request_template);
+      ta.dispatchEvent(new Event('input', {bubbles: true}));
+      $('#rep-note').textContent = 'Loaded template "' + name + '". Edit ${VAR} placeholders, then Send.';
+    }, 200);
+  }
+
+  // ===========================================================
   // Match & Replace UI — backed by /api/match-replace REST.
   // List rules with inline enable toggle + delete; an
   // expandable form below adds new rules.
@@ -2880,6 +3019,7 @@
     initFilterPresets();
     initDiffMarks();
     initLineCollapse();
+    initTemplates();
     restoreRepeaterVars();
 
     document.addEventListener('click', function(e) {
@@ -3124,6 +3264,11 @@
 
         if (action === 'send-repeater') {
           selectTrafficRow(contextRowId).then(function() { sendToRepeater(); });
+          return;
+        }
+
+        if (action === 'save-template') {
+          openSaveAsTemplate(contextRowId);
           return;
         }
 

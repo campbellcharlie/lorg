@@ -311,6 +311,15 @@
             <button id="scope-reset-btn" class="btn btn-sm" style="color:var(--red);">Reset All Scope Rules</button>
           </div>
 
+          <h2 class="settings-title" style="margin-top:28px;">Templates</h2>
+          <p class="settings-help">
+            Saved request templates. <code>${VAR}</code> placeholders get
+            substituted on send. Each template can also auto-extract a
+            value from the response via a regex (handy for chaining
+            CSRF tokens / auth tokens between requests).
+          </p>
+          <div id="tpl-list" class="mr-rules"></div>
+
           <h2 class="settings-title" style="margin-top:28px;">Match &amp; Replace</h2>
           <p class="settings-help">
             Rewrite request/response content in flight. Type is one of:
@@ -344,6 +353,38 @@
 
     </main>
 
+    <!-- Save-as-Template modal -->
+    <div id="tpl-modal" class="cmd-palette hidden" role="dialog" aria-label="Save as template">
+      <div class="cmd-palette-backdrop"></div>
+      <div class="cmd-palette-modal" style="width: 480px;">
+        <div style="padding: 14px 16px; border-bottom: 1px solid var(--border, #2a2a30); font-family: var(--font-sans); font-size: 13px;">
+          Save as Template
+        </div>
+        <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <label style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-sans); font-size: 11px; color: var(--text-secondary);">
+            Name
+            <input type="text" id="tpl-name" class="input-sm" placeholder="login-csrf" style="font-family: var(--font-mono);">
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-sans); font-size: 11px; color: var(--text-secondary);">
+            Description (optional)
+            <input type="text" id="tpl-desc" class="input-sm" placeholder="Login form with CSRF extraction" style="font-family: var(--font-mono);">
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 4px; font-family: var(--font-sans); font-size: 11px; color: var(--text-secondary);">
+            Extract regex (optional, e.g. <code>name="csrf" value="([^"]+)"</code>)
+            <input type="text" id="tpl-extract" class="input-sm" placeholder="" style="font-family: var(--font-mono);">
+          </label>
+          <div style="display: flex; gap: 14px; font-family: var(--font-sans); font-size: 11px; color: var(--text-secondary);">
+            <label><input type="checkbox" id="tpl-inject-session"> inject active session cookies</label>
+            <label><input type="checkbox" id="tpl-json-escape"> JSON-escape variable values</label>
+          </div>
+        </div>
+        <div style="padding: 8px 16px; border-top: 1px solid var(--border, #2a2a30); display: flex; gap: 8px; justify-content: flex-end;">
+          <button id="tpl-cancel" class="btn btn-sm">Cancel</button>
+          <button id="tpl-save" class="btn btn-sm btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Diff modal -->
     <div id="diff-modal" class="diff-modal hidden">
       <div class="diff-backdrop"></div>
@@ -376,6 +417,7 @@
     <button class="context-menu-item" data-action="copy-curl-proxy">Copy as curl (through proxy)</button>
     <button class="context-menu-item" data-action="copy-raw">Copy raw request</button>
     <button class="context-menu-item" data-action="send-repeater">Send to Repeater</button>
+    <button class="context-menu-item" data-action="save-template">Save as Template…</button>
     <button class="context-menu-item" data-action="filter-by-host">Filter by host</button>
     <button class="context-menu-item" data-action="filter-by-path">Filter by path</button>
     <button class="context-menu-item" data-action="diff-mark-a">Mark for diff (A)</button>
