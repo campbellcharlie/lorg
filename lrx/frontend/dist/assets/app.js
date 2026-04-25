@@ -151,7 +151,8 @@
     // AI-only checkbox
     if (aiOnly) {
       filtered = filtered.filter(function(row) {
-        return (row.generated_by || '').indexOf('ai/mcp') !== -1;
+        var g = row.generated_by || '';
+        return g.indexOf('ai/mcp') !== -1 || g === 'MCP';
       });
     }
 
@@ -1034,9 +1035,15 @@
     // source:ai, source:proxy
     m = cond.match(/^source:(\S+)$/i);
     if (m) {
-      var isAi = (row.generated_by || '').indexOf('ai/mcp') !== -1;
-      if (m[1].toLowerCase() === 'ai') return isAi;
-      if (m[1].toLowerCase() === 'proxy') return !isAi;
+      var sg = row.generated_by || '';
+      var isAi = sg.indexOf('ai/mcp') !== -1 || sg === 'MCP';
+      var isRep = sg.indexOf('repeater/') !== -1 || sg === 'Repeater';
+      switch (m[1].toLowerCase()) {
+        case 'ai': case 'mcp': return isAi;
+        case 'repeater': return isRep && !isAi;
+        case 'proxy': return !isAi && !isRep && sg !== 'Template' && sg.indexOf('template') === -1;
+        case 'template': return sg === 'Template' || sg.indexOf('template') !== -1;
+      }
       return false;
     }
 
@@ -1076,7 +1083,7 @@
       case 'path': return (req.path || req.url || '/').toLowerCase();
       case 'status': return resp.status || 0;
       case 'length': return resp.length || 0;
-      case 'source': var g = row.generated_by || ''; return g.indexOf('ai/mcp') !== -1 ? 'a' : g.indexOf('repeater/') !== -1 ? 'm' : 'z';
+      case 'source': var g = row.generated_by || ''; return (g.indexOf('ai/mcp') !== -1 || g === 'MCP') ? 'a' : (g.indexOf('repeater/') !== -1 || g === 'Repeater') ? 'm' : (g === 'Template' || g.indexOf('template') !== -1) ? 't' : 'z';
       case 'time': return row.created || '';
       default: return 0;
     }
@@ -1130,7 +1137,7 @@
       var status = resp.status || '';
       var length = resp.length || row.length || '';
       var genBy = row.generated_by || '';
-      var source = genBy.indexOf('ai/mcp') !== -1 ? 'AI' : genBy.indexOf('repeater/') !== -1 ? 'Repeater' : 'Proxy';
+      var source = genBy.indexOf('ai/mcp') !== -1 || genBy === 'MCP' ? 'AI' : genBy.indexOf('repeater/') !== -1 || genBy === 'Repeater' ? 'Repeater' : genBy === 'Template' || genBy.indexOf('template') !== -1 ? 'Template' : 'Proxy';
       var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : 'source-proxy';
       var created = row.created || '';
       var timeStr = created ? formatTime(created) : '';

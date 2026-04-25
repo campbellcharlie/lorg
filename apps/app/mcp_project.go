@@ -1101,17 +1101,21 @@ func sanitizeProjectName(name string) string {
 }
 
 // mapGeneratedByToTool converts lorg's generated_by field to a burp-style
-// tool name for the export.
+// tool name for the export. AI/MCP traffic gets routed through the
+// repeater (so its generated_by reads "repeater/ai/mcp/..."), so the
+// substring check for "ai/mcp" must run BEFORE the "repeater/" prefix
+// check or AI traffic gets mislabeled as plain "Repeater" — which the
+// UI then collapses to "Proxy".
 func mapGeneratedByToTool(generatedBy string) string {
 	switch {
+	case strings.Contains(generatedBy, "ai/mcp"):
+		return "MCP"
 	case strings.HasPrefix(generatedBy, "proxy/"):
 		return "Proxy"
-	case strings.HasPrefix(generatedBy, "repeater/"):
-		return "Repeater"
-	case strings.HasPrefix(generatedBy, "ai/mcp/"):
-		return "MCP"
 	case strings.Contains(generatedBy, "template"):
 		return "Template"
+	case strings.HasPrefix(generatedBy, "repeater/"):
+		return "Repeater"
 	case generatedBy == "":
 		return "Proxy"
 	default:
