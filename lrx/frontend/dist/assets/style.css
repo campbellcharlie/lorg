@@ -2154,70 +2154,98 @@ mark.find-match.find-current {
 [data-theme="ember"] .method-post { color: #4fc3f7; }
 [data-theme="ember"] .status-2xx, [data-theme="ember"] .hl-status-2xx { color: #81c784; }
 
-/* Ayu Mirage Plus — the warm dark sibling in the Ayu family.
-   Background sits between true dark and washed-out, accent leans
-   amber (Ayu's signature) with cyan tags and lime-green strings. */
+/* Ayu Mirage Plus — canonical palette from dempfi/ayu (v5).
+   Editor bg #242936, popup bg #282e3b, signature amber #ffcc66.
+   String green is bright lime #d5ff80, tags use cyan #5ccfe6,
+   keywords/storage are warm orange #ffad66. */
 [data-theme="ayu-mirage"] {
-  --bg: #1f2430; --bg-surface: #171b24; --bg-elevated: #272d38; --bg-hover: #2f3543; --bg-active: #383f4d;
-  --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.10); --border-focus: rgba(255,204,102,0.5);
-  --text: #cbccc6; --text-secondary: #a6acb9; --text-tertiary: #5c6773; --text-ghost: #3e4b59;
-  --accent: #ffcc66; --accent-hover: #ffd580; --accent-dim: rgba(255,204,102,0.12); --accent-glow: rgba(255,204,102,0.18);
-  --red: #ff3333; --orange: #ffa759; --blue: #5ccfe6; --yellow: #ffcc66; --purple: #d4bfff;
+  --bg: #242936; --bg-surface: #1f242f; --bg-elevated: #282e3b; --bg-hover: #2d3343; --bg-active: #353b4a;
+  --border: rgba(204,202,194,0.08); --border-light: rgba(204,202,194,0.14); --border-focus: rgba(255,204,102,0.5);
+  --text: #cccac2; --text-secondary: #a6adba; --text-tertiary: #707a8c; --text-ghost: #475266;
+  --accent: #ffcc66; --accent-hover: #ffd173; --accent-dim: rgba(255,204,102,0.12); --accent-glow: rgba(255,204,102,0.18);
+  --red: #ff6666; --orange: #ffad66; --blue: #5ccfe6; --yellow: #ffcc66; --purple: #dfbfff;
 }
-[data-theme="ayu-mirage"] .method-get  { color: #bae67e; }
+[data-theme="ayu-mirage"] .method-get  { color: #d5ff80; }
 [data-theme="ayu-mirage"] .method-post { color: #5ccfe6; }
-[data-theme="ayu-mirage"] .method-put  { color: #ffa759; }
-[data-theme="ayu-mirage"] .method-delete { color: #ff3333; }
-[data-theme="ayu-mirage"] .status-2xx, [data-theme="ayu-mirage"] .hl-status-2xx { color: #bae67e; }
-[data-theme="ayu-mirage"] .status-3xx, [data-theme="ayu-mirage"] .hl-status-3xx { color: #5ccfe6; }
-[data-theme="ayu-mirage"] .status-4xx, [data-theme="ayu-mirage"] .hl-status-4xx { color: #ffa759; }
-[data-theme="ayu-mirage"] .status-5xx, [data-theme="ayu-mirage"] .hl-status-5xx { color: #ff3333; }
+[data-theme="ayu-mirage"] .method-put  { color: #ffad66; }
+[data-theme="ayu-mirage"] .method-delete { color: #ff6666; }
+[data-theme="ayu-mirage"] .method-patch  { color: #dfbfff; }
+[data-theme="ayu-mirage"] .status-2xx, [data-theme="ayu-mirage"] .hl-status-2xx { color: #d5ff80; }
+[data-theme="ayu-mirage"] .status-3xx, [data-theme="ayu-mirage"] .hl-status-3xx { color: #73d0ff; }
+[data-theme="ayu-mirage"] .status-4xx, [data-theme="ayu-mirage"] .hl-status-4xx { color: #ffad66; }
+[data-theme="ayu-mirage"] .status-5xx, [data-theme="ayu-mirage"] .hl-status-5xx { color: #ff6666; }
+[data-theme="ayu-mirage"] .hl-method        { color: #ffad66; }
+[data-theme="ayu-mirage"] .hl-url           { color: #73d0ff; }
+[data-theme="ayu-mirage"] .hl-version       { color: #b8cfe680; }
+[data-theme="ayu-mirage"] .hl-header-name   { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .hl-header-value  { color: #cccac2; }
+[data-theme="ayu-mirage"] .hl-json-key      { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .hl-json-string   { color: #d5ff80; }
+[data-theme="ayu-mirage"] .hl-json-number   { color: #ffcc66; }
+[data-theme="ayu-mirage"] .hl-json-bool     { color: #dfbfff; }
+[data-theme="ayu-mirage"] .hl-json-null     { color: #f28779; }
+[data-theme="ayu-mirage"] .hl-html-tag      { color: #5ccfe6; }
+[data-theme="ayu-mirage"] .hl-html-attr     { color: #ffd173; }
+[data-theme="ayu-mirage"] .hl-html-value    { color: #d5ff80; }
 
-/* Ayu Light — the daytime sibling. Inverts the dark assumptions
-   most other themes bake in: borders fade to black, scrollbars
-   are dark on light, hover states are subtle dark tints. */
+/* Ayu Light — canonical palette from dempfi/ayu (v5).
+   Editor bg #fcfcfc, accent caret #ffaa33 (Ayu logo orange),
+   strings green #86b300, keywords/storage orange #fa8d3e,
+   types/tags cyan #55b4d4, entity names blue #22a4e6. */
 [data-theme="ayu-light"] {
-  --bg: #fafafa; --bg-surface: #f3f4f5; --bg-elevated: #e9ecef; --bg-hover: #e1e4e8; --bg-active: #d4d8dd;
-  --border: rgba(0,0,0,0.08); --border-light: rgba(0,0,0,0.12); --border-focus: rgba(255,153,64,0.5);
-  --text: #5c6773; --text-secondary: #828c99; --text-tertiary: #abb0b6; --text-ghost: #cbcdd0;
-  --accent: #ff9940; --accent-hover: #ffaf60; --accent-dim: rgba(255,153,64,0.12); --accent-glow: rgba(255,153,64,0.18);
-  --red: #f07171; --orange: #fa8d3e; --blue: #36a3d9; --yellow: #f2ae49; --purple: #a37acc;
+  --bg: #fcfcfc; --bg-surface: #f5f5f5; --bg-elevated: #ededed; --bg-hover: #e7e7e7; --bg-active: #dcdcdc;
+  --border: rgba(92,97,102,0.10); --border-light: rgba(92,97,102,0.16); --border-focus: rgba(255,170,51,0.5);
+  --text: #5c6166; --text-secondary: #787b80; --text-tertiary: #8a9199; --text-ghost: #c7c9cc;
+  --accent: #ffaa33; --accent-hover: #ffbb55; --accent-dim: rgba(255,170,51,0.14); --accent-glow: rgba(255,170,51,0.20);
+  --red: #f07171; --orange: #fa8d3e; --blue: #55b4d4; --yellow: #f2ae49; --purple: #a37acc;
 }
 [data-theme="ayu-light"] .method-get  { color: #86b300; }
-[data-theme="ayu-light"] .method-post { color: #36a3d9; }
+[data-theme="ayu-light"] .method-post { color: #55b4d4; }
 [data-theme="ayu-light"] .method-put  { color: #fa8d3e; }
-[data-theme="ayu-light"] .method-delete { color: #f07171; }
+[data-theme="ayu-light"] .method-delete { color: #e65050; }
+[data-theme="ayu-light"] .method-patch  { color: #a37acc; }
 [data-theme="ayu-light"] .status-2xx, [data-theme="ayu-light"] .hl-status-2xx { color: #86b300; }
-[data-theme="ayu-light"] .status-3xx, [data-theme="ayu-light"] .hl-status-3xx { color: #36a3d9; }
+[data-theme="ayu-light"] .status-3xx, [data-theme="ayu-light"] .hl-status-3xx { color: #22a4e6; }
 [data-theme="ayu-light"] .status-4xx, [data-theme="ayu-light"] .hl-status-4xx { color: #fa8d3e; }
-[data-theme="ayu-light"] .status-5xx, [data-theme="ayu-light"] .hl-status-5xx { color: #f07171; }
-/* Light-mode overrides for elements that hardcode rgba(255,...)
-   assuming a dark canvas. Scrollbars + selection are the most
-   visible offenders. */
+[data-theme="ayu-light"] .status-5xx, [data-theme="ayu-light"] .hl-status-5xx { color: #e65050; }
+[data-theme="ayu-light"] .hl-method        { color: #fa8d3e; }
+[data-theme="ayu-light"] .hl-url           { color: #22a4e6; }
+[data-theme="ayu-light"] .hl-version       { color: #787b80; }
+[data-theme="ayu-light"] .hl-header-name   { color: #55b4d4; }
+[data-theme="ayu-light"] .hl-header-value  { color: #5c6166; }
+[data-theme="ayu-light"] .hl-json-key      { color: #55b4d4; }
+[data-theme="ayu-light"] .hl-json-string   { color: #86b300; }
+[data-theme="ayu-light"] .hl-json-number   { color: #ffaa33; }
+[data-theme="ayu-light"] .hl-json-bool     { color: #a37acc; }
+[data-theme="ayu-light"] .hl-json-null     { color: #f07171; }
+[data-theme="ayu-light"] .hl-html-tag      { color: #55b4d4; }
+[data-theme="ayu-light"] .hl-html-attr     { color: #f2ae49; }
+[data-theme="ayu-light"] .hl-html-value    { color: #86b300; }
+/* Light-mode overrides — the rest of the UI assumes a dark canvas */
 [data-theme="ayu-light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(92, 97, 102, 0.18);
 }
 [data-theme="ayu-light"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(92, 97, 102, 0.32);
 }
 [data-theme="ayu-light"] ::selection {
-  background: rgba(255, 153, 64, 0.25);
+  background: rgba(255, 170, 51, 0.28);
   color: var(--text);
 }
 [data-theme="ayu-light"] .raw-http {
   background: var(--bg);
 }
 [data-theme="ayu-light"] mark.find-match {
-  background: rgba(255, 153, 64, 0.30);
+  background: rgba(255, 170, 51, 0.32);
   color: var(--text);
 }
 [data-theme="ayu-light"] mark.find-match.find-current {
-  background: rgba(255, 153, 64, 0.85);
-  color: #1a1a1a;
+  background: #ffaa33;
+  color: #fcfcfc;
 }
 [data-theme="ayu-light"] .hex-ascii,
 [data-theme="ayu-light"] .pane-footer-stats {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(92, 97, 102, 0.06);
 }
 
 /* ============================================================
