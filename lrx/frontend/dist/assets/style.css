@@ -1300,6 +1300,135 @@ mark.find-match.find-current {
 }
 
 /* ============================================================
+   JSON Tree view — Postman-style collapsible tree.
+   <details>/<summary> for native disclosure semantics; styled
+   to remove default arrows and add our own ▸/▾ indicator.
+   ============================================================ */
+.tree-view {
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow: auto;
+  line-height: 1.5;
+}
+.tree-empty {
+  color: var(--text-ghost);
+  font-style: italic;
+  padding: 8px;
+}
+.tree-node {
+  margin: 0;
+}
+.tree-node > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-left: 14px;
+}
+.tree-node > summary::-webkit-details-marker { display: none; }
+.tree-node > summary::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  transition: transform 0.1s ease;
+}
+.tree-node[open] > summary::before {
+  content: '▾';
+}
+.tree-children {
+  margin-left: 14px;
+  border-left: 1px dotted var(--border, #2a2a30);
+  padding-left: 8px;
+}
+.tree-row {
+  padding-left: 14px;
+}
+.tree-key    { color: var(--whiskey, #e8b97a); }
+.tree-colon  { color: var(--text-ghost); }
+.tree-string { color: var(--accent); }
+.tree-number { color: var(--blue, #60a5fa); }
+.tree-bool   { color: var(--purple, #a855f7); font-weight: 600; }
+.tree-null   { color: var(--red, #ef4444); font-style: italic; }
+.tree-bracket { color: var(--text-secondary); font-weight: 600; }
+.tree-count  { color: var(--text-ghost); font-size: 10px; margin: 0 4px; }
+
+/* ============================================================
+   HTML render view — sandboxed iframe.
+   Sandbox is intentionally empty (no scripts, no forms, no
+   top-nav, no same-origin) so the preview can never harm the
+   host page.
+   ============================================================ */
+.render-view {
+  padding: 0;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.render-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white; /* most pages assume light bg */
+}
+.render-empty {
+  padding: 20px;
+  color: var(--text-ghost);
+  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+/* ============================================================
+   Hex view — Burp-style 16-byte rows with offset/hex/ascii
+   columns. Monospaced, fixed alignment.
+   ============================================================ */
+.hex-view {
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  overflow: auto;
+  line-height: 1.4;
+}
+.hex-empty {
+  color: var(--text-ghost);
+  font-style: italic;
+}
+.hex-row {
+  display: flex;
+  gap: 16px;
+  white-space: pre;
+}
+.hex-offset {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.hex-bytes {
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+}
+.hex-ascii {
+  color: var(--accent);
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+.hex-trunc {
+  margin-top: 8px;
+  padding: 6px 8px;
+  color: var(--text-ghost);
+  font-style: italic;
+  border-top: 1px dotted var(--border, #2a2a30);
+}
+
+/* ============================================================
    Scrollbar
    ============================================================ */
 ::-webkit-scrollbar {

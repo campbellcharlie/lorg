@@ -470,6 +470,12 @@
       el.innerHTML = highlightHTTP(headers);
     } else if (format === 'cookies') {
       el.innerHTML = renderCookiesView(raw);
+    } else if (format === 'tree') {
+      el.innerHTML = renderTreeView(raw);
+    } else if (format === 'render') {
+      el.innerHTML = renderHTMLView(raw);
+    } else if (format === 'hex') {
+      el.innerHTML = renderHexView(raw);
     }
   }
 
@@ -574,6 +580,142 @@
       }
     });
     return c;
+  }
+
+  // ===========================================================
+  // JSON Tree view (Postman-style collapsible tree).
+  // Parses the body as JSON; if valid, renders <details> blocks
+  // for objects/arrays with type-colored values. If invalid,
+  // gracefully falls back to a notice + the raw body.
+  // ===========================================================
+  function renderTreeView(raw) {
+    if (!raw) return '<div class="tree-view"><div class="tree-empty">No data</div></div>';
+    var sep = raw.indexOf('\r\n\r\n');
+    if (sep < 0) sep = raw.indexOf('\n\n');
+    var body = sep >= 0 ? raw.substring(sep + (raw.indexOf('\r\n\r\n') >= 0 ? 4 : 2)) : raw;
+    body = body.trim();
+    if (!body) return '<div class="tree-view"><div class="tree-empty">Empty body</div></div>';
+
+    var parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch (e) {
+      return '<div class="tree-view"><div class="tree-empty">Body is not valid JSON — switch to Pretty for the syntax-highlighted view.</div></div>';
+    }
+    return '<div class="tree-view">' + renderTreeNode(parsed, /*key*/ null, /*depth*/ 0, /*last*/ true) + '</div>';
+  }
+
+  function renderTreeNode(value, key, depth, last) {
+    var keyHTML = key !== null ? '<span class="tree-key">' + escapeHtml(String(key)) + '</span><span class="tree-colon">:</span> ' : '';
+
+    if (value === null) {
+      return '<div class="tree-row">' + keyHTML + '<span class="tree-null">null</span></div>';
+    }
+    if (typeof value === 'boolean') {
+      return '<div class="tree-row">' + keyHTML + '<span class="tree-bool">' + value + '</span></div>';
+    }
+    if (typeof value === 'number') {
+      return '<div class="tree-row">' + keyHTML + '<span class="tree-number">' + value + '</span></div>';
+    }
+    if (typeof value === 'string') {
+      return '<div class="tree-row">' + keyHTML + '<span class="tree-string">"' + escapeHtml(value) + '"</span></div>';
+    }
+    if (Array.isArray(value)) {
+      var arrLabel = '<span class="tree-bracket">[</span><span class="tree-count">' + value.length + '</span><span class="tree-bracket">]</span>';
+      if (value.length === 0) {
+        return '<div class="tree-row">' + keyHTML + arrLabel + '</div>';
+      }
+      var open = depth < 2 ? ' open' : '';
+      var children = '';
+      for (var i = 0; i < value.length; i++) {
+        children += renderTreeNode(value[i], i, depth + 1, i === value.length - 1);
+      }
+      return '<details class="tree-node"' + open + '><summary>' + keyHTML + arrLabel + '</summary><div class="tree-children">' + children + '</div></details>';
+    }
+    if (typeof value === 'object') {
+      var keys = Object.keys(value);
+      var objLabel = '<span class="tree-bracket">{</span><span class="tree-count">' + keys.length + '</span><span class="tree-bracket">}</span>';
+      if (keys.length === 0) {
+        return '<div class="tree-row">' + keyHTML + objLabel + '</div>';
+      }
+      var openObj = depth < 2 ? ' open' : '';
+      var childrenObj = '';
+      for (var k = 0; k < keys.length; k++) {
+        childrenObj += renderTreeNode(value[keys[k]], keys[k], depth + 1, k === keys.length - 1);
+      }
+      return '<details class="tree-node"' + openObj + '><summary>' + keyHTML + objLabel + '</summary><div class="tree-children">' + childrenObj + '</div></details>';
+    }
+    return '<div class="tree-row">' + keyHTML + escapeHtml(String(value)) + '</div>';
+  }
+
+  // ===========================================================
+  // HTML render view (Burp Render tab).
+  // For text/html responses, render in a sandboxed iframe with
+  // sandbox="" (no scripts, no forms, no top-nav, no same-origin)
+  // so we can preview layout safely. Falls back to a notice for
+  // non-HTML content.
+  // ===========================================================
+  function renderHTMLView(raw) {
+    var ct = extractCT(raw);
+    if (!ct || ct.toLowerCase().indexOf('html') < 0) {
+      return '<div class="render-view"><div class="render-empty">Render view is only meaningful for HTML responses (this response is ' + escapeHtml(ct || 'unknown') + ').</div></div>';
+    }
+    var sep = raw.indexOf('\r\n\r\n');
+    if (sep < 0) sep = raw.indexOf('\n\n');
+    var body = sep >= 0 ? raw.substring(sep + (raw.indexOf('\r\n\r\n') >= 0 ? 4 : 2)) : raw;
+    // sandbox="" disables scripts, forms, popups, top-nav, plugins,
+    // and same-origin access. Iframe can render layout but cannot
+    // exfil cookies, navigate, or run scripts.
+    var doc = body.replace(/"/g, '&quot;');
+    return '<div class="render-view"><iframe class="render-frame" sandbox="" srcdoc="' + doc + '"></iframe></div>';
+  }
+
+  // ===========================================================
+  // Hex view (Burp Hex tab).
+  // Renders the body as 16-byte rows: 8-digit offset | hex bytes
+  // | ASCII (non-printable as '.'). Capped at 16KB per render to
+  // keep the DOM responsive — past that, switch to Raw.
+  // ===========================================================
+  function renderHexView(raw) {
+    var sep = raw.indexOf('\r\n\r\n');
+    if (sep < 0) sep = raw.indexOf('\n\n');
+    var body = sep >= 0 ? raw.substring(sep + (raw.indexOf('\r\n\r\n') >= 0 ? 4 : 2)) : raw;
+    if (!body) return '<div class="hex-view"><div class="hex-empty">Empty body</div></div>';
+
+    var maxBytes = 16 * 1024;
+    var truncated = false;
+    if (body.length > maxBytes) {
+      body = body.substring(0, maxBytes);
+      truncated = true;
+    }
+
+    var lines = [];
+    for (var i = 0; i < body.length; i += 16) {
+      var chunk = body.substring(i, i + 16);
+      var hex = '';
+      var ascii = '';
+      for (var j = 0; j < 16; j++) {
+        if (j < chunk.length) {
+          var code = chunk.charCodeAt(j) & 0xff;
+          hex += (code < 16 ? '0' : '') + code.toString(16) + ' ';
+          ascii += (code >= 0x20 && code < 0x7f) ? chunk[j] : '.';
+        } else {
+          hex += '   ';
+          ascii += ' ';
+        }
+        if (j === 7) hex += ' '; // visual midpoint gap
+      }
+      var offset = i.toString(16).padStart(8, '0');
+      lines.push(
+        '<div class="hex-row">' +
+          '<span class="hex-offset">' + offset + '</span>' +
+          '<span class="hex-bytes">' + hex.trimEnd() + '</span>' +
+          '<span class="hex-ascii">' + escapeHtml(ascii) + '</span>' +
+        '</div>'
+      );
+    }
+    var trunc = truncated ? '<div class="hex-trunc">Hex view truncated at 16 KB. Switch to Raw for the full body.</div>' : '';
+    return '<div class="hex-view">' + lines.join('') + trunc + '</div>';
   }
 
   // extractCT pulls Content-Type out of a raw HTTP message (headers part).
