@@ -36,16 +36,6 @@ type SendHttpRequestArgs struct {
 	Note            string            `json:"note,omitempty" jsonschema_description:"Note to attach to request"`
 }
 
-// ReplayFromDbArgs defines the parameters for replaying a request stored in
-// the project SQLite database.
-type ReplayFromDbArgs struct {
-	RequestID     int               `json:"requestId" jsonschema:"required" jsonschema_description:"request_id from project SQLite DB"`
-	ModifyHeaders map[string]string `json:"modifyHeaders,omitempty" jsonschema_description:"Headers to add or replace"`
-	ModifyBody    string            `json:"modifyBody,omitempty" jsonschema_description:"Replacement request body"`
-	InjectSession bool              `json:"injectSession,omitempty" jsonschema_description:"Inject active session cookies/headers"`
-	Note          string            `json:"note,omitempty" jsonschema_description:"Note for replayed request"`
-}
-
 // ---------------------------------------------------------------------------
 // sendHttpRequest handler
 // ---------------------------------------------------------------------------
@@ -350,98 +340,6 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 	}
 
 	return mcpJSONResult(result)
-}
-
-// ---------------------------------------------------------------------------
-// replayFromDb handler
-// ---------------------------------------------------------------------------
-
-func (backend *Backend) replayFromDbHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args ReplayFromDbArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	// 1. Fetch request from project SQLite DB
-	dbReq, err := getRequestFromProjectDB(args.RequestID)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	// 2. Reconstruct raw HTTP request from stored headers + body
-	var rawBuilder strings.Builder
-	rawBuilder.WriteString(dbReq.RequestHeaders)
-
-	// 3. Apply header modifications
-	rawStr := rawBuilder.String()
-	for k, v := range args.ModifyHeaders {
-		rawStr = setHeaderValue(rawStr, k, v)
-	}
-
-	// 4. Apply body modification + update Content-Length
-	body := string(dbReq.RequestBody)
-	if args.ModifyBody != "" {
-		body = args.ModifyBody
-	}
-
-	// Ensure header section ends with \r\n\r\n, then append body
-	rawStr = strings.TrimRight(rawStr, "\r\n")
-	rawStr += "\r\n"
-
-	// Update Content-Length if body is present
-	if body != "" {
-		rawStr = setHeaderValue(rawStr, "Content-Length", strconv.Itoa(len(body)))
-	}
-	rawStr += "\r\n" + body
-
-	// 5. Session injection if requested
-	if args.InjectSession {
-		injected, injErr := backend.injectSessionIntoRequest(rawStr)
-		if injErr == nil {
-			rawStr = injected
-		}
-	}
-
-	// 6. CRLF normalize
-	rawStr = normalizeCRLF(rawStr)
-
-	// Derive connection params
-	tls := strings.ToLower(dbReq.Protocol) == "https"
-	portStr := strconv.Itoa(dbReq.Port)
-	scheme := dbReq.Protocol
-	if scheme == "" {
-		scheme = "http"
-	}
-
-	// 7. Send via sendRepeaterLogic
-	resp, err := backend.sendRepeaterLogic(&RepeaterSendRequest{
-		Host:        dbReq.Host,
-		Port:        portStr,
-		TLS:         tls,
-		Request:     rawStr,
-		Timeout:     30,
-		HTTP2:       false,
-		Index:       0,
-		Url:         fmt.Sprintf("%s://%s:%d", scheme, dbReq.Host, dbReq.Port),
-		Note:        args.Note,
-		GeneratedBy: "ai/mcp/replay",
-	})
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	// 8. Return response
-	statusCode := parseStatusCode(resp.Response)
-	parsedHeaders := parseResponseHeaders(resp.Response)
-
-	return mcpJSONResult(map[string]any{
-		"statusCode":        statusCode,
-		"response":          resp.Response,
-		"headers":           parsedHeaders,
-		"requestId":         resp.UserData.ID,
-		"time":              resp.Time,
-		"originalRequestId": args.RequestID,
-	})
 }
 
 // ---------------------------------------------------------------------------

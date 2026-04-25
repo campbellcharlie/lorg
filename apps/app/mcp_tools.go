@@ -47,18 +47,6 @@ type HostPrintRowsArgs struct {
 	Filter string `json:"filter" jsonschema:"required" jsonschema_description:"filter the results for faster search"`
 }
 
-type SendRequestArgs struct {
-	TLS                     bool     `json:"tls" jsonschema:"required" jsonschema_description:"use https or http"`
-	Host                    string   `json:"host" jsonschema:"required" jsonschema_description:"the host to send the request to"`
-	Port                    int      `json:"port" jsonschema:"required" jsonschema_description:"the port to send the request to"`
-	HttpVersion             int      `json:"httpVersion" jsonschema:"required" jsonschema_description:"1 or 2"`
-	AttachToIndex           float64  `json:"attachToIndex" jsonschema:"required" jsonschema_description:"origin index of request you are modifying"`
-	Request                 string   `json:"request" jsonschema:"required" jsonschema_description:"raw request"`
-	Note                    string   `json:"note" jsonschema:"required" jsonschema_description:"the note to attach to the request"`
-	Labels                  []string `json:"labels,omitempty" jsonschema_description:"the labels to attach to the request"`
-	AutoUpdateContentLength *bool    `json:"autoUpdateContentLength,omitempty" jsonschema_description:"auto update content length (default: true). Set to false for raw byte-level control."`
-}
-
 type ListHostsArgs struct {
 	Search string `json:"search,omitempty" jsonschema_description:"the search to get the table for, use empty string to get all results"`
 	Page   int    `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
@@ -364,59 +352,6 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 	}
 
 	return mcpJSONResult(result)
-}
-
-func (backend *Backend) sendRequestHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args SendRequestArgs
-	if err := request.BindArguments(&args); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	// Extract just the hostname (e.g. "https://example.com/path" → "example.com")
-	host := args.Host
-	if u, err := url.Parse(host); err == nil && u.Host != "" {
-		host = u.Hostname()
-	}
-
-	port := fmt.Sprintf("%d", args.Port)
-	http2 := args.HttpVersion == 2
-
-	// Normalize line endings: ensure \r\n (CRLF) for HTTP compliance.
-	// MCP clients may send \n only, which causes servers to not recognize headers.
-	rawReq := args.Request
-	rawReq = strings.ReplaceAll(rawReq, "\r\n", "\n") // normalize to LF first
-	rawReq = strings.ReplaceAll(rawReq, "\n", "\r\n") // then convert all to CRLF
-
-	// Auto-inject missing headers for realistic traffic
-	rawReq = injectDefaultHeaders(rawReq)
-
-	// Update Content-Length based on actual body length after normalization.
-	// Handles the common case where the LLM omits Content-Length on POST requests.
-	if args.AutoUpdateContentLength == nil || *args.AutoUpdateContentLength {
-		headerSection, bodyPart := splitRequestHeadersAndBody(rawReq)
-		if bodyPart != "" {
-			headerSection = setHeaderInSection(headerSection, "Content-Length", fmt.Sprintf("%d", len(bodyPart)))
-			rawReq = headerSection + "\r\n\r\n" + bodyPart
-		}
-	}
-
-	resp, err := backend.sendRepeaterLogic(&RepeaterSendRequest{
-		Host:        host,
-		Port:        port,
-		TLS:         args.TLS,
-		Request:     rawReq,
-		Timeout:     30,
-		HTTP2:       http2,
-		Index:       args.AttachToIndex,
-		Url:         fmt.Sprintf("%s://%s:%d", map[bool]string{true: "https", false: "http"}[args.TLS], host, args.Port),
-		Note:        args.Note,
-		GeneratedBy: "ai/mcp/claudecode",
-	})
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return mcpJSONResult(resp)
 }
 
 func (backend *Backend) listHostsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

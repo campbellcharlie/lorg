@@ -139,27 +139,11 @@ func (backend *Backend) mcpInit() {
 	// =====================================================================
 
 	s.AddTool(
-		mcp.NewTool("sendRequest",
-			mcp.WithDescription("Send a raw HTTP request. Mind the terminating \\r\\n\\r\\n and content length."),
-			mcp.WithInputSchema[SendRequestArgs](),
-		),
-		backend.sendRequestHandler,
-	)
-
-	s.AddTool(
 		mcp.NewTool("sendHttpRequest",
-			mcp.WithDescription("Send a structured HTTP request with session injection, CSRF handling, redirect following, and response extraction. The primary request tool."),
+			mcp.WithDescription("Send a structured HTTP request: method, url, headers, body, with session injection, CSRF handling, redirect following, and optional regex extraction from the response. The primary request tool — use this for one-off requests where you have all the parameters. For re-firing a captured request with small mutations, use mirror() instead (much cheaper). For raw byte control over the request line, use sendRaw."),
 			mcp.WithInputSchema[SendHttpRequestArgs](),
 		),
 		backend.sendHttpRequestHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("replayFromDb",
-			mcp.WithDescription("Replay a request from the project SQLite DB by request_id, with optional header/body modifications"),
-			mcp.WithInputSchema[ReplayFromDbArgs](),
-		),
-		backend.replayFromDbHandler,
 	)
 
 	s.AddTool(
@@ -520,7 +504,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("gatherContext",
-			mcp.WithDescription("Gather structured intelligence about a target host from captured traffic: endpoints, parameters, tech stack, status distribution, error signatures"),
+			mcp.WithDescription("Gather structured intelligence from the active project DB: endpoints, parameters, status distribution, MIME types, error signatures. Pass host to scope to one target (also adds tech stack from _hosts). Omit host for global stats across all hosts (also returns top-50 host breakdown). This is the canonical replacement for the old getTrafficStats / getStatusDistribution / getEndpoints / getParameters tools."),
 			mcp.WithInputSchema[GatherContextArgs](),
 		),
 		backend.gatherContextHandler,
@@ -572,49 +556,10 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("searchTraffic",
-			mcp.WithDescription("Search traffic by host, path, method, status, or raw content"),
+			mcp.WithDescription("Search captured traffic by host/path/method/status, or substring/regex on raw request/response. Set regex=true and pass query as a Go regex pattern (regexSource: request|response|both, default both). For per-host stats and endpoint discovery use gatherContext instead."),
 			mcp.WithInputSchema[SearchTrafficArgs](),
 		),
 		backend.searchTrafficHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("searchTrafficRegex",
-			mcp.WithDescription("Search traffic with regex patterns in request/response content"),
-			mcp.WithInputSchema[SearchTrafficRegexArgs](),
-		),
-		backend.searchTrafficRegexHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("getTrafficStats",
-			mcp.WithDescription("Get aggregate traffic statistics: total requests, hosts, methods"),
-		),
-		backend.getTrafficStatsHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("getStatusDistribution",
-			mcp.WithDescription("Get HTTP response status code distribution"),
-			mcp.WithInputSchema[GetStatusDistributionArgs](),
-		),
-		backend.getStatusDistributionHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("getEndpoints",
-			mcp.WithDescription("Get unique URL endpoints discovered in traffic"),
-			mcp.WithInputSchema[GetEndpointsArgs](),
-		),
-		backend.getEndpointsHandler,
-	)
-
-	s.AddTool(
-		mcp.NewTool("getParameters",
-			mcp.WithDescription("Get unique query parameters extracted from traffic"),
-			mcp.WithInputSchema[GetParametersArgs](),
-		),
-		backend.getParametersHandler,
 	)
 
 	s.AddTool(
