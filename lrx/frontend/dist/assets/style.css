@@ -2797,6 +2797,35 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
 .intercept-item:hover {
   background: var(--bg-hover);
 }
+.intercept-host { color: var(--text-secondary); flex-shrink: 0; }
+.intercept-path { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+/* Per-row Forward/Drop. Hidden until row hover so the queue stays calm. */
+.intercept-row-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms;
+  flex-shrink: 0;
+}
+.intercept-item:hover .intercept-row-actions,
+.intercept-item:focus-within .intercept-row-actions { opacity: 1; }
+.btn-row {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.btn-row-fwd:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+.btn-row-drop:hover { background: rgba(248, 113, 113, 0.14); color: var(--red); border-color: var(--red); }
 .intercept-editor {
   flex: 1;
   display: flex;
