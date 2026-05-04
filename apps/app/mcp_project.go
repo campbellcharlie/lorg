@@ -84,13 +84,32 @@ func (c *trafficLoggingConfig) shouldLog(generatedBy string) bool {
 
 // ProjectDB maintains an open SQLite connection for real-time traffic logging.
 // All exported methods are goroutine-safe.
+//
+// Two pointers, by design:
+//
+//   - Active (db / name / dbPath): the write target. Captured proxy traffic,
+//     repeater sends, intercept edits, MCP write tools — all writes go here.
+//     Only changes when SetProject is called (via /api/project/setActive).
+//   - Viewed (viewedDB / viewedName / viewedPath): the UI's read target.
+//     Defaults to Active. SetViewed opens a separate read-only handle so the
+//     user can browse another project without affecting writes. ViewedDB()
+//     falls back to the Active handle when no viewer is set.
+//
+// MCP read tools take an optional `project` arg and resolve through the
+// readDBCache below, independent of Viewed — so the AI can scope reads
+// per-call without touching the user's UI selection.
 type ProjectDB struct {
-	mu    sync.Mutex
-	db    *sql.DB
-	name  string // current project name (e.g. "MyProject")
+	mu     sync.Mutex
+	db     *sql.DB
+	name   string // current project name (e.g. "MyProject")
 	dbPath string // full path to the current .db file
 	dbDir  string // directory where .db files live
 	ready  bool
+
+	// Read-only viewer for the UI. Nil = "viewing active".
+	viewedDB   *sql.DB
+	viewedName string
+	viewedPath string
 }
 
 // Init opens the default TemporaryProject.db in dbDir.
@@ -463,6 +482,13 @@ func (p *ProjectDB) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.viewedDB != nil && p.viewedDB != p.db {
+		_ = p.viewedDB.Close()
+	}
+	p.viewedDB = nil
+	p.viewedName = ""
+	p.viewedPath = ""
+
 	if p.db != nil {
 		_ = p.db.Close()
 		p.db = nil
@@ -470,22 +496,255 @@ func (p *ProjectDB) Close() {
 	p.ready = false
 }
 
-// Info returns a snapshot of the current project state.
+// SetViewed opens a separate read-only handle on a different project DB so
+// the UI can browse it without disturbing the Active write target. Calling
+// with the Active project's name (or empty name) clears any prior viewer
+// and falls back to the Active handle.
+//
+// Subsequent UI reads should route through ViewedDB(); writes still use
+// the Active handle (db) so they remain "sticky" to the project the user
+// is actually working on.
+func (p *ProjectDB) SetViewed(name string, dbDir string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	sanitized := sanitizeProjectName(name)
+
+	// Empty name or pointing at Active = clear viewer.
+	if sanitized == "" || sanitized == p.name {
+		if p.viewedDB != nil && p.viewedDB != p.db {
+			_ = p.viewedDB.Close()
+		}
+		p.viewedDB = nil
+		p.viewedName = ""
+		p.viewedPath = ""
+		return nil
+	}
+
+	dir := dbDir
+	if dir == "" {
+		dir = p.dbDir
+	}
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("projectDB.SetViewed: cannot determine home directory: %w", err)
+		}
+		dir = home
+	}
+
+	dbFile := filepath.Join(dir, sanitized+".db")
+	if _, err := os.Stat(dbFile); err != nil {
+		return fmt.Errorf("projectDB.SetViewed: %s not found at %s", sanitized, dbFile)
+	}
+
+	// Read-only attach. mode=ro + immutable=0 keeps the WAL writer (the
+	// Active proxy goroutines) from being blocked. _query_only further
+	// rejects any DML statements that slip through a misclassified handler.
+	dsn := fmt.Sprintf("file:%s?mode=ro&_query_only=on&_busy_timeout=5000", dbFile)
+	newDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("projectDB.SetViewed: open %s: %w", dbFile, err)
+	}
+	if err := newDB.Ping(); err != nil {
+		_ = newDB.Close()
+		return fmt.Errorf("projectDB.SetViewed: ping %s: %w", dbFile, err)
+	}
+
+	// Swap & close the old viewer (if any).
+	if p.viewedDB != nil && p.viewedDB != p.db {
+		_ = p.viewedDB.Close()
+	}
+	p.viewedDB = newDB
+	p.viewedName = sanitized
+	p.viewedPath = dbFile
+
+	log.Printf("[ProjectDB] viewer opened: %s", dbFile)
+	return nil
+}
+
+// ClearViewed drops any read-only viewer so subsequent UI reads route
+// through the Active handle. Equivalent to SetViewed("", "").
+func (p *ProjectDB) ClearViewed() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.viewedDB != nil && p.viewedDB != p.db {
+		_ = p.viewedDB.Close()
+	}
+	p.viewedDB = nil
+	p.viewedName = ""
+	p.viewedPath = ""
+}
+
+// ViewedDB returns the handle UI read endpoints should use. Falls back to
+// the Active handle when no viewer is set.
+func (p *ProjectDB) ViewedDB() *sql.DB {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.viewedDB != nil {
+		return p.viewedDB
+	}
+	return p.db
+}
+
+// UIRead atomically returns the handle and project name UI read endpoints
+// should use, plus a "ready" flag. When a separate viewer is set it returns
+// (viewedDB, viewedName, true); otherwise (db, name, ready). Used by
+// traffic_list / traffic_detail / etc. so they grab a single coherent
+// snapshot under the mutex instead of three separate field reads.
+func (p *ProjectDB) UIRead() (db *sql.DB, name string, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.viewedDB != nil {
+		return p.viewedDB, p.viewedName, true
+	}
+	return p.db, p.name, p.ready
+}
+
+// IsViewingActive reports whether the UI is currently looking at the
+// Active project (i.e. no separate viewer set). UI write handlers should
+// gate on this — return 409 when false so writes can't accidentally
+// target a project the user is just browsing.
+func (p *ProjectDB) IsViewingActive() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.viewedDB == nil || p.viewedDB == p.db
+}
+
+// ActiveAndViewedNames returns a snapshot of the Active and Viewed names
+// under a single mutex acquisition. Used by the write-gate to populate
+// 409 responses with both names without racing.
+func (p *ProjectDB) ActiveAndViewedNames() (active, viewed string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	v := p.viewedName
+	if v == "" {
+		v = p.name
+	}
+	return p.name, v
+}
+
+// ViewedName returns the name of the project currently being viewed,
+// falling back to the Active name when no separate viewer is set.
+func (p *ProjectDB) ViewedName() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.viewedName != "" {
+		return p.viewedName
+	}
+	return p.name
+}
+
+// ---------------------------------------------------------------------------
+// readDBCache: per-call read-only handles for MCP tools that take a
+// `project` arg. Kept separate from the UI's viewedDB so an LLM can scope
+// reads per-call without affecting what the user has selected on screen.
+// ---------------------------------------------------------------------------
+
+type readDBCacheEntry struct {
+	db   *sql.DB
+	path string
+}
+
+var readDBCache = struct {
+	mu      sync.Mutex
+	entries map[string]readDBCacheEntry // key = absolute dbPath
+}{entries: make(map[string]readDBCacheEntry)}
+
+// resolveReadDB returns a read-only sql.DB for the given project name.
+// Empty name → Active handle (the default). When a name is provided that
+// matches Active, returns Active. Otherwise opens (or reuses) a cached
+// read-only handle to <dbDir>/<name>.db.
+//
+// Callers must NOT close the returned handle.
+func resolveReadDB(name string) (*sql.DB, error) {
+	if name == "" {
+		return projectDB.db, nil
+	}
+	sanitized := sanitizeProjectName(name)
+	if sanitized == "" {
+		return projectDB.db, nil
+	}
+
+	projectDB.mu.Lock()
+	if sanitized == projectDB.name {
+		db := projectDB.db
+		projectDB.mu.Unlock()
+		return db, nil
+	}
+	dbDir := projectDB.dbDir
+	projectDB.mu.Unlock()
+
+	if dbDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolveReadDB: cannot determine home directory: %w", err)
+		}
+		dbDir = home
+	}
+	dbFile := filepath.Join(dbDir, sanitized+".db")
+
+	readDBCache.mu.Lock()
+	defer readDBCache.mu.Unlock()
+	if entry, ok := readDBCache.entries[dbFile]; ok {
+		return entry.db, nil
+	}
+
+	if _, err := os.Stat(dbFile); err != nil {
+		return nil, fmt.Errorf("resolveReadDB: project %q not found at %s", sanitized, dbFile)
+	}
+
+	dsn := fmt.Sprintf("file:%s?mode=ro&_query_only=on&_busy_timeout=5000", dbFile)
+	newDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("resolveReadDB: open %s: %w", dbFile, err)
+	}
+	if err := newDB.Ping(); err != nil {
+		_ = newDB.Close()
+		return nil, fmt.Errorf("resolveReadDB: ping %s: %w", dbFile, err)
+	}
+
+	readDBCache.entries[dbFile] = readDBCacheEntry{db: newDB, path: dbFile}
+	log.Printf("[ProjectDB] readDBCache: opened %s", dbFile)
+	return newDB, nil
+}
+
+// Info returns a snapshot of the current project state. The "viewed"
+// fields describe what the UI is currently reading from; when no separate
+// viewer is set they mirror the active fields. UI clients can compare
+// activeName vs viewedName to decide whether to show the read-only banner.
 func (p *ProjectDB) Info() map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	viewedName := p.viewedName
+	viewedPath := p.viewedPath
+	viewing := p.viewedDB
+	if viewedName == "" {
+		viewedName = p.name
+		viewedPath = p.dbPath
+		viewing = p.db
+	}
+
 	info := map[string]any{
+		// Legacy fields (kept so existing callers don't break).
 		"projectName":  p.name,
 		"dbPath":       p.dbPath,
 		"dbDir":        p.dbDir,
 		"isActive":     p.ready,
 		"trafficCount": 0,
+
+		// Active vs viewed split.
+		"activeName":      p.name,
+		"activePath":      p.dbPath,
+		"viewedName":      viewedName,
+		"viewedPath":      viewedPath,
+		"isViewingActive": p.viewedDB == nil || p.viewedDB == p.db,
 	}
 
-	if p.db != nil && p.ready {
+	if viewing != nil {
 		var count int
-		if err := p.db.QueryRow("SELECT count(*) FROM http_traffic").Scan(&count); err == nil {
+		if err := viewing.QueryRow("SELECT count(*) FROM http_traffic").Scan(&count); err == nil {
 			info["trafficCount"] = count
 		}
 	}

@@ -23,17 +23,19 @@ import (
 // ---------------------------------------------------------------------------
 
 type ClusterResponsesArgs struct {
-	Host   string `json:"host,omitempty" jsonschema_description:"Hostname filter (LIKE substring match). Optional."`
-	Method string `json:"method,omitempty" jsonschema_description:"HTTP method filter (e.g. GET, POST). Optional, exact match."`
-	Path   string `json:"path,omitempty" jsonschema_description:"Path filter (LIKE substring match). Optional."`
-	Limit  int    `json:"limit,omitempty" jsonschema_description:"Max clusters to return (default 50)"`
+	Host    string `json:"host,omitempty" jsonschema_description:"Hostname filter (LIKE substring match). Optional."`
+	Method  string `json:"method,omitempty" jsonschema_description:"HTTP method filter (e.g. GET, POST). Optional, exact match."`
+	Path    string `json:"path,omitempty" jsonschema_description:"Path filter (LIKE substring match). Optional."`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project tag filter. Independent from the UI's currently-viewed project."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max clusters to return (default 50)"`
 }
 
 type FindAnomaliesArgs struct {
-	Host   string `json:"host" jsonschema:"required" jsonschema_description:"Hostname (LIKE substring match)"`
-	Method string `json:"method,omitempty" jsonschema_description:"HTTP method filter (e.g. GET). Optional, exact match."`
-	Path   string `json:"path,omitempty" jsonschema_description:"Path filter (LIKE substring match). Optional."`
-	Limit  int    `json:"limit,omitempty" jsonschema_description:"Max anomalous rows to return (default 25)"`
+	Host    string `json:"host" jsonschema:"required" jsonschema_description:"Hostname (LIKE substring match)"`
+	Method  string `json:"method,omitempty" jsonschema_description:"HTTP method filter (e.g. GET). Optional, exact match."`
+	Path    string `json:"path,omitempty" jsonschema_description:"Path filter (LIKE substring match). Optional."`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project tag filter. Independent from the UI's currently-viewed project."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max anomalous rows to return (default 25)"`
 }
 
 type clusterRow struct {
@@ -70,7 +72,7 @@ func (backend *Backend) clusterResponsesHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError("backend database not initialized"), nil
 	}
 
-	where, whereArgs := buildClusterWhere(args.Host, args.Method, args.Path, true)
+	where, whereArgs := buildClusterWhereWithProject(args.Host, args.Method, args.Path, args.Project, true)
 
 	// Group by fingerprint, return cluster summaries with up to 5 sample IDs
 	// and 3 example "method path" strings each.
@@ -151,7 +153,7 @@ func (backend *Backend) findAnomaliesHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError("backend database not initialized"), nil
 	}
 
-	where, whereArgs := buildClusterWhere(args.Host, args.Method, args.Path, true)
+	where, whereArgs := buildClusterWhereWithProject(args.Host, args.Method, args.Path, args.Project, true)
 
 	// Step 1: find the modal fingerprint for this scope.
 	modalQ := `
@@ -230,6 +232,13 @@ func (backend *Backend) findAnomaliesHandler(ctx context.Context, request mcp.Ca
 // guarantees at least one condition (defaulting to "1=1") so the caller can
 // always concatenate "AND ..." after it.
 func buildClusterWhere(host, method, path string, requireOne bool) (string, []any) {
+	return buildClusterWhereWithProject(host, method, path, "", requireOne)
+}
+
+// buildClusterWhereWithProject is the project-aware variant. project=""
+// behaves identically to buildClusterWhere; otherwise an `AND project = ?`
+// clause is appended.
+func buildClusterWhereWithProject(host, method, path, project string, requireOne bool) (string, []any) {
 	var conds []string
 	var args []any
 
@@ -244,6 +253,10 @@ func buildClusterWhere(host, method, path string, requireOne bool) (string, []an
 	if p := strings.TrimSpace(path); p != "" {
 		conds = append(conds, "json_extract(req_json,'$.path') LIKE ?")
 		args = append(args, "%"+p+"%")
+	}
+	if pj := strings.TrimSpace(project); pj != "" {
+		conds = append(conds, "project = ?")
+		args = append(args, pj)
 	}
 
 	if len(conds) == 0 {

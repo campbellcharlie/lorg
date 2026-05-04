@@ -387,6 +387,7 @@ type ConsolidatedTrafficTagArgs struct {
 	RequestID int    `json:"requestId,omitempty" jsonschema_description:"request_id from project DB (add, get, delete)"`
 	Tag       string `json:"tag,omitempty" jsonschema_description:"Tag name (add, get, delete)"`
 	Note      string `json:"note,omitempty" jsonschema_description:"Optional note (add)"`
+	Project   string `json:"project,omitempty" jsonschema_description:"Optional project name to read tags from (get, list only). Defaults to active. Independent from the UI's currently-viewed project. Writes (add, delete) always go to active."`
 	Limit     int    `json:"limit,omitempty" jsonschema_description:"Max results (get, default: 100)"`
 }
 
@@ -666,6 +667,14 @@ type ConsolidatedHostArgs struct {
 	// modifyLabels / modifyNotes
 	Labels []HostLabelAction `json:"labels,omitempty" jsonschema_description:"Label actions to apply (modifyLabels). Each entry has its own action field: add|remove|toggle."`
 	Notes  []HostNoteAction  `json:"notes,omitempty" jsonschema_description:"Note actions to apply (modifyNotes). Each entry has its own action field: add|update|remove."`
+
+	// Optional project tag filter, only honored by `rows` (which surfaces
+	// captured requests for a host). list/info/sitemap don't honor it
+	// because the underlying _hosts and per-host site tables are global
+	// metadata — hosts exist across projects, the project tag lives on
+	// individual _data rows. Use rows when you need project-scoped
+	// per-host activity.
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project tag filter. Only honored by action=rows. Independent from the UI's currently-viewed project."`
 }
 
 func (backend *Backend) hostHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

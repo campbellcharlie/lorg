@@ -319,6 +319,58 @@ html, body {
   margin-top: 1px;
 }
 
+/* Active (write target) badge in the DB switcher list. The viewed item
+   keeps the .active class for highlighting; .write-target marks the row
+   whose star indicates "writes go here" so the user can see at a glance
+   that viewing != writing when the two diverge. */
+.project-item-active-badge {
+  color: var(--accent);
+  margin-right: 4px;
+  font-size: 10px;
+}
+.project-item.write-target:not(.active) {
+  border-left-color: var(--accent);
+  border-left-width: 2px;
+  border-left-style: solid;
+}
+
+/* "Set active" button — only renders on rows that aren't already active.
+   Visible on hover so the row stays compact when the user is just
+   browsing the list. */
+.project-item .btn-set-active {
+  display: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--border, #2a2a30);
+  color: var(--text-secondary);
+  border-radius: 3px;
+  font-size: 9px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.project-item:hover .btn-set-active {
+  display: inline-block;
+}
+.project-item .btn-set-active:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* When the user is viewing a read-only project, dim and disable the
+   buttons that fire UI writes. The backend gates these too (returns
+   409 from /api/repeater/send), but disabling client-side keeps the
+   UX honest. */
+body.viewing-readonly #rep-send,
+body.viewing-readonly #intercept-forward,
+body.viewing-readonly #btn-send-to-repeater,
+body.viewing-readonly #tpl-save {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 /* ============================================================
    Main Content
    ============================================================ */

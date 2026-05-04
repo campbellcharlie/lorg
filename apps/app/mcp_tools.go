@@ -64,6 +64,7 @@ type HostPrintRowsArgs struct {
 	Page    flexInt  `json:"page" jsonschema:"required" jsonschema_description:"the page to get the data from, start from 1"`
 	Filter  string   `json:"filter" jsonschema:"required" jsonschema_description:"filter the results for faster search"`
 	Concise flexBool `json:"concise,omitempty" jsonschema_description:"If true, return only id+method+path+status+length per row (~10x cheaper). Default: false (full req/resp JSON)."`
+	Project string   `json:"project,omitempty" jsonschema_description:"Optional project tag filter. Only includes rows whose underlying _data record was captured under this project. Independent from the UI's currently-viewed project."`
 }
 
 type ListHostsArgs struct {
@@ -264,6 +265,11 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 		}
 		dataRecord, err := backend.DB.FindRecordById("_data", dataID)
 		if err != nil || dataRecord == nil {
+			continue
+		}
+		// Project filter — drop rows whose _data record was captured under
+		// a different project tag than the agent asked for.
+		if args.Project != "" && dataRecord.GetString("project") != args.Project {
 			continue
 		}
 

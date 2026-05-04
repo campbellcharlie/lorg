@@ -29,7 +29,6 @@ cmd/lorg-app/build/bin/
 # Node.js dependencies
 node_modules/
 **/node_modules/
-*/electron/dist/
 
 # macOS system files
 .DS_Store

@@ -2777,14 +2777,55 @@
   }
 
   // --- Project Switcher ---
-  // On boot, surface the active DB name (from /api/project/list) so the
-  // top-bar label shows what's actually loaded instead of "All Traffic".
+  // The DB the UI is currently *viewing* may differ from the *active*
+  // (write target) DB. Surface the viewed name on the sidebar header,
+  // and toggle a body class so CSS can grey out write-only affordances
+  // (repeater send, intercept forward, etc.) when the user is browsing
+  // a read-only project.
   async function loadProjectInfo() {
     var projName = document.getElementById('project-name');
     if (!projName) return;
     var data = await api('/api/project/list', { silent: true });
-    var current = (data && data.currentName) || '';
-    projName.textContent = activeProjectFilter || current || 'All Traffic';
+    var viewed = (data && data.viewedName) || (data && data.currentName) || '';
+    var active = (data && data.activeName) || (data && data.currentName) || '';
+    projName.textContent = activeProjectFilter || viewed || 'All Traffic';
+    applyViewedState(active, viewed);
+  }
+
+  // applyViewedState sets body.viewing-readonly when the viewed DB is not
+  // the active one, and stamps a banner-friendly tooltip on the project
+  // header so the user can see at a glance what they're looking at vs
+  // what their proxy is capturing into.
+  function applyViewedState(active, viewed) {
+    var readOnly = !!(active && viewed && active !== viewed);
+    document.body.classList.toggle('viewing-readonly', readOnly);
+    var banner = document.getElementById('readonly-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'readonly-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 14px;background:#3a2a14;color:#f4c280;font-family:var(--font-sans,sans-serif);font-size:11px;text-align:center;border-bottom:1px solid #5c4220;display:none;';
+      document.body.appendChild(banner);
+    }
+    if (readOnly) {
+      banner.innerHTML = 'Viewing read-only: <strong>' + escapeHtml(viewed) + '</strong>'
+        + ' &nbsp;·&nbsp; writes go to active: <strong>' + escapeHtml(active) + '</strong>'
+        + ' &nbsp;·&nbsp; <a href="#" id="readonly-banner-back" style="color:#f4c280;text-decoration:underline;">switch back</a>';
+      banner.style.display = 'block';
+      var back = document.getElementById('readonly-banner-back');
+      if (back) {
+        back.onclick = async function(ev) {
+          ev.preventDefault();
+          await api('/api/project/switch', { method: 'POST', body: JSON.stringify({ name: '' }) });
+          activeProjectFilter = '';
+          loadProjectInfo();
+          loadProjectList();
+          loadTraffic();
+          loadHosts();
+        };
+      }
+    } else {
+      banner.style.display = 'none';
+    }
   }
 
   async function loadProjectList() {
@@ -2814,13 +2855,25 @@
     var html = '';
 
     // --- DB switcher section ---
+    // Two orthogonal concepts on each item:
+    //   - viewing (UI read target): clicking flips the viewer, marked by .active class
+    //   - active (write target):    proxy/repeater/MCP writes land here; marked by ★
+    // Items that aren't currently active get a "Set active" button so the
+    // user can promote them when they actually want to start writing here.
     if (dbs.length > 0) {
-      html += '<div class="project-section-label">Switch database</div>';
+      html += '<div class="project-section-label">Switch database (read-only browse)</div>';
       html += dbs.map(function(p) {
-        var activeClass = p.active ? 'project-item active' : 'project-item';
-        return '<div class="' + activeClass + '" data-db-name="' + escapeAttr(p.name) + '" title="' + escapeAttr(p.path) + '">' +
-          '<span class="project-item-name">' + escapeHtml(p.name) + '</span>' +
+        var classes = ['project-item'];
+        if (p.viewing) classes.push('active');         // currently being viewed
+        if (p.active)  classes.push('write-target');   // styling hook (writes land here)
+        var badge = p.active ? '<span class="project-item-active-badge" title="Active write target">★</span>' : '';
+        var setActiveBtn = p.active
+          ? ''
+          : '<button class="btn-set-active" data-set-active="' + escapeAttr(p.name) + '" title="Promote to active (writes go here)">Set active</button>';
+        return '<div class="' + classes.join(' ') + '" data-db-name="' + escapeAttr(p.name) + '" title="' + escapeAttr(p.path) + '">' +
+          '<span class="project-item-name">' + badge + escapeHtml(p.name) + '</span>' +
           '<span class="project-item-size">' + escapeHtml(fmtSize(p.size)) + '</span>' +
+          setActiveBtn +
           '</div>';
       }).join('');
     } else {
@@ -2847,9 +2900,15 @@
 
     container.innerHTML = html;
 
-    // DB switcher click — calls /api/project/switch then refreshes lists
+    // DB switcher click — flips the read-only VIEWER (not active write target).
+    // Active is changed only via the explicit "Set active" button.
     $$('[data-db-name]', container).forEach(function(el) {
-      el.addEventListener('click', async function() {
+      el.addEventListener('click', async function(ev) {
+        // Don't hijack the click when the user actually meant the inner
+        // "Set active" button (which has its own handler below).
+        if (ev.target && ev.target.closest('.btn-set-active')) {
+          return;
+        }
         var name = el.dataset.dbName;
         var resp = await api('/api/project/switch', {
           method: 'POST',
@@ -2860,6 +2919,35 @@
           if (projName) projName.textContent = name;
           activeProjectFilter = '';
           closeProjectDropdown();
+          // Refresh the read-only banner + Active/Viewed badges since the
+          // viewer just flipped.
+          loadProjectInfo();
+          loadProjectList();
+          loadTraffic();
+          loadHosts();
+        }
+      });
+    });
+
+    // "Set active" button — promote a viewed DB to the write target.
+    // Distinct from the row click so the user has to opt in deliberately.
+    $$('.btn-set-active', container).forEach(function(btn) {
+      btn.addEventListener('click', async function(ev) {
+        ev.stopPropagation();
+        var name = btn.dataset.setActive;
+        if (!name) return;
+        if (!confirm('Set "' + name + '" as the active write target? All future captured/repeater traffic will go here.')) {
+          return;
+        }
+        var resp = await api('/api/project/setActive', {
+          method: 'POST',
+          body: JSON.stringify({ name: name }),
+        });
+        if (resp) {
+          activeProjectFilter = '';
+          closeProjectDropdown();
+          loadProjectInfo();
+          loadProjectList();
           loadTraffic();
           loadHosts();
         }

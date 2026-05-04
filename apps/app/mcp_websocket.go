@@ -18,6 +18,7 @@ type WebSocketArgs struct {
 	RequestID string `json:"requestId,omitempty" jsonschema_description:"Filter by proxy request ID (connection identifier)"`
 	Query     string `json:"query,omitempty" jsonschema_description:"Search string for message payloads"`
 	Direction string `json:"direction,omitempty" jsonschema_description:"Filter by direction: send or recv"`
+	Project   string `json:"project,omitempty" jsonschema_description:"Optional project tag filter — only show WebSocket messages from connections captured under this project. Independent from the UI's currently-viewed project."`
 	Limit     int    `json:"limit,omitempty" jsonschema_description:"Max results (default 100)"`
 }
 
@@ -66,6 +67,14 @@ func (backend *Backend) wsListMessagesHandler(args WebSocketArgs) (*mcp.CallTool
 	if args.Direction != "" {
 		conditions = append(conditions, "direction = ?")
 		queryArgs = append(queryArgs, args.Direction)
+	}
+	if args.Project != "" {
+		// _websockets has no project column; the link to a project goes
+		// through the upgrade request stored in _data (joined via
+		// data_index). Filter messages whose upgrade request was captured
+		// under this project.
+		conditions = append(conditions, `data_index IN (SELECT "index" FROM _data WHERE project = ?)`)
+		queryArgs = append(queryArgs, args.Project)
 	}
 
 	where := "1=1"
@@ -133,6 +142,10 @@ func (backend *Backend) wsSearchHandler(args WebSocketArgs) (*mcp.CallToolResult
 	if args.Direction != "" {
 		conditions = append(conditions, "direction = ?")
 		queryArgs = append(queryArgs, args.Direction)
+	}
+	if args.Project != "" {
+		conditions = append(conditions, `data_index IN (SELECT "index" FROM _data WHERE project = ?)`)
+		queryArgs = append(queryArgs, args.Project)
 	}
 
 	where := strings.Join(conditions, " AND ")
@@ -210,16 +223,24 @@ func (backend *Backend) wsGetConnectionHandler(args WebSocketArgs) (*mcp.CallToo
 func (backend *Backend) wsListConnectionsHandler(args WebSocketArgs) (*mcp.CallToolResult, error) {
 	limit := clampWSLimit(args.Limit, 50, 200)
 
+	whereClause := ""
+	queryParams := []any{}
+	if args.Project != "" {
+		whereClause = ` WHERE data_index IN (SELECT "index" FROM _data WHERE project = ?)`
+		queryParams = append(queryParams, args.Project)
+	}
+	queryParams = append(queryParams, limit)
+
 	rows, err := backend.DB.Query(`
 		SELECT proxy_id, host, path, url,
 		       MIN(timestamp) AS first_msg,
 		       MAX(timestamp) AS last_msg,
 		       COUNT(*) AS msg_count
-		FROM _websockets
+		FROM _websockets`+whereClause+`
 		GROUP BY proxy_id
 		ORDER BY first_msg DESC
 		LIMIT ?
-	`, limit)
+	`, queryParams...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}

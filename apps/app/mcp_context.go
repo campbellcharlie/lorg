@@ -13,8 +13,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type GatherContextArgs struct {
-	Host  string `json:"host,omitempty" jsonschema_description:"Target hostname to gather context for. Omit or pass empty to gather global stats across all hosts in the active project DB."`
-	Limit int    `json:"limit,omitempty" jsonschema_description:"Max traffic entries to analyze (default 500)"`
+	Host    string `json:"host,omitempty" jsonschema_description:"Target hostname to gather context for. Omit or pass empty to gather global stats across all hosts in the active project DB."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max traffic entries to analyze (default 500)"`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project name to read from. Defaults to the active project. Lets the agent scope reads to another captured project without affecting the UI's view."`
 }
 
 // ---------------------------------------------------------------------------
@@ -33,11 +34,17 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 	}
 
 	if projectDB == nil || projectDB.db == nil {
-		return mcp.NewToolResultError("project database not initialized. Use project(action:'list') / project(action:'switch', name:'...') to activate a DB first."), nil
+		return mcp.NewToolResultError("project database not initialized. Use project(action:'list') / project(action:'setActive', name:'...') to activate a DB first."), nil
 	}
 
-	projectDB.mu.Lock()
-	defer projectDB.mu.Unlock()
+	// Resolve the read handle: defaults to the active DB, or opens a
+	// cached read-only handle on a different project when args.Project
+	// is set. resolveReadDB never returns the active handle's mutex —
+	// callers shouldn't hold projectDB.mu around a query loop.
+	db, err := resolveReadDB(args.Project)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	// Build a where clause + args set we reuse across every query. Empty
 	// host = global stats across the entire project DB.
@@ -54,7 +61,7 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 		whereClause,
 	)
 	endpointArgs := append(append([]any{}, whereArgs...), limit)
-	endpointRows, err := projectDB.db.Query(endpointSQL, endpointArgs...)
+	endpointRows, err := db.Query(endpointSQL, endpointArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("endpoint query error: %v", err)), nil
 	}
@@ -76,7 +83,7 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 		"SELECT status_code, COUNT(*) as cnt FROM http_traffic WHERE %s GROUP BY status_code ORDER BY cnt DESC",
 		whereClause,
 	)
-	statusRows, err := projectDB.db.Query(statusSQL, whereArgs...)
+	statusRows, err := db.Query(statusSQL, whereArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("status query error: %v", err)), nil
 	}
@@ -95,7 +102,7 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 		whereClause,
 	)
 	paramArgs := append(append([]any{}, whereArgs...), limit)
-	paramRows, err := projectDB.db.Query(paramSQL, paramArgs...)
+	paramRows, err := db.Query(paramSQL, paramArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("param query error: %v", err)), nil
 	}
@@ -121,14 +128,14 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 	// 4. Total request count
 	var totalRequests int
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM http_traffic WHERE %s", whereClause)
-	_ = projectDB.db.QueryRow(countSQL, whereArgs...).Scan(&totalRequests)
+	_ = db.QueryRow(countSQL, whereArgs...).Scan(&totalRequests)
 
 	// 5. Content types (MIME distribution)
 	mimeSQL := fmt.Sprintf(
 		"SELECT mime_type, COUNT(*) as cnt FROM http_traffic WHERE %s AND mime_type != '' GROUP BY mime_type ORDER BY cnt DESC LIMIT 20",
 		whereClause,
 	)
-	mimeRows, err := projectDB.db.Query(mimeSQL, whereArgs...)
+	mimeRows, err := db.Query(mimeSQL, whereArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("mime query error: %v", err)), nil
 	}
@@ -146,7 +153,7 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 	// fast "what's in this DB" overview without needing a second tool call.
 	var hostBreakdown []map[string]any
 	if args.Host == "" {
-		hostRows, hErr := projectDB.db.Query(
+		hostRows, hErr := db.Query(
 			`SELECT host, COUNT(*) as cnt FROM http_traffic GROUP BY host ORDER BY cnt DESC LIMIT 50`,
 		)
 		if hErr == nil {
@@ -191,7 +198,7 @@ func (backend *Backend) gatherContextHandler(ctx context.Context, request mcp.Ca
 		Path   string `json:"path"`
 	}
 	var errors []errorSig
-	if errorRows, eErr := projectDB.db.Query(errorSQL, whereArgs...); eErr == nil {
+	if errorRows, eErr := db.Query(errorSQL, whereArgs...); eErr == nil {
 		for errorRows.Next() {
 			var e errorSig
 			if errorRows.Scan(&e.Status, &e.Path) == nil {

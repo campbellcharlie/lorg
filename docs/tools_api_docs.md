@@ -1,8 +1,8 @@
-# Grroxy Tools API Documentation
+# lorg Tools API Documentation
 
 ## Overview
 
-The Grroxy Tools application provides advanced fuzzing capabilities for web application security testing. It supports multiple fuzzing modes, wordlist-based payload generation, and concurrent request execution with both HTTP/1.1 and HTTP/2 support.
+The lorg Tools application provides advanced fuzzing capabilities for web application security testing. It supports multiple fuzzing modes, wordlist-based payload generation, and concurrent request execution with both HTTP/1.1 and HTTP/2 support.
 
 **Base URL**: `http://{host}:{port}/api`
 
