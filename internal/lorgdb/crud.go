@@ -253,7 +253,7 @@ func scanRecords(tableName string, rows *sql.Rows) ([]*Record, error) {
 			if b, ok := val.([]byte); ok {
 				val = string(b)
 			}
-			// Auto-parse JSON strings so callers get maps/slices like PocketBase.
+			// Auto-parse JSON strings so callers get maps/slices.
 			if s, ok := val.(string); ok && len(s) > 0 && (s[0] == '{' || s[0] == '[') {
 				var parsed any
 				if json.Unmarshal([]byte(s), &parsed) == nil {

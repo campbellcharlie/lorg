@@ -8,8 +8,8 @@ import (
 	"github.com/campbellcharlie/lorg/internal/utils"
 )
 
-// Record is a thin replacement for *models.Record. It stores column values in
-// a flat map, just like PocketBase records are stored as SQLite rows.
+// Record represents a single row from a collection table. It stores column
+// values in a flat map keyed by column name.
 type Record struct {
 	Id        string
 	TableName string

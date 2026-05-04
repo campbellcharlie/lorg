@@ -1,6 +1,5 @@
-// Package lorgdb provides a lightweight SQLite wrapper that replaces PocketBase's
-// DAO layer. It opens the same data.db file PocketBase used, so no data migration
-// is required.
+// Package lorgdb provides a lightweight SQLite wrapper used as lorg's
+// data-access layer.
 package lorgdb
 
 import (

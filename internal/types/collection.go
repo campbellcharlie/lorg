@@ -5,7 +5,6 @@ import (
 )
 
 // SchemaField describes a single field in a collection schema.
-// This replaces the PocketBase schema.SchemaField type.
 type SchemaField struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`

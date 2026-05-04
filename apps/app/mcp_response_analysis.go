@@ -656,12 +656,12 @@ func (backend *Backend) analyzeResponseKeywordsHandler(ctx context.Context, requ
 }
 
 // ---------------------------------------------------------------------------
-// compareTrafficById: compare two traffic entries by PocketBase ID
+// compareTrafficById: compare two traffic entries by activeID
 // ---------------------------------------------------------------------------
 
 type CompareTrafficByIdArgs struct {
-	ID1           string   `json:"id1" jsonschema:"required" jsonschema_description:"First request activeID (from PocketBase)"`
-	ID2           string   `json:"id2" jsonschema:"required" jsonschema_description:"Second request activeID (from PocketBase)"`
+	ID1           string   `json:"id1" jsonschema:"required" jsonschema_description:"First request activeID (from lorgdb)"`
+	ID2           string   `json:"id2" jsonschema:"required" jsonschema_description:"Second request activeID (from lorgdb)"`
 	IgnoreHeaders []string `json:"ignoreHeaders,omitempty" jsonschema_description:"Headers to ignore in comparison"`
 }
 

@@ -78,10 +78,10 @@ func (c *Client) Update(collection string, id string, body any) error {
 
 	resp, err := request.Patch(c.url + "/api/collections/{collection}/records/" + id)
 	if err != nil {
-		return fmt.Errorf("[update] can't send update request to pocketbase, err %w", err)
+		return fmt.Errorf("[update] request failed: %w", err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("[update] pocketbase returned status: %d, msg: %s, err %w",
+		return fmt.Errorf("[update] server returned status: %d, msg: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			ErrInvalidResponse,
@@ -106,11 +106,11 @@ func (c *Client) Create(collection string, body any) (types.ResponseCreate, erro
 
 	resp, err := request.Post(c.url + "/api/collections/{collection}/records")
 	if err != nil {
-		return response, fmt.Errorf("[create] can't send update request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[create] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
+		return response, fmt.Errorf("[create] server returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			"[body omitted]",
@@ -137,11 +137,11 @@ func (c *Client) CreateCollection(body any) (any, error) {
 
 	resp, err := request.Post(c.url + "/api/collections")
 	if err != nil {
-		return response, fmt.Errorf("[create] can't send create collection request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[create] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
+		return response, fmt.Errorf("[create] server returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			"[body omitted]",
@@ -170,11 +170,11 @@ func (c *Client) AddRequest(body types.AddRequestBodyType) (any, error) {
 
 	resp, err := request.Post(c.url + "/api/request/add")
 	if err != nil {
-		return response, fmt.Errorf("[create] can't send create request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[create] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
+		return response, fmt.Errorf("[create] server returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			"[body omitted]",
@@ -204,11 +204,11 @@ func (c *Client) PlaygroundNew(body types.PlaygroundNew) (any, error) {
 
 	resp, err := request.Post(c.url + "/api/playground/new")
 	if err != nil {
-		return response, fmt.Errorf("[create] can't send create playground request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[create] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
+		return response, fmt.Errorf("[create] server returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			"[body omitted]",
@@ -237,11 +237,11 @@ func (c *Client) PlaygroundAddChild(body types.PlaygroundAdd) (any, error) {
 
 	resp, err := request.Post(c.url + "/api/playground/add")
 	if err != nil {
-		return response, fmt.Errorf("[create] can't send create playground request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[create] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[create] pocketbase returned status: %d, msg: %s, body: %s, err %w",
+		return response, fmt.Errorf("[create] server returned status: %d, msg: %s, body: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			"[body omitted]",
@@ -266,11 +266,11 @@ func (c *Client) Delete(collection string, id string) error {
 
 	resp, err := request.Delete(c.url + "/api/collections/{collection}/records/{id}")
 	if err != nil {
-		return fmt.Errorf("[delete] can't send update request to pocketbase, err %w", err)
+		return fmt.Errorf("[delete] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return fmt.Errorf("[delete] pocketbase returned status: %d, msg: %s, err %w",
+		return fmt.Errorf("[delete] server returned status: %d, msg: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			ErrInvalidResponse,
@@ -306,11 +306,11 @@ func (c *Client) List(collection string, params types.ParamsList) (types.Respons
 
 	resp, err := request.Get(c.url + "/api/collections/{collection}/records")
 	if err != nil {
-		return response, fmt.Errorf("[list] can't send update request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[list] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[list] pocketbase returned status: %d, msg: %s, err %w",
+		return response, fmt.Errorf("[list] server returned status: %d, msg: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			ErrInvalidResponse,
@@ -340,11 +340,11 @@ func (c *Client) List(collection string, params types.ParamsList) (types.Respons
 
 // 	resp, err := request.Get(c.url + "/api/collections")
 // 	if err != nil {
-// 		return response, fmt.Errorf("[list] can't send update request to pocketbase, err %w", err)
+// 		return response, fmt.Errorf("[list] request failed: %w", err)
 // 	}
 
 // 	if resp.IsError() {
-// 		return response, fmt.Errorf("[list] pocketbase returned status: %d, msg: %s, err %w",
+// 		return response, fmt.Errorf("[list] server returned status: %d, msg: %s, err %w",
 // 			resp.StatusCode(),
 // 			resp.String(),
 // 			ErrInvalidResponse,
@@ -388,11 +388,11 @@ func (c *Client) List(collection string, params types.ParamsList) (types.Respons
 
 // 	resp, err := request.Post(c.url + "/api/collections")
 // 	if err != nil {
-// 		return fmt.Errorf("[collection] can't send update request to pocketbase, err %w", err)
+// 		return fmt.Errorf("[collection] request failed: %w", err)
 // 	}
 
 // 	if resp.IsError() {
-// 		return fmt.Errorf("[collection] pocketbase returned status: %d, msg: %s, err %w",
+// 		return fmt.Errorf("[collection] server returned status: %d, msg: %s, err %w",
 // 			resp.StatusCode(),
 // 			resp.String(),
 // 			ErrInvalidResponse,
@@ -415,11 +415,11 @@ func (c *Client) SitemapNew(data types.SitemapGet) error {
 
 	resp, err := request.Post(c.url + "/api/sitemap/new")
 	if err != nil {
-		return fmt.Errorf("[sitemap] can't send update request to pocketbase, err %w", err)
+		return fmt.Errorf("[sitemap] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return fmt.Errorf("[sitemap] pocketbase returned status: %d, msg: %s, err %w",
+		return fmt.Errorf("[sitemap] server returned status: %d, msg: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			ErrInvalidResponse,

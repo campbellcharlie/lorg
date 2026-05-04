@@ -26,7 +26,7 @@ func serve(projectPath string) {
 	conf.ProjectID = projectID
 	log.Printf("Project ID: %s", projectID)
 
-	// Open LorgDB (same data.db path PocketBase used)
+	// Open LorgDB
 	dbPath := filepath.Join(projectPath, "lorg", "pb_data", "data.db")
 	ldb, err := lorgdb.Open(dbPath)
 	if err != nil {

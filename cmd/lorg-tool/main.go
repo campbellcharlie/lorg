@@ -44,7 +44,8 @@ func main() {
 
 	fmt.Println("Working directory changed to:", projectPath)
 
-	// Open lorgdb for the tool's database
+	// Open lorgdb for the tool's database.
+	// Note: "pb_data" is the historical on-disk directory name kept for compatibility with existing project DBs.
 	dbPath := filepath.Join(projectPath, name, "pb_data", "data.db")
 	db, err := lorgdb.Open(dbPath)
 	if err != nil {

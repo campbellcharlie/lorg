@@ -146,7 +146,7 @@ func (backend *Backend) toolsServerStart(hostAddress, path, name string, onClose
 	onClose()
 }
 
-// Tools endpoint (PocketBase sub-instance removed — no longer supported)
+// Tools registers the tool sub-instance endpoint, which now returns HTTP 410 Gone.
 func (backend *Backend) Tools(e *echo.Echo) {
 	e.GET("/api/tool", func(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusGone, "tool sub-instances are no longer supported")
