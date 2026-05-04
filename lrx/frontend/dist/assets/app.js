@@ -134,6 +134,33 @@
 
     allTrafficData = data.items;
     applyClientFilter();
+    renderSparkline();
+  }
+
+  // Live request sparkline: 60 1-second buckets of `created` timestamps from
+  // the most recent poll. Updates on every loadTraffic() so it tracks the
+  // ~1.5s poll cadence. SVG is preserveAspectRatio=none so the 120-unit
+  // viewBox stretches to whatever pixel width the toolbar gives us.
+  function renderSparkline() {
+    var svg = document.getElementById('traffic-sparkline');
+    if (!svg) return;
+    var now = Date.now();
+    var buckets = new Array(60);
+    for (var i = 0; i < 60; i++) buckets[i] = 0;
+    for (var j = 0; j < allTrafficData.length; j++) {
+      var t = Date.parse(allTrafficData[j].created);
+      if (isNaN(t)) continue;
+      var ageSec = Math.floor((now - t) / 1000);
+      if (ageSec >= 0 && ageSec < 60) buckets[59 - ageSec]++;
+    }
+    var max = 1;
+    for (var k = 0; k < 60; k++) if (buckets[k] > max) max = buckets[k];
+    var bars = '';
+    for (var b = 0; b < 60; b++) {
+      var h = (buckets[b] / max) * 18;
+      bars += '<rect x="' + (b * 2) + '" y="' + (20 - h).toFixed(2) + '" width="1.6" height="' + h.toFixed(2) + '" fill="currentColor"/>';
+    }
+    svg.innerHTML = bars;
   }
 
   // Chip filter state — sets of method names and mime tokens that the
@@ -3589,12 +3616,41 @@
       }
     });
 
-    // Auto-refresh every 5 seconds
+    // Auto-refresh every 1.5s when on the traffic view — fast enough that
+    // an AI agent's bursts feel live without thrashing the API.
     setInterval(function() {
       if (currentView === 'traffic') {
         loadTraffic();
       }
-    }, 5000);
+    }, 1500);
+
+    // Sidebar collapse toggle. Persists to localStorage so it survives
+    // refreshes; dispatches a synthetic resize so the splitters re-derive
+    // their pinned widths against the new layout.
+    var sidebar = document.getElementById('sidebar');
+    var toggle = document.getElementById('sidebar-toggle');
+    function applySidebarCollapsed(collapsed) {
+      if (collapsed) sidebar.setAttribute('data-collapsed', '');
+      else sidebar.removeAttribute('data-collapsed');
+      if (toggle) toggle.innerHTML = collapsed ? '&raquo;' : '&laquo;';
+      try { localStorage.setItem('lorg-sidebar-collapsed', collapsed ? '1' : '0'); } catch(e) {}
+      window.dispatchEvent(new Event('resize'));
+    }
+    if (toggle && sidebar) {
+      toggle.addEventListener('click', function() {
+        applySidebarCollapsed(!sidebar.hasAttribute('data-collapsed'));
+      });
+      // Restore last state.
+      if (localStorage.getItem('lorg-sidebar-collapsed') === '1') applySidebarCollapsed(true);
+      // Backslash key toggles, like in some IDE shells.
+      document.addEventListener('keydown', function(e) {
+        if (e.key !== '\\') return;
+        var t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        e.preventDefault();
+        applySidebarCollapsed(!sidebar.hasAttribute('data-collapsed'));
+      });
+    }
 
     setInterval(checkStatus, 15000);
     setInterval(loadHosts, 10000);

@@ -87,6 +87,58 @@ html, body {
   padding: 0;
   z-index: 10;
   overflow-y: auto;
+  transition: width 180ms ease-out;
+}
+
+/* Collapsed sidebar: ~48px wide, only nav initials remain visible.
+   min-width updates instantly so the transitioned width can reach 48px;
+   transitioning both at once gets stuck at the original min-width in
+   Safari/WebKit. */
+#sidebar[data-collapsed] { width: 48px !important; min-width: 48px !important; }
+#sidebar[data-collapsed] .logo,
+#sidebar[data-collapsed] .section-title,
+#sidebar[data-collapsed] #hosts,
+#sidebar[data-collapsed] .project-section,
+#sidebar[data-collapsed] .sidebar-footer { display: none; }
+#sidebar[data-collapsed] .logo-row { justify-content: center; padding: 12px 0; }
+#sidebar[data-collapsed] .nav-btn { font-size: 0; padding: 10px 0; text-align: center; }
+#sidebar[data-collapsed] .nav-btn::before {
+  content: attr(data-letter);
+  font-size: 14px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.logo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+.sidebar-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-ghost);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 120ms;
+}
+.sidebar-toggle:hover { color: var(--accent); }
+
+/* Live request sparkline: 60s of 1s buckets sitting in the traffic toolbar.
+   Color bars in accent so they pop against the dark toolbar background. */
+.sparkline {
+  margin-left: auto;
+  color: var(--accent);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.sparkline rect { transition: y 200ms ease-out, height 200ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  #sidebar { transition: none; }
+  .sparkline rect { transition: none; }
 }
 
 .logo {
