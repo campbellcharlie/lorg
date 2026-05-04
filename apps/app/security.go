@@ -15,9 +15,21 @@ func requireAuth(c echo.Context) error {
 	return requireLocalhost(c)
 }
 
+// trustNetwork, when true, lets requireLocalhost permit non-loopback callers.
+// Opt-in via -allow-lan at startup; off by default so the gate's defense-in-depth
+// posture is the standard.
+var trustNetwork bool
+
+// SetTrustNetwork toggles whether non-loopback API callers are allowed.
+// Wired from main when -allow-lan is set.
+func SetTrustNetwork(v bool) { trustNetwork = v }
+
 // requireLocalhost checks that the request originates from a loopback address.
 // This is a defense-in-depth measure for sensitive endpoints.
 func requireLocalhost(c echo.Context) error {
+	if trustNetwork {
+		return nil
+	}
 	remoteAddr := c.RealIP()
 	if remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost" {
 		return nil
