@@ -10,6 +10,43 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// requireViewingActive returns a 409 response when the UI is currently
+// viewing a non-active project. UI write handlers call this at the top
+// so the user can't accidentally fire a request from a project they're
+// just browsing — the result would write to Active (which is correct)
+// but vanish from their view, looking like the action did nothing.
+//
+// Returns nil when it's safe to proceed. When blocked, writes the 409
+// directly and returns a non-nil error so the caller's
+// `if err := requireViewingActive(c); err != nil { return err }`
+// short-circuits BEFORE the handler attempts to bind/process the body
+// (otherwise echo would write a second response to the same connection).
+func requireViewingActive(c echo.Context) error {
+	if projectDB == nil || projectDB.IsViewingActive() {
+		return nil
+	}
+	active, viewed := projectDB.ActiveAndViewedNames()
+	if err := c.JSON(http.StatusConflict, map[string]any{
+		"error":        "viewing read-only project",
+		"viewed":       viewed,
+		"active":       active,
+		"hint":         "switch back to active (POST /api/project/switch with empty name) or promote (POST /api/project/setActive)",
+		"writeBlocked": true,
+	}); err != nil {
+		return err
+	}
+	// Sentinel: response already written; return a non-nil error so the
+	// handler bails out without writing a second body.
+	return errReadOnlyView
+}
+
+// errReadOnlyView is the sentinel error requireViewingActive returns when
+// the UI is on a read-only viewer. It's non-nil so the standard
+// `if err := requireViewingActive(c); err != nil { return err }` short-
+// circuits, but the response has already been written so echo doesn't
+// need to render it.
+var errReadOnlyView = echo.NewHTTPError(http.StatusConflict, "viewing read-only project")
+
 // ProjectEndpoints registers REST API routes for project management.
 func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 	// GET /api/project/info -- current project state
@@ -85,6 +122,10 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 		projectDB.mu.Lock()
 		dbDir := projectDB.dbDir
 		currentName := projectDB.name
+		viewedName := projectDB.viewedName
+		if viewedName == "" {
+			viewedName = currentName
+		}
 		projectDB.mu.Unlock()
 
 		if dbDir == "" {
@@ -93,10 +134,11 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 		}
 
 		type projectEntry struct {
-			Name   string `json:"name"`
-			Path   string `json:"path"`
-			Size   int64  `json:"size"`
-			Active bool   `json:"active"`
+			Name    string `json:"name"`
+			Path    string `json:"path"`
+			Size    int64  `json:"size"`
+			Active  bool   `json:"active"`  // is this the write target
+			Viewing bool   `json:"viewing"` // is this what the UI is reading
 		}
 
 		var projects []projectEntry
@@ -132,10 +174,11 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 					size = info.Size()
 				}
 				projects = append(projects, projectEntry{
-					Name:   baseName,
-					Path:   fullPath,
-					Size:   size,
-					Active: baseName == currentName,
+					Name:    baseName,
+					Path:    fullPath,
+					Size:    size,
+					Active:  baseName == currentName,
+					Viewing: baseName == viewedName,
 				})
 			}
 		}
@@ -178,13 +221,49 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"projects":    projects,
-			"currentName": currentName,
+			"currentName": currentName, // Active (write target) — kept for back-compat
+			"activeName":  currentName,
+			"viewedName":  viewedName,
 			"dbDir":       dbDir,
 		})
 	})
 
-	// POST /api/project/switch -- switch to a different project DB
+	// POST /api/project/switch -- read-only: flip the UI viewer to a different
+	// project DB. Writes still go to the Active project (set via /setActive
+	// or initial boot). Pass an empty name to clear the viewer and view Active.
 	e.POST("/api/project/switch", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+
+		var body struct {
+			Name  string `json:"name"`
+			DbDir string `json:"dbDir"`
+		}
+		if err := c.Bind(&body); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		}
+
+		if err := projectDB.SetViewed(body.Name, body.DbDir); err != nil {
+			log.Printf("[ProjectSwitch] Error: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+
+		if strings.TrimSpace(body.Name) == "" {
+			log.Printf("[ProjectSwitch] cleared viewer (now viewing active)")
+		} else {
+			log.Printf("[ProjectSwitch] viewing: %s (read-only)", body.Name)
+		}
+		return c.JSON(http.StatusOK, projectDB.Info())
+	})
+
+	// POST /api/project/setActive -- destructive: change the write target.
+	// All subsequent writes (proxy capture, repeater, intercept, MCP write
+	// tools) go to this project. This is the old /switch behavior, now
+	// behind an explicit endpoint so it can't be triggered by a casual UI
+	// click. Also clears any read-only viewer and persists the choice to
+	// _settings.PROJECT_NAME___ so it survives restart.
+	e.POST("/api/project/setActive", func(c echo.Context) error {
 		if err := requireLocalhost(c); err != nil {
 			return err
 		}
@@ -200,19 +279,24 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required"})
 		}
 
+		// Drop the read-only viewer first so SetProject doesn't race against
+		// it (and so callers who passed the same name don't end up with
+		// viewedDB pointing at the soon-to-be-closed Active handle).
+		projectDB.ClearViewed()
+
 		if err := projectDB.SetProject(body.Name, body.DbDir); err != nil {
-			log.Printf("[ProjectSwitch] Error: %v", err)
+			log.Printf("[ProjectSetActive] Error: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 
-		// Update _settings with new project name
+		// Persist active project name so it survives restart.
 		rec, err := backend.DB.FindRecordById("_settings", "PROJECT_NAME___")
 		if err == nil && rec != nil {
 			rec.Set("value", body.Name)
 			_ = backend.DB.SaveRecord(rec)
 		}
 
-		log.Printf("[ProjectSwitch] Switched to project: %s", body.Name)
+		log.Printf("[ProjectSetActive] Active project: %s", body.Name)
 		return c.JSON(http.StatusOK, projectDB.Info())
 	})
 

@@ -169,6 +169,6 @@ _check-gh:
 
 .PHONY: clean
 clean:
-	rm -f lorg-bin lorg-app lorg-launcher lorg-server lorg-tool
+	rm -f lorg-bin lorg-app
 	rm -rf cmd/lorg-app/build/bin
 	rm -rf $(RELEASE_DIR)

@@ -78,6 +78,12 @@ func (backend *Backend) SendRepeater(e *echo.Echo) {
 		if err := requireLocalhost(c); err != nil {
 			return err
 		}
+		// Repeater sends are user-driven writes that get captured into the
+		// Active project. Block from a read-only viewer so the user isn't
+		// confused by results that don't appear in their current view.
+		if err := requireViewingActive(c); err != nil {
+			return err
+		}
 
 		var reqData RepeaterSendRequest
 		if err := c.Bind(&reqData); err != nil {

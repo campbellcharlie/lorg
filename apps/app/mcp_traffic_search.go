@@ -26,6 +26,7 @@ type SearchTrafficArgs struct {
 	Query       string `json:"query,omitempty" jsonschema_description:"Search in request/response raw content (substring by default; regex when regex=true)"`
 	Regex       bool   `json:"regex,omitempty" jsonschema_description:"Treat query as a Go regex pattern instead of a literal substring"`
 	RegexSource string `json:"regexSource,omitempty" jsonschema_description:"For regex queries, which side to search: request, response, or both (default: both)"`
+	Project     string `json:"project,omitempty" jsonschema_description:"Filter by project tag (matches the project column on captured rows). Independent from the UI's currently-viewed project — the agent can scope reads to any project regardless of what the user has on screen."`
 	Limit       int    `json:"limit" jsonschema:"required" jsonschema_description:"Max results (max 200)"`
 	Offset      int    `json:"offset,omitempty" jsonschema_description:"Offset for pagination (cursor-style)"`
 }
@@ -76,6 +77,10 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 	if args.Status != 0 {
 		conditions = append(conditions, "resp_json LIKE ?")
 		queryArgs = append(queryArgs, "%"+fmt.Sprintf("%d", args.Status)+"%")
+	}
+	if args.Project != "" {
+		conditions = append(conditions, "project = ?")
+		queryArgs = append(queryArgs, args.Project)
 	}
 
 	where := "1=1"
@@ -328,6 +333,7 @@ func mapFloat(m map[string]any, key string) float64 {
 type GenerateWordlistArgs struct {
 	Source     string `json:"source" jsonschema:"required" jsonschema_description:"What to extract: paths, parameters, or both"`
 	HostFilter string `json:"hostFilter,omitempty" jsonschema_description:"Only extract from this host"`
+	Project    string `json:"project,omitempty" jsonschema_description:"Optional project tag filter — restrict the wordlist source to traffic captured under this project. Independent from the UI's currently-viewed project."`
 	OutputPath string `json:"outputPath" jsonschema:"required" jsonschema_description:"File path to write the wordlist to"`
 }
 
@@ -341,14 +347,19 @@ func (backend *Backend) generateWordlistHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError("source must be 'paths', 'parameters', or 'both'"), nil
 	}
 
-	var sql string
+	var conditions []string
 	var queryArgs []any
-
 	if args.HostFilter != "" {
-		sql = `SELECT req_json FROM _data WHERE host LIKE ? ORDER BY "index" DESC`
+		conditions = append(conditions, "host LIKE ?")
 		queryArgs = append(queryArgs, "%"+args.HostFilter+"%")
-	} else {
-		sql = `SELECT req_json FROM _data ORDER BY "index" DESC`
+	}
+	if args.Project != "" {
+		conditions = append(conditions, "project = ?")
+		queryArgs = append(queryArgs, args.Project)
+	}
+	sql := `SELECT req_json FROM _data ORDER BY "index" DESC`
+	if len(conditions) > 0 {
+		sql = `SELECT req_json FROM _data WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY "index" DESC`
 	}
 
 	rows, err := backend.DB.Query(sql, queryArgs...)

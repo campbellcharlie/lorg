@@ -20,6 +20,7 @@ type ProtobufArgs struct {
 	Action    string `json:"action" jsonschema:"required,enum=decode,decodeHex,decodeTraffic" jsonschema_description:"decode: decode base64 protobuf; decodeHex: decode hex-encoded protobuf; decodeTraffic: decode gRPC response from traffic by request ID"`
 	Data      string `json:"data,omitempty" jsonschema_description:"Base64 or hex-encoded protobuf data"`
 	RequestID string `json:"requestId,omitempty" jsonschema_description:"Request ID for decodeTraffic action"`
+	Project   string `json:"project,omitempty" jsonschema_description:"Optional project name (decodeTraffic only). Reads from another project's DB without affecting the UI's view. Defaults to the active project."`
 }
 
 // ---------------------------------------------------------------------------
@@ -275,24 +276,28 @@ func (backend *Backend) protobufHandler(ctx context.Context, request mcp.CallToo
 		if args.RequestID == "" {
 			return mcp.NewToolResultError("requestId is required for decodeTraffic"), nil
 		}
-		return backend.protobufDecodeTrafficHandler(args.RequestID)
+		return backend.protobufDecodeTrafficHandler(args.RequestID, args.Project)
 
 	default:
 		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: decode, decodeHex, decodeTraffic"), nil
 	}
 }
 
-func (backend *Backend) protobufDecodeTrafficHandler(requestID string) (*mcp.CallToolResult, error) {
+func (backend *Backend) protobufDecodeTrafficHandler(requestID, projectArg string) (*mcp.CallToolResult, error) {
 	if projectDB == nil || projectDB.db == nil {
 		return mcp.NewToolResultError("project database not initialized"), nil
 	}
 
-	projectDB.mu.Lock()
-	defer projectDB.mu.Unlock()
+	// Resolve to the active read handle by default, or a cached read-only
+	// handle on a different project when projectArg is set.
+	db, err := resolveReadDB(projectArg)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	// Get raw response from _raw table
 	var rawResp string
-	err := projectDB.db.QueryRow(`SELECT response FROM _raw WHERE id = ?`, requestID).Scan(&rawResp)
+	err = db.QueryRow(`SELECT response FROM _raw WHERE id = ?`, requestID).Scan(&rawResp)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("request %s not found: %v", requestID, err)), nil
 	}

@@ -178,10 +178,9 @@ func tryServeProjectDBDetail(id string) (*TrafficDetailResponse, bool) {
 	if projectDB == nil {
 		return nil, false
 	}
-	projectDB.mu.Lock()
-	db := projectDB.db
-	ready := projectDB.ready
-	projectDB.mu.Unlock()
+	// UI read — go through the viewer pointer so detail pages match what
+	// the traffic table is showing.
+	db, _, ready := projectDB.UIRead()
 	if db == nil || !ready {
 		return nil, false
 	}

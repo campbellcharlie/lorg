@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"regexp"
 	"sort"
@@ -25,13 +24,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type MapEndpointsArgs struct {
-	Host  string `json:"host" jsonschema:"required" jsonschema_description:"Target hostname (LIKE substring match)"`
-	Limit int    `json:"limit,omitempty" jsonschema_description:"Max endpoints to return (default 100)"`
+	Host    string `json:"host" jsonschema:"required" jsonschema_description:"Target hostname (LIKE substring match)"`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project tag filter. Independent from the UI's currently-viewed project — the agent can scope reads to any captured project."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max endpoints to return (default 100)"`
 }
 
 type ProbeAuthArgs struct {
-	Host  string `json:"host" jsonschema:"required" jsonschema_description:"Target hostname (LIKE substring match)"`
-	Limit int    `json:"limit,omitempty" jsonschema_description:"Max probe candidates to return (default 25)"`
+	Host    string `json:"host" jsonschema:"required" jsonschema_description:"Target hostname (LIKE substring match)"`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project tag filter. Independent from the UI's currently-viewed project — the agent can scope reads to any captured project."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max probe candidates to return (default 25)"`
 }
 
 type endpointSummary struct {
@@ -77,6 +78,12 @@ func (backend *Backend) mapEndpointsHandler(ctx context.Context, request mcp.Cal
 	}
 
 	hostPattern := "%" + strings.TrimSpace(args.Host) + "%"
+	whereProject := ""
+	queryParams := []any{hostPattern}
+	if args.Project != "" {
+		whereProject = " AND project = ?"
+		queryParams = append(queryParams, args.Project)
+	}
 
 	q := `
 		SELECT
@@ -86,11 +93,11 @@ func (backend *Backend) mapEndpointsHandler(ctx context.Context, request mcp.Cal
 			fingerprint,
 			has_params
 		FROM _data
-		WHERE host LIKE ?
+		WHERE host LIKE ?` + whereProject + `
 		  AND has_resp = TRUE
 		ORDER BY "index" DESC`
 
-	rows, err := backend.DB.Query(q, hostPattern)
+	rows, err := backend.DB.Query(q, queryParams...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
@@ -197,6 +204,12 @@ func (backend *Backend) probeAuthHandler(ctx context.Context, request mcp.CallTo
 	}
 
 	hostPattern := "%" + strings.TrimSpace(args.Host) + "%"
+	whereProject := ""
+	authParams := []any{hostPattern}
+	if args.Project != "" {
+		whereProject = " AND d.project = ?"
+		authParams = append(authParams, args.Project)
+	}
 
 	// 1. Find requests that carried an auth-bearing credential. _data.req
 	//    holds a cross-reference ID, not the raw bytes, so we JOIN _req
@@ -209,12 +222,12 @@ func (backend *Backend) probeAuthHandler(ctx context.Context, request mcp.CallTo
 		       COALESCE(q.raw, '')                              AS raw
 		FROM _data d
 		LEFT JOIN _req q ON d.id = q.id
-		WHERE d.host LIKE ?
+		WHERE d.host LIKE ?` + whereProject + `
 		  AND d.has_resp = TRUE
 		ORDER BY d."index" DESC
 		LIMIT 2000`
 
-	rows, err := backend.DB.Query(authQ, hostPattern)
+	rows, err := backend.DB.Query(authQ, authParams...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("auth scan failed: %v", err)), nil
 	}
@@ -266,14 +279,15 @@ func (backend *Backend) probeAuthHandler(ctx context.Context, request mcp.CallTo
 			COALESCE(json_extract(req_json,'$.path'),  '') AS path,
 			COUNT(*) AS cnt
 		FROM _data
-		WHERE host LIKE ?
+		WHERE host LIKE ?` + whereProject + `
 		  AND has_resp = TRUE
 		  AND json_extract(resp_json,'$.status') IN (401, 403)
 		GROUP BY status, method, path
 		ORDER BY cnt DESC
 		LIMIT ?`
 
-	drows, err := backend.DB.Query(denialQ, hostPattern, limit)
+	denialParams := append(append([]any{}, authParams...), limit)
+	drows, err := backend.DB.Query(denialQ, denialParams...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("denial scan failed: %v", err)), nil
 	}
@@ -391,7 +405,3 @@ func detectAuthMechanism(raw string) string {
 	}
 	return ""
 }
-
-// silence unused-import warning in some build configurations where database/sql
-// isn't directly referenced in this file.
-var _ = sql.ErrNoRows

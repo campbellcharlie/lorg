@@ -57,11 +57,9 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 	if projectDB == nil {
 		return nil, false
 	}
-	projectDB.mu.Lock()
-	db := projectDB.db
-	ready := projectDB.ready
-	currentName := projectDB.name
-	projectDB.mu.Unlock()
+	// UI reads go through the viewer pointer when set so the user can
+	// browse another project without disturbing the Active write target.
+	db, currentName, ready := projectDB.UIRead()
 	if db == nil || !ready {
 		return nil, false
 	}

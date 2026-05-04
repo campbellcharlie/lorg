@@ -17,9 +17,10 @@ import (
 // ---------------------------------------------------------------------------
 
 type QueryArgs struct {
-	Action string `json:"action" jsonschema:"required,enum=search,enum=explain" jsonschema_description:"search: execute query; explain: return generated SQL"`
-	Query  string `json:"query" jsonschema:"required" jsonschema_description:"HTTPQL-like query string, e.g. req.host.cont:\"example.com\" AND resp.status.eq:200"`
-	Limit  int    `json:"limit,omitempty" jsonschema_description:"Max results (default 100)"`
+	Action  string `json:"action" jsonschema:"required,enum=search,enum=explain" jsonschema_description:"search: execute query; explain: return generated SQL"`
+	Query   string `json:"query" jsonschema:"required" jsonschema_description:"HTTPQL-like query string, e.g. req.host.cont:\"example.com\" AND resp.status.eq:200"`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project tag filter (matches the project column on captured rows). Independent from the UI's currently-viewed project — the agent can scope reads to any project regardless of what the user has on screen."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max results (default 100)"`
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +492,14 @@ func buildFullSQL(cq *compiledQuery, limit int) string {
 // ---------------------------------------------------------------------------
 
 func (backend *Backend) executeTrafficQuery(query string, limit int) ([]map[string]any, string, error) {
+	return backend.executeTrafficQueryWithProject(query, "", limit)
+}
+
+// executeTrafficQueryWithProject runs an HTTPQL query, optionally
+// filtered to a single project tag. projectTag is appended to the
+// compiled WHERE as `AND d.project = ?` when non-empty — the HTTPQL
+// grammar itself doesn't model project so we splice it on after compile.
+func (backend *Backend) executeTrafficQueryWithProject(query, projectTag string, limit int) ([]map[string]any, string, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -506,6 +515,11 @@ func (backend *Backend) executeTrafficQuery(query string, limit int) ([]map[stri
 	cq, err := compileToSQL(ast)
 	if err != nil {
 		return nil, "", fmt.Errorf("compile error: %w", err)
+	}
+
+	if projectTag != "" {
+		cq.where = "(" + cq.where + ") AND d.project = ?"
+		cq.params = append(cq.params, projectTag)
 	}
 
 	sql := buildFullSQL(cq, limit)
@@ -557,7 +571,7 @@ func (backend *Backend) queryHandler(ctx context.Context, request mcp.CallToolRe
 
 	switch args.Action {
 	case "search":
-		results, sql, err := backend.executeTrafficQuery(args.Query, args.Limit)
+		results, sql, err := backend.executeTrafficQueryWithProject(args.Query, args.Project, args.Limit)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -565,6 +579,7 @@ func (backend *Backend) queryHandler(ctx context.Context, request mcp.CallToolRe
 			"results": results,
 			"count":   len(results),
 			"query":   args.Query,
+			"project": args.Project,
 			"sql":     sql,
 		})
 

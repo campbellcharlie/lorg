@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const releasesURL = "https://api.github.com/repos/glitchedgitz/lorg/releases/latest"
+const releasesURL = "https://api.github.com/repos/campbellcharlie/lorg/releases/latest"
 
 type Asset struct {
 	Name string `json:"name"`

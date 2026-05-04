@@ -36,11 +36,30 @@ type TagTrafficArgs struct {
 }
 
 type GetTaggedTrafficArgs struct {
-	Tag   string `json:"tag" jsonschema:"required" jsonschema_description:"Tag name to filter by"`
-	Limit int    `json:"limit,omitempty" jsonschema_description:"Max results (default: 100)"`
+	Tag     string `json:"tag" jsonschema:"required" jsonschema_description:"Tag name to filter by"`
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project name to read from. Defaults to active."`
+	Limit   int    `json:"limit,omitempty" jsonschema_description:"Max results (default: 100)"`
 }
 
-type ListTagsArgs struct{}
+type ListTagsArgs struct {
+	Project string `json:"project,omitempty" jsonschema_description:"Optional project name to read from. Defaults to active."`
+}
+
+// withReadDB resolves a read-only project handle (defaulting to Active when
+// project is empty) and runs fn against it. The mirror of withProjectDB but
+// without taking the projectDB mutex around fn — resolveReadDB returns
+// either the active handle directly or a long-lived cached read-only handle,
+// neither of which need locking by the caller.
+func withReadDB(project string, fn func(db *sql.DB) error) error {
+	db, err := resolveReadDB(project)
+	if err != nil {
+		return err
+	}
+	if db == nil {
+		return fmt.Errorf("no active project database -- use projectSetup first")
+	}
+	return fn(db)
+}
 
 type DeleteTrafficTagArgs struct {
 	RequestID int    `json:"requestId" jsonschema:"required" jsonschema_description:"request_id to remove tag from"`
@@ -103,7 +122,7 @@ func (backend *Backend) getTaggedTrafficHandler(ctx context.Context, request mcp
 
 	var items []taggedItem
 
-	err := withProjectDB(func(db *sql.DB) error {
+	err := withReadDB(args.Project, func(db *sql.DB) error {
 		rows, queryErr := db.Query(`
 			SELECT t.request_id, t.method, t.host, t.path, t.status_code,
 			       t.tool, t.timestamp, tt.note
@@ -153,6 +172,11 @@ func (backend *Backend) getTaggedTrafficHandler(ctx context.Context, request mcp
 // ---------------------------------------------------------------------------
 
 func (backend *Backend) listTagsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ListTagsArgs
+	if err := request.BindArguments(&args); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	type tagCount struct {
 		Tag   string `json:"tag"`
 		Count int    `json:"count"`
@@ -161,7 +185,7 @@ func (backend *Backend) listTagsHandler(ctx context.Context, request mcp.CallToo
 	var tags []tagCount
 	total := 0
 
-	err := withProjectDB(func(db *sql.DB) error {
+	err := withReadDB(args.Project, func(db *sql.DB) error {
 		rows, queryErr := db.Query(`
 			SELECT tag, COUNT(*) as count
 			FROM traffic_tags
