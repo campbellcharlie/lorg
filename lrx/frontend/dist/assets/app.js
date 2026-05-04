@@ -2521,6 +2521,42 @@
     }
   }
 
+  // Render the theme swatch grid below the theme select. Each swatch
+  // pulls --bg / --accent from a temporary [data-theme] attribute on
+  // the documentElement so themes never need to be hand-mirrored here.
+  function renderThemeSwatches() {
+    var grid = document.getElementById('theme-swatches');
+    var sel = document.getElementById('pref-theme');
+    if (!grid || !sel) return;
+    var current = sel.value;
+    var prevTheme = document.documentElement.getAttribute('data-theme');
+    var html = '';
+    Array.prototype.forEach.call(sel.options, function(opt) {
+      var name = opt.value;
+      // Sample colors for each theme by temporarily switching, reading,
+      // and reverting in a single layout pass. Cheaper than hardcoding.
+      if (name === 'obsidian') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', name);
+      var cs = getComputedStyle(document.documentElement);
+      var bg = cs.getPropertyValue('--bg').trim();
+      var ac = cs.getPropertyValue('--accent').trim();
+      var active = name === current ? ' active' : '';
+      html += '<button type="button" class="theme-swatch' + active + '" data-theme="' + escapeAttr(name) + '" title="' + escapeAttr(opt.textContent) + '" style="--swatch-bg: ' + bg + '; --swatch-accent: ' + ac + ';"></button>';
+    });
+    if (prevTheme) document.documentElement.setAttribute('data-theme', prevTheme);
+    else document.documentElement.removeAttribute('data-theme');
+    grid.innerHTML = html;
+    Array.prototype.forEach.call(grid.querySelectorAll('.theme-swatch'), function(btn) {
+      btn.addEventListener('click', function() {
+        var v = btn.dataset.theme;
+        sel.value = v;
+        applyTheme(v);
+        applyPreference('theme', v);
+        renderThemeSwatches();
+      });
+    });
+  }
+
   function applyTheme(theme) {
     if (theme === 'obsidian' || !theme) {
       document.documentElement.removeAttribute('data-theme');
@@ -2600,8 +2636,10 @@
       themeEl.addEventListener('change', function() {
         applyTheme(this.value);
         applyPreference('theme', this.value);
+        renderThemeSwatches();
       });
     }
+    renderThemeSwatches();
     $('#pref-font').addEventListener('change', function() { applyPreference('font', this.value); });
     $('#pref-font-size').addEventListener('change', function() { applyPreference('fontSize', this.value); });
     $('#pref-line-height').addEventListener('change', function() { applyPreference('lineHeight', this.value); });

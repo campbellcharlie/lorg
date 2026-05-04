@@ -46,6 +46,7 @@
     <main id="content">
       <!-- Traffic View -->
       <div id="view-traffic" class="view active">
+        <h1 class="visually-hidden">Traffic</h1>
         <div class="toolbar">
           <input type="text" id="traffic-filter" placeholder="status:200  |  method:POST  |  path:/api  |  host:example  |  source:ai" class="filter-input">
           <label class="filter-toggle">
@@ -59,11 +60,13 @@
           <svg id="traffic-sparkline" class="sparkline" width="120" height="20" viewBox="0 0 120 20" preserveAspectRatio="none" aria-hidden="true"></svg>
         </div>
         <div class="chip-strip" id="traffic-chips">
+          <span class="chip-group-label">Method</span>
           <button class="chip" data-chip-type="method" data-chip="GET">GET</button>
           <button class="chip" data-chip-type="method" data-chip="POST">POST</button>
           <button class="chip" data-chip-type="method" data-chip="PUT">PUT</button>
           <button class="chip" data-chip-type="method" data-chip="DELETE">DEL</button>
           <span class="chip-sep"></span>
+          <span class="chip-group-label">Type</span>
           <button class="chip" data-chip-type="mime" data-chip="json">JSON</button>
           <button class="chip" data-chip-type="mime" data-chip="html">HTML</button>
           <button class="chip" data-chip-type="mime" data-chip="javascript">JS</button>
@@ -90,7 +93,7 @@
                 <th class="col-time sortable" data-sort="time">Time</th>
               </tr>
             </thead>
-            <tbody id="traffic-body"></tbody>
+            <tbody id="traffic-body"><tr class="skeleton-row"><td colspan="8"><span class="skeleton-bar"></span></td></tr><tr class="skeleton-row"><td colspan="8"><span class="skeleton-bar"></span></td></tr><tr class="skeleton-row"><td colspan="8"><span class="skeleton-bar"></span></td></tr><tr class="skeleton-row"><td colspan="8"><span class="skeleton-bar"></span></td></tr><tr class="skeleton-row"><td colspan="8"><span class="skeleton-bar"></span></td></tr></tbody>
           </table>
         </div>
         <div id="resize-handle" class="resize-handle hidden"></div>
@@ -148,6 +151,7 @@
 
       <!-- Repeater View -->
       <div id="view-repeater" class="view">
+        <h1 class="visually-hidden">Repeater</h1>
         <div class="repeater-layout">
           <div class="repeater-tabs" id="repeater-tabs">
             <div class="repeater-tab active" data-tab="0">#1</div>
@@ -186,6 +190,7 @@
 
       <!-- Intercept View -->
       <div id="view-intercept" class="view">
+        <h1 class="visually-hidden">Intercept</h1>
         <div class="toolbar">
           <span id="intercept-status">Intercept is off</span>
           <button id="intercept-toggle" class="btn btn-sm">Enable</button>
@@ -211,6 +216,7 @@
 
       <!-- Settings View -->
       <div id="view-settings" class="view">
+        <h1 class="visually-hidden">Settings</h1>
         <div class="settings-panel">
           <h2 class="settings-title">Preferences</h2>
           <div class="settings-group">
@@ -232,6 +238,7 @@
                 <option value="paper">Paper (warm light)</option>
               </select>
             </label>
+            <div id="theme-swatches" class="theme-swatches" aria-label="Pick a theme by swatch"></div>
           </div>
           <div class="settings-group">
             <label class="settings-label">Editor Font
