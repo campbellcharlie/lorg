@@ -1179,6 +1179,7 @@
       var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : source === 'Template' ? 'source-template' : 'source-proxy';
       var created = row.created || '';
       var timeStr = created ? formatTime(created) : '';
+      var timeAbs = created ? escapeAttr(created) : '';
       var methodClass = 'method-' + method.toLowerCase();
       var statusClass = status >= 500 ? 'status-5xx' : status >= 400 ? 'status-4xx' : status >= 300 ? 'status-3xx' : status >= 200 ? 'status-2xx' : '';
       var selected = row.id === selectedTrafficId ? 'selected' : '';
@@ -1192,7 +1193,7 @@
         '<td class="col-status"><span class="' + statusClass + '">' + escapeHtml(String(status)) + '</span></td>' +
         '<td class="col-length">' + (length ? formatBytes(length) : '') + '</td>' +
         '<td class="col-source"><span class="' + sourceClass + '">' + source + '</span></td>' +
-        '<td class="col-time">' + escapeHtml(timeStr) + '</td>' +
+        '<td class="col-time" title="' + timeAbs + '">' + escapeHtml(timeStr) + '</td>' +
         '</tr>';
     }).join('');
 
@@ -2562,6 +2563,29 @@
     }
     savePreferences();
     updateSettingsPreview();
+    flashSavedToast();
+  }
+
+  // Tiny "Saved" toast that confirms a Settings change took effect.
+  // Reuses one DOM node, restarts the fade on every call so rapid edits
+  // re-trigger instead of stacking. Honors prefers-reduced-motion via CSS.
+  var _savedToastTimer = null;
+  function flashSavedToast() {
+    var t = document.getElementById('saved-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'saved-toast';
+      t.className = 'saved-toast';
+      t.setAttribute('role', 'status');
+      t.setAttribute('aria-live', 'polite');
+      t.textContent = 'Saved';
+      document.body.appendChild(t);
+    }
+    t.classList.remove('show');
+    void t.offsetWidth;          // restart the transition
+    t.classList.add('show');
+    if (_savedToastTimer) clearTimeout(_savedToastTimer);
+    _savedToastTimer = setTimeout(function() { t.classList.remove('show'); }, 1400);
   }
 
   function updateSettingsPreview() {

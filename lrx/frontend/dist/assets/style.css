@@ -744,6 +744,34 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
   color: var(--purple);
 }
 
+/* "Saved" micro-toast that flashes after a Settings preference change.
+   Bottom-right, fades in/out, never blocks input. */
+.saved-toast {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+  pointer-events: none;
+  z-index: 9999;
+}
+.saved-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .saved-toast { transition: opacity 60ms; transform: none; }
+}
+
 /* Inline keyboard-shortcut badge inside primary buttons. */
 .kbd {
   display: inline-block;
@@ -972,11 +1000,11 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
 .pane-header {
   padding: 8px 12px;
   font-family: var(--font-sans);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
+  letter-spacing: 1px;
   font-weight: 600;
-  color: var(--text-ghost);
+  color: var(--text-tertiary);
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
   display: flex;
