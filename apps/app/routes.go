@@ -114,12 +114,11 @@ func (backend *Backend) RegisterRoutes(e *echo.Echo) {
 		backend.RegisterXtermRoutes(e)
 	}
 
-	// Generic collection CRUD (replaces PocketBase's auto-generated REST API)
+	// Generic collection CRUD REST API.
 	backend.registerCollectionCRUD(e)
 }
 
-// registerCollectionCRUD provides basic CRUD endpoints for PocketBase collections,
-// replacing the auto-generated REST API that PocketBase provided.
+// registerCollectionCRUD provides basic CRUD endpoints for lorgdb collections.
 func (backend *Backend) registerCollectionCRUD(e *echo.Echo) {
 	// List records
 	e.GET("/api/collections/:collection/records", func(c echo.Context) error {
@@ -252,8 +251,7 @@ func (backend *Backend) registerCollectionCRUD(e *echo.Echo) {
 	})
 }
 
-// afterRecordWrite fires inline hooks when specific collections are modified,
-// replacing PocketBase's OnRecordAfterUpdateRequest/OnRecordAfterCreateRequest.
+// afterRecordWrite fires inline hooks when specific collections are modified.
 func (backend *Backend) afterRecordWrite(table string, record *lorgdb.Record) {
 	switch table {
 	case "_proxies":

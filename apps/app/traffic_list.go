@@ -28,7 +28,7 @@ type TrafficListItem struct {
 }
 
 // TrafficList registers GET /api/traffic/list -- a fast, direct-SQL endpoint
-// that bypasses PocketBase's generic records API for performance.
+// that bypasses the generic records API for performance.
 // Supports ?perPage, ?page, ?host, and ?project filters.
 //
 // When the active projectDB has rows in its http_traffic table (the
@@ -45,7 +45,7 @@ func (backend *Backend) TrafficList(e *echo.Echo) {
 		if served, ok := tryServeProjectDBTraffic(c); ok {
 			return served
 		}
-		return servePocketBaseTraffic(c, backend)
+		return serveLegacyTraffic(c, backend)
 	})
 }
 
@@ -149,8 +149,8 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 	return c.JSON(http.StatusOK, trafficResponse(items, page, perPage, totalItems)), true
 }
 
-// servePocketBaseTraffic queries the PocketBase _data collection.
-func servePocketBaseTraffic(c echo.Context, backend *Backend) error {
+// serveLegacyTraffic queries the legacy lorgdb _data collection.
+func serveLegacyTraffic(c echo.Context, backend *Backend) error {
 	perPage, page, hostFilter := parseTrafficParams(c)
 	projectFilter := c.QueryParam("project")
 	offset := (page - 1) * perPage

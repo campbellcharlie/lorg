@@ -11,7 +11,6 @@ import (
 )
 
 // requireAuth checks that the request originates from localhost.
-// This replaces PocketBase's admin/auth context checks.
 func requireAuth(c echo.Context) error {
 	return requireLocalhost(c)
 }

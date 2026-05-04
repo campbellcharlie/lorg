@@ -54,11 +54,11 @@ func (c Collection[T]) One(id string) (T, error) {
 
 	resp, err := request.Get(c.url + "/api/collections/{collection}/records/{id}")
 	if err != nil {
-		return response, fmt.Errorf("[one] can't send update request to pocketbase, err %w", err)
+		return response, fmt.Errorf("[one] request failed: %w", err)
 	}
 
 	if resp.IsError() {
-		return response, fmt.Errorf("[one] pocketbase returned status: %d, msg: %s, err %w",
+		return response, fmt.Errorf("[one] server returned status: %d, msg: %s, err %w",
 			resp.StatusCode(),
 			resp.String(),
 			ErrInvalidResponse,

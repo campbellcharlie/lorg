@@ -17,12 +17,12 @@ type Migration struct {
 }
 
 // Migrations is the ordered list of all migrations.
-// Migration 0 is a no-op for existing PocketBase databases.
-// Migration 1 creates all tables for fresh installs.
+// Migration 0 is a no-op preserved for legacy databases that already exist
+// on disk. Migration 1 creates all tables for fresh installs.
 var Migrations = []Migration{
 	{
 		Version:     0,
-		Description: "no-op for existing PocketBase databases",
+		Description: "no-op for legacy databases",
 		Up:          func(db *sql.DB) error { return nil },
 	},
 	{
@@ -142,7 +142,8 @@ func (d *LorgDB) RunMigrations() error {
 }
 
 // migrationCreateAllTables creates every table and index needed for a fresh
-// lorg install. Uses IF NOT EXISTS so it's safe on existing PocketBase DBs.
+// lorg install. Uses IF NOT EXISTS so it's safe on databases that already
+// exist on disk.
 func migrationCreateAllTables(db *sql.DB) error {
 	for _, stmt := range allTableSQL {
 		if _, err := db.Exec(stmt); err != nil {
@@ -153,10 +154,10 @@ func migrationCreateAllTables(db *sql.DB) error {
 }
 
 // allTableSQL is the complete set of CREATE TABLE / CREATE INDEX statements
-// matching the PocketBase schema. PocketBase tables always have id (TEXT PK),
-// created (TEXT), updated (TEXT) plus the schema-defined columns.
+// for lorg's collection schema. Every table has id (TEXT PK), created (TEXT),
+// and updated (TEXT) plus the schema-defined columns.
 //
-// Column types follow PocketBase conventions:
+// Column type conventions:
 //   - Text / Editor / File / Relation → TEXT DEFAULT '' NOT NULL
 //   - Number                          → REAL DEFAULT 0 NOT NULL
 //   - Bool                            → BOOLEAN DEFAULT FALSE NOT NULL
@@ -442,7 +443,7 @@ var allTableSQL = []string{
 	)`,
 
 	// -----------------------------------------------------------------------
-	// Tables added by later PocketBase migrations
+	// Tables added by later schema migrations
 	// -----------------------------------------------------------------------
 
 	// _counters (migration 1766447171)
@@ -661,8 +662,7 @@ func (d *LorgDB) seedDefaultSettings() error {
 	return nil
 }
 
-// randomID generates a 15-character alphanumeric ID matching PocketBase's
-// format, using crypto/rand.
+// randomID generates a 15-character alphanumeric ID using crypto/rand.
 func randomID() string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 15)

@@ -58,11 +58,11 @@ func (a *authorizeEmailPassword) authorize() error {
 			Post(a.url)
 
 		if err != nil {
-			return nil, fmt.Errorf("[auth] can't send request to pocketbase %w", err)
+			return nil, fmt.Errorf("[auth] request failed: %w", err)
 		}
 
 		if resp.IsError() {
-			return nil, fmt.Errorf("[auth] pocketbase returned status: %d, msg: %s, err %w",
+			return nil, fmt.Errorf("[auth] server returned status: %d, msg: %s, err %w",
 				resp.StatusCode(),
 				resp.String(),
 				ErrInvalidResponse,

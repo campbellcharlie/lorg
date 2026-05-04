@@ -806,8 +806,8 @@ func (backend *Backend) projectSetupHandler(ctx context.Context, request mcp.Cal
 		return mcp.NewToolResultError(fmt.Sprintf("failed to setup project: %v", err)), nil
 	}
 
-	// Also store the project name in PocketBase _settings for backward compat
-	backend.storeProjectNameInPB(sanitized)
+	// Mirror the project name into the lorgdb _settings table for the UI and other tools.
+	backend.storeProjectName(sanitized)
 
 	return mcpJSONResult(map[string]any{
 		"success":     true,
@@ -839,7 +839,7 @@ func (backend *Backend) projectInfoHandler(ctx context.Context, request mcp.Call
 	}
 
 	info["hostCount"] = len(hostSet)
-	info["pocketbaseTrafficCount"] = len(allData)
+	info["trafficCount"] = len(allData)
 
 	return mcpJSONResult(info)
 }
@@ -865,8 +865,8 @@ func (backend *Backend) projectSetNameHandler(ctx context.Context, request mcp.C
 		return mcp.NewToolResultError(fmt.Sprintf("failed to set project name: %v", err)), nil
 	}
 
-	// Also store in PocketBase for backward compat
-	backend.storeProjectNameInPB(sanitizeProjectName(args.Name))
+	// Mirror the project name into the lorgdb _settings table for the UI and other tools.
+	backend.storeProjectName(sanitizeProjectName(args.Name))
 
 	return mcpJSONResult(map[string]any{
 		"success":     true,
@@ -875,9 +875,9 @@ func (backend *Backend) projectSetNameHandler(ctx context.Context, request mcp.C
 	})
 }
 
-// storeProjectNameInPB persists the project name in PocketBase _settings
-// for backward compatibility with the UI and other tools.
-func (backend *Backend) storeProjectNameInPB(name string) {
+// storeProjectName persists the project name in the lorgdb _settings table
+// for the UI and other tools.
+func (backend *Backend) storeProjectName(name string) {
 	record, err := backend.DB.FindFirstRecord("_settings", "option = ?", "project_name")
 	if err != nil || record == nil {
 		record = lorgdb.NewRecord("_settings")
@@ -922,10 +922,10 @@ func (backend *Backend) setTrafficLoggingHandler(ctx context.Context, request mc
 }
 
 // ---------------------------------------------------------------------------
-// projectExport handler -- full export from PocketBase for reimporting old data
+// projectExport handler -- full export from lorgdb for reimporting old data
 // ---------------------------------------------------------------------------
 
-// parseJSONField handles PocketBase JSON fields that may be stored as text strings,
+// parseJSONField handles JSON fields that may be stored as text strings,
 // types.JsonRaw, []byte, or already-parsed maps.
 func parseJSONField(v any) map[string]any {
 	if v == nil {
@@ -1199,9 +1199,9 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 		portStr := rec.GetString("port")
 		isHTTPS := rec.GetBool("is_https")
 		generatedBy := rec.GetString("generated_by")
-		created := rec.GetString("created") // PocketBase timestamp string
+		created := rec.GetString("created") // lorgdb timestamp string
 
-		// Parse req_json and resp_json -- PocketBase may return types.JsonRaw, string, or map
+		// Parse req_json and resp_json -- lorgdb may return types.JsonRaw, string, or map
 		reqJSONRaw := rec.Get("req_json")
 		respJSONRaw := rec.Get("resp_json")
 		reqJSON := parseJSONField(reqJSONRaw)
@@ -1308,7 +1308,7 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 			requestHash = hex.EncodeToString(h[:])[:16]
 		}
 
-		// Use PocketBase created timestamp, fallback to now
+		// Use stored created timestamp, fallback to now
 		timestamp := created
 		if timestamp == "" {
 			timestamp = time.Now().UTC().Format(time.RFC3339)

@@ -41,7 +41,6 @@ type FuzzerStartRequest struct {
 }
 
 // CreateFuzzerTable creates a table for storing fuzzer results.
-// Replaces the old PocketBase CreateCollection(name, schemas.Fuzzer) pattern.
 func (backend *Tools) CreateFuzzerTable(tableName string) error {
 	ddl := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (
 		id               TEXT PRIMARY KEY NOT NULL,
