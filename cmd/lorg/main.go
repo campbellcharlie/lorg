@@ -21,6 +21,7 @@ var ProjectPath string
 var ProxyAddress string // removed, we use api now
 var ProjectsDir string  // directory containing per-project .db files for the UI switcher
 var showLogs bool
+var allowLAN bool       // when true, permit non-loopback callers to /api/*
 
 func init() {
 	// Ensure timestamps are included in standard log output.
@@ -59,8 +60,10 @@ func main() {
 	flag.BoolVar(&showLogs, "log", false, "Show debug logs")
 	flag.StringVar(&conf.MCPToken, "mcp-token", "", "Bearer token for MCP endpoint authentication")
 	flag.BoolVar(&conf.EnableTerminal, "enable-terminal", false, "Enable xterm terminal routes (disabled by default)")
+	flag.BoolVar(&allowLAN, "allow-lan", false, "Allow API access from non-loopback addresses (off by default; only enable on a trusted network)")
 
 	flag.Parse()
+	app.SetTrustNetwork(allowLAN)
 
 	if len(os.Args) > 1 {
 		initialize()
