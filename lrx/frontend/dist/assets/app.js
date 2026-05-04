@@ -1176,7 +1176,7 @@
       var length = resp.length || row.length || '';
       var genBy = row.generated_by || '';
       var source = genBy.indexOf('ai/mcp') !== -1 || genBy === 'MCP' ? 'AI' : genBy.indexOf('repeater/') !== -1 || genBy === 'Repeater' ? 'Repeater' : genBy === 'Template' || genBy.indexOf('template') !== -1 ? 'Template' : 'Proxy';
-      var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : 'source-proxy';
+      var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : source === 'Template' ? 'source-template' : 'source-proxy';
       var created = row.created || '';
       var timeStr = created ? formatTime(created) : '';
       var methodClass = 'method-' + method.toLowerCase();

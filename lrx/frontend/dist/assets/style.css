@@ -5,6 +5,16 @@
 /* === Reset === */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Visible focus rings for keyboard navigation. Browsers and the various
+   `outline: none` declarations below strip the default; put it back here
+   so Tab navigation always has a visible target. Mouse focus stays clean
+   because :focus-visible only fires on keyboard / programmatic focus. */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 :root {
   /* Backgrounds -- deep obsidian, each step ~5pt brighter so panel
      elevation actually reads instead of bleeding into the void. */
@@ -230,14 +240,15 @@ html, body {
   border-radius: 0 var(--radius) var(--radius) 0;
 }
 
-/* Sidebar footer */
+/* Sidebar footer — load-bearing during a session (proxy up? right project?),
+   so size up to 12px and lighten the color from text-tertiary to secondary. */
 .sidebar-footer {
   margin-top: auto;
   padding: 14px 16px;
   border-top: 1px solid var(--border);
   font-family: var(--font-sans);
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
+  font-size: 12px;
+  color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -721,6 +732,31 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
   letter-spacing: 0.3px;
   background: rgba(96, 165, 250, 0.12);
   color: var(--blue);
+}
+.source-template {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  background: rgba(167, 139, 250, 0.14);
+  color: var(--purple);
+}
+
+/* Inline keyboard-shortcut badge inside primary buttons. */
+.kbd {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.10);
+  color: inherit;
+  vertical-align: 1px;
+  letter-spacing: 0;
 }
 
 /* ============================================================
