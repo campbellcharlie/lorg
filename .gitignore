@@ -71,6 +71,10 @@ docs/lorg-pentester-guide.md
 # Local dev config
 .mcp.json
 
+# Per-project Claude state (skills, transcripts, settings) — local to each
+# clone, not shared.
+.claude/
+
 # Runtime audit logs
 audit/
 
