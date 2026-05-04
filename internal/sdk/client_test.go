@@ -47,6 +47,7 @@ func TestAuthorizeAnonymous(t *testing.T) {
 }
 
 func TestListAccess(t *testing.T) {
+	t.Skip("requires PocketBase admin auth + seeded posts_admin/posts_user/posts_public collections, removed post-PocketBase migration")
 	type auth struct {
 		email    string
 		password string
@@ -107,6 +108,7 @@ func TestListAccess(t *testing.T) {
 }
 
 func TestAuthorizeEmailPassword(t *testing.T) {
+	t.Skip("requires PocketBase admin/user auth endpoints, removed post-PocketBase migration")
 	type args struct {
 		email    string
 		password string
@@ -153,6 +155,7 @@ func TestAuthorizeEmailPassword(t *testing.T) {
 }
 
 func TestClient_List(t *testing.T) {
+	t.Skip("requires seeded posts_public collection with rows, removed post-PocketBase migration")
 	defaultClient := NewClient(defaultURL)
 
 	tests := []struct {
@@ -208,6 +211,7 @@ func TestClient_List(t *testing.T) {
 }
 
 func TestClient_Delete(t *testing.T) {
+	t.Skip("requires writable posts_public collection table, removed post-PocketBase migration")
 	client := NewClient(defaultURL)
 	field := "value_" + time.Now().Format(time.StampMilli)
 
@@ -233,6 +237,7 @@ func TestClient_Delete(t *testing.T) {
 }
 
 func TestClient_Update(t *testing.T) {
+	t.Skip("requires writable posts_public collection table, removed post-PocketBase migration")
 	client := NewClient(defaultURL)
 	field := "value_" + time.Now().Format(time.StampMilli)
 
@@ -264,6 +269,7 @@ func TestClient_Update(t *testing.T) {
 }
 
 func TestClient_Create(t *testing.T) {
+	t.Skip("requires writable posts_public collection table, removed post-PocketBase migration")
 	defaultClient := NewClient(defaultURL)
 	defaultBody := map[string]interface{}{
 		"field": "value_" + time.Now().Format(time.StampMilli),

@@ -14,15 +14,19 @@ import (
 // It normalizes HTTP proxy requests to use path-only format (like HTTPS requests).
 // IMPORTANT: This function restores the request body so it can still be forwarded.
 func DumpRequest(req *http.Request, normalizeHTTP bool) string {
-	// Read the body first
-	originalBody, err := io.ReadAll(req.Body)
-	utils.CheckErr("[DumpRequest] Read body error: ", err)
+	// Read the body first (guard against nil body, e.g. GET requests)
+	var originalBody []byte
+	if req.Body != nil {
+		var err error
+		originalBody, err = io.ReadAll(req.Body)
+		utils.CheckErr("[DumpRequest] Read body error: ", err)
 
-	// Close the original body to release resources
-	req.Body.Close()
+		// Close the original body to release resources
+		req.Body.Close()
 
-	// CRITICAL: Restore the body so it can be forwarded
-	req.Body = io.NopCloser(bytes.NewReader(originalBody))
+		// CRITICAL: Restore the body so it can be forwarded
+		req.Body = io.NopCloser(bytes.NewReader(originalBody))
+	}
 
 	// Determine the URL to use in the request line
 	url := req.URL.RequestURI()
