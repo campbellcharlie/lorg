@@ -2123,6 +2123,12 @@ mark.find-match.find-current {
 #traffic-table tr.selected.hl-blue td {
   background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
 }
+.context-menu-item.has-submenu {
+  /* Anchor the submenu to THIS item, not the outer .context-menu container.
+     Without position:relative the absolute submenu was top:0 of the whole
+     menu (way above the cursor). */
+  position: relative;
+}
 .context-menu-item.has-submenu::after {
   content: '▸';
   float: right;
@@ -2132,16 +2138,22 @@ mark.find-match.find-current {
 .context-submenu {
   display: none;
   position: absolute;
+  /* Overlap the parent's right edge by 4px and pad the submenu's left
+     by the same so visible content sits where it always did. The 4px
+     overlap absorbs the cursor as it traverses from parent to submenu,
+     so the :hover chain doesn't break and the submenu doesn't vanish. */
   left: 100%;
-  top: 0;
+  top: -4px;
+  margin-left: -4px;
+  padding: 4px 0 4px 4px;
   background: var(--bg-surface, #1c1c20);
   border: 1px solid var(--border, #2a2a30);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   min-width: 130px;
-  padding: 4px 0;
 }
-.context-menu-item.has-submenu:hover .context-submenu { display: block; }
+.context-menu-item.has-submenu:hover .context-submenu,
+.context-menu-item.has-submenu:focus-within .context-submenu { display: block; }
 .context-submenu-item {
   display: flex;
   align-items: center;
