@@ -878,9 +878,7 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
   flex-direction: column;
   overflow: hidden;
 }
-.repeater-pane:first-child {
-  border-right: 1px solid var(--border);
-}
+/* No border needed — the .detail-split-handle between panes is the divider. */
 
 /* Pane header -- accent underline */
 .pane-header {

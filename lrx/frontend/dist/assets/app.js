@@ -3055,6 +3055,68 @@
       reqHighlight.scrollLeft = reqInput.scrollLeft;
     });
 
+    // Tab inserts a literal tab instead of moving focus out of the editor.
+    // Esc still tabs out for accessibility.
+    reqInput.addEventListener('keydown', function(e) {
+      if (e.key !== 'Tab' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      var s = reqInput.selectionStart, en = reqInput.selectionEnd;
+      reqInput.setRangeText('\t', s, en, 'end');
+      reqInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // Drag-resize the request/response split. Same pattern as the
+    // traffic-detail splitter: drag to set width, store the ratio so a later
+    // window resize re-derives proportional widths, double-click to reset.
+    (function() {
+      var handle = document.getElementById('rep-split-handle');
+      var reqPane = document.getElementById('rep-pane-request');
+      var respPane = document.getElementById('rep-pane-response');
+      if (!handle || !reqPane || !respPane) return;
+      var dragging = false, startX = 0, startReqW = 0, startRespW = 0, ratio = null;
+
+      function applyRatio() {
+        if (ratio == null) return;
+        var avail = reqPane.parentElement.offsetWidth - handle.offsetWidth;
+        if (avail < 160) return;
+        var w = Math.max(80, Math.min(avail - 80, Math.round(avail * ratio)));
+        reqPane.style.flex = 'none'; reqPane.style.width = w + 'px';
+        respPane.style.flex = 'none'; respPane.style.width = (avail - w) + 'px';
+      }
+      handle.addEventListener('mousedown', function(e) {
+        dragging = true;
+        startX = e.clientX;
+        startReqW = reqPane.offsetWidth;
+        startRespW = respPane.offsetWidth;
+        handle.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (!dragging) return;
+        var total = startReqW + startRespW;
+        var newReq = Math.max(80, Math.min(total - 80, startReqW + (e.clientX - startX)));
+        reqPane.style.flex = 'none'; reqPane.style.width = newReq + 'px';
+        respPane.style.flex = 'none'; respPane.style.width = (total - newReq) + 'px';
+      });
+      document.addEventListener('mouseup', function() {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        var total = reqPane.offsetWidth + respPane.offsetWidth;
+        if (total > 0) ratio = reqPane.offsetWidth / total;
+      });
+      handle.addEventListener('dblclick', function() {
+        reqPane.style.flex = '1'; reqPane.style.width = '';
+        respPane.style.flex = '1'; respPane.style.width = '';
+        ratio = null;
+      });
+      window.addEventListener('resize', applyRatio);
+    })();
+
     // Keyboard shortcuts
     document.addEventListener('keydown', function(e) {
       if (e.ctrlKey || e.metaKey) {
