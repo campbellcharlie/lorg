@@ -1167,6 +1167,7 @@
 
   async function selectTrafficRow(id) {
     selectedTrafficId = id;
+    try { localStorage.setItem('lorg-selected-traffic-id', id); } catch(e) {}
     renderTraffic(true);
 
     // Fetch from unified endpoint (checks _req/_resp, then _data.req/resp, then reconstructs from JSON)
@@ -1813,13 +1814,21 @@
     if (repeaterTabs.length === 0) {
       repeaterTabs.push({ host: '', port: '443', tls: true, request: '', response: '', time: '' });
     }
-    if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) activeTabIndex = 0;
+    var savedIdx = parseInt(localStorage.getItem('lorg-repeater-active-index'), 10);
+    if (!isNaN(savedIdx) && savedIdx >= 0 && savedIdx < repeaterTabs.length) {
+      activeTabIndex = savedIdx;
+    } else if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) {
+      activeTabIndex = 0;
+    }
     renderRepeaterTabs();
     loadRepeaterTabData(activeTabIndex);
   }
 
   function saveRepeaterTabs() {
-    try { localStorage.setItem('lorg-repeater-history', JSON.stringify(repeaterTabs)); } catch(e) {}
+    try {
+      localStorage.setItem('lorg-repeater-history', JSON.stringify(repeaterTabs));
+      localStorage.setItem('lorg-repeater-active-index', String(activeTabIndex));
+    } catch(e) {}
   }
 
   function renderRepeaterTabs() {
@@ -1869,6 +1878,7 @@
     if (idx < 0 || idx >= repeaterTabs.length) return;
     saveCurrentTabState();
     activeTabIndex = idx;
+    saveRepeaterTabs();
     renderRepeaterTabs();
     loadRepeaterTabData(idx);
   }
@@ -2006,6 +2016,7 @@
     currentView = view;
     $$('.view').forEach(function(v) { v.classList.toggle('active', v.id === 'view-' + view); });
     $$('.nav-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.view === view); });
+    try { localStorage.setItem('lorg-active-view', view); } catch(e) {}
   }
 
   // --- Helpers ---
@@ -3556,8 +3567,20 @@
     initSettings();
     checkStatus();
     loadHosts();
-    loadTraffic();
+    loadTraffic().then(function() {
+      // Restore selected traffic row if it's still in the loaded set.
+      var savedId = localStorage.getItem('lorg-selected-traffic-id');
+      if (savedId && allTrafficData.some(function(r) { return r.id === savedId; })) {
+        selectTrafficRow(savedId);
+      }
+    });
     loadProjectInfo();
+
+    // Restore last view (Traffic / Repeater / Intercept / Settings).
+    var savedView = localStorage.getItem('lorg-active-view');
+    if (savedView && ['traffic','repeater','intercept','settings'].indexOf(savedView) >= 0) {
+      switchView(savedView);
+    }
 
     // Check initial intercept state
     api('/api/proxy/list').then(function(data) {
