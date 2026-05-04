@@ -2454,7 +2454,10 @@
     if (prefs.font) { document.documentElement.style.setProperty('--font', prefs.font); $('#pref-font').value = prefs.font; }
     if (prefs.fontSize) { document.documentElement.style.setProperty('--font-size', prefs.fontSize); $('#pref-font-size').value = prefs.fontSize; }
     if (prefs.lineHeight) {
-      document.querySelectorAll('.raw-http, .raw-editor').forEach(function(el) { el.style.lineHeight = prefs.lineHeight; });
+      // .editor-input must move in lockstep with the .editor-highlight (.raw-http)
+      // pre, otherwise the overlay drifts vertically and the caret no longer
+      // sits on its character. Same rule on the live setter below.
+      document.querySelectorAll('.raw-http, .raw-editor, .editor-input').forEach(function(el) { el.style.lineHeight = prefs.lineHeight; });
       $('#pref-line-height').value = prefs.lineHeight;
     }
     if (prefs.wrap) {
@@ -2497,7 +2500,7 @@
         document.documentElement.style.setProperty('--font-size', value);
         break;
       case 'lineHeight':
-        document.querySelectorAll('.raw-http, .raw-editor').forEach(function(el) { el.style.lineHeight = value; });
+        document.querySelectorAll('.raw-http, .raw-editor, .editor-input').forEach(function(el) { el.style.lineHeight = value; });
         break;
       case 'wrap':
         document.querySelectorAll('.raw-editor.readonly, .raw-http').forEach(function(el) { el.style.whiteSpace = value; });
