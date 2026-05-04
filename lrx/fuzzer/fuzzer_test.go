@@ -18,7 +18,7 @@ func TestFuzzer(t *testing.T) {
 		Request: "GET /FUZZ HTTP/1.1\r\nHost: example.com\r\n\r\n",
 		Host:    "example.com",
 		Markers: map[string]any{
-			"FUZZ": "./Uw8sq8xo2u3Tw9AefgcgYpod",
+			"FUZZ": "./10.txt",
 		},
 	})
 
