@@ -1788,7 +1788,12 @@
         }
       }
     }
-    return result.join('\n');
+    // Mark {{name}} placeholders so users can see at a glance which
+    // values will be substituted before send. Color-only span (no layout
+    // change) so the textarea/highlight overlay stays aligned to the px.
+    return result.join('\n').replace(/\{\{[\w.\-]+\}\}/g, function(m) {
+      return '<span class="hl-var">' + m + '</span>';
+    });
   }
 
   function syncRequestHighlight() {
@@ -1803,7 +1808,14 @@
 
   function loadRepeaterTabs() {
     try { repeaterTabs = JSON.parse(localStorage.getItem('lorg-repeater-history') || '[]'); } catch(e) { repeaterTabs = []; }
+    // Seed an empty tab so the strip is never blank — pro tools always
+    // have an active workspace to type into.
+    if (repeaterTabs.length === 0) {
+      repeaterTabs.push({ host: '', port: '443', tls: true, request: '', response: '', time: '' });
+    }
+    if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) activeTabIndex = 0;
     renderRepeaterTabs();
+    loadRepeaterTabData(activeTabIndex);
   }
 
   function saveRepeaterTabs() {

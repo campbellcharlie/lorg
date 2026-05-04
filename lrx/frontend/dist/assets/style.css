@@ -1125,6 +1125,18 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
 .hl-version { color: #52525b; }
 .hl-first-line { color: #fbbf24; }
 .hl-header-name { color: #60a5fa; font-weight: 600; }
+/* {{var}} placeholders: distinct color, no font-weight or background — must
+   not change glyph metrics or the editor overlay drifts off the textarea. */
+.hl-var { color: var(--purple); }
+
+/* Empty response pane — give the user a hint instead of a blank wall. */
+#rep-response:empty::before {
+  content: 'No response yet — fill in a request and press \2318 Enter to send.';
+  color: var(--text-ghost);
+  font-style: italic;
+  display: block;
+  padding: 10px 12px;
+}
 .hl-colon { color: #52525b; }
 .hl-header-value { color: #d4d4d8; }
 .hl-status-2xx { color: var(--accent); font-weight: 700; }
