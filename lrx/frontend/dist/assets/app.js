@@ -2828,16 +2828,33 @@
       var method = req.method || '?';
       var host = item.host || '';
       var path = req.path || req.url || '/';
-      return '<div class="intercept-item" data-id="' + escapeAttr(item.id) + '">' +
+      var idAttr = escapeAttr(item.id);
+      // Inline per-row Forward/Drop. Clicking them dispatches directly
+      // without going through the editor's currentId; clicking elsewhere
+      // on the row still opens it in the editor (handled by row click).
+      return '<div class="intercept-item" data-id="' + idAttr + '">' +
         '<span class="method-' + method.toLowerCase() + '">' + escapeHtml(method) + '</span> ' +
-        '<span style="color:var(--text-secondary)">' + escapeHtml(host) + '</span>' +
-        '<span style="color:var(--text-tertiary)">' + escapeHtml(path) + '</span>' +
+        '<span class="intercept-host">' + escapeHtml(host) + '</span>' +
+        '<span class="intercept-path">' + escapeHtml(path) + '</span>' +
+        '<span class="intercept-row-actions">' +
+          '<button class="btn-row btn-row-fwd" data-row-action="forward" data-id="' + idAttr + '" title="Forward unmodified">Fwd</button>' +
+          '<button class="btn-row btn-row-drop" data-row-action="drop" data-id="' + idAttr + '" title="Drop">Drop</button>' +
+        '</span>' +
         '</div>';
     }).join('');
 
-    $$('.intercept-item', queue).forEach(function(el) {
-      el.addEventListener('click', function() { selectIntercept(el.dataset.id); });
-    });
+    // Single delegated listener: row click opens editor, but Forward/Drop
+    // buttons short-circuit and dispatch the action directly.
+    queue.onclick = function(ev) {
+      var rowBtn = ev.target.closest('[data-row-action]');
+      if (rowBtn) {
+        ev.stopPropagation();
+        interceptDispatch(rowBtn.dataset.id, rowBtn.dataset.rowAction, '');
+        return;
+      }
+      var item = ev.target.closest('.intercept-item');
+      if (item) selectIntercept(item.dataset.id);
+    };
 
     if (!$('#intercept-editor').dataset.currentId && items.length > 0) {
       selectIntercept(items[0].id);
@@ -2866,14 +2883,20 @@
     };
   }
 
+  // Editor-side action: forward with whatever is currently in the textarea
+  // (so the user's edits go upstream).
   async function interceptAction(action) {
     var editor = $('#intercept-editor');
     var id = editor.dataset.currentId;
     if (!id) return;
+    var editedReq = action === 'forward' ? $('#intercept-request').value : '';
+    await interceptDispatch(id, action, editedReq);
+  }
 
-    var isEdited = action === 'forward';
-    var editedReq = $('#intercept-request').value;
-
+  // Inner dispatcher used by both the editor buttons and the per-row
+  // inline Fwd/Drop. editedReq='' means "forward unmodified".
+  async function interceptDispatch(id, action, editedReq) {
+    var isEdited = action === 'forward' && editedReq !== '';
     await api('/api/intercept/action', {
       method: 'POST',
       body: JSON.stringify({
@@ -2883,9 +2906,11 @@
         req_edited: isEdited ? editedReq : '',
       }),
     });
-
-    editor.classList.add('hidden');
-    editor.dataset.currentId = '';
+    var editor = $('#intercept-editor');
+    if (editor && editor.dataset.currentId === id) {
+      editor.classList.add('hidden');
+      editor.dataset.currentId = '';
+    }
     pollIntercepts();
   }
 
