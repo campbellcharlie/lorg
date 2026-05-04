@@ -138,9 +138,9 @@
   }
 
   // Live request sparkline: 60 1-second buckets of `created` timestamps from
-  // the most recent poll. Updates on every loadTraffic() so it tracks the
-  // ~1.5s poll cadence. SVG is preserveAspectRatio=none so the 120-unit
-  // viewBox stretches to whatever pixel width the toolbar gives us.
+  // the most recent poll, drawn as a filled area chart with a sharp top line.
+  // Scale floor of 10 req/s keeps light traffic from maxing out (a single
+  // request shouldn't hit the ceiling); bursts above grow the floor.
   function renderSparkline() {
     var svg = document.getElementById('traffic-sparkline');
     if (!svg) return;
@@ -153,14 +153,19 @@
       var ageSec = Math.floor((now - t) / 1000);
       if (ageSec >= 0 && ageSec < 60) buckets[59 - ageSec]++;
     }
-    var max = 1;
+    var max = 10;
     for (var k = 0; k < 60; k++) if (buckets[k] > max) max = buckets[k];
-    var bars = '';
+    var pts = [];
     for (var b = 0; b < 60; b++) {
-      var h = (buckets[b] / max) * 18;
-      bars += '<rect x="' + (b * 2) + '" y="' + (20 - h).toFixed(2) + '" width="1.6" height="' + h.toFixed(2) + '" fill="currentColor"/>';
+      var x = b * 2;
+      var y = 20 - (buckets[b] / max) * 18;
+      pts.push(x.toFixed(0) + ',' + y.toFixed(2));
     }
-    svg.innerHTML = bars;
+    var line = 'M ' + pts.join(' L ');
+    var area = line + ' L 118,20 L 0,20 Z';
+    svg.innerHTML =
+      '<path d="' + area + '" fill="currentColor" fill-opacity="0.22"/>' +
+      '<path d="' + line + '" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>';
   }
 
   // Chip filter state — sets of method names and mime tokens that the
