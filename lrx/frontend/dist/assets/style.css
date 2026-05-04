@@ -2383,6 +2383,83 @@ mark.find-match.find-current {
   background: rgba(92, 97, 102, 0.06);
 }
 
+/* Cyber -- high-contrast pentest-tool dark. Deep blue-black bg, cyan
+   accent that pops against neon magenta accents, warm yellow flag for
+   methods. Tuned for screen-sharing and demo readability. */
+[data-theme="cyber"] {
+  --bg: #0a0e16; --bg-surface: #131822; --bg-elevated: #1c2230; --bg-hover: #232a3a; --bg-active: #2c3447;
+  --border: rgba(127,219,255,0.14); --border-light: rgba(127,219,255,0.22); --border-focus: rgba(0,229,255,0.55);
+  --text: #e8efff; --text-secondary: #b8c5dd; --text-tertiary: #8895b3; --text-ghost: #4a5573;
+  --accent: #00e5ff; --accent-hover: #4ff0ff; --accent-dim: rgba(0,229,255,0.12); --accent-glow: rgba(0,229,255,0.25);
+  --red: #ff3d6e; --orange: #ff9e3d; --blue: #5e9bff; --yellow: #ffd24d; --purple: #c66bff;
+}
+[data-theme="cyber"] .method-get { color: #00e5ff; }
+[data-theme="cyber"] .method-post { color: #ffd24d; }
+[data-theme="cyber"] .method-put { color: #ff9e3d; }
+[data-theme="cyber"] .method-delete { color: #ff3d6e; }
+[data-theme="cyber"] .method-patch { color: #c66bff; }
+[data-theme="cyber"] .status-2xx, [data-theme="cyber"] .hl-status-2xx { color: #4ff0c8; }
+[data-theme="cyber"] .status-3xx, [data-theme="cyber"] .hl-status-3xx { color: #5e9bff; }
+[data-theme="cyber"] .status-4xx, [data-theme="cyber"] .hl-status-4xx { color: #ffd24d; }
+[data-theme="cyber"] .status-5xx, [data-theme="cyber"] .hl-status-5xx { color: #ff3d6e; }
+[data-theme="cyber"] .hl-method { color: #ffd24d; }
+[data-theme="cyber"] .hl-url { color: #00e5ff; }
+[data-theme="cyber"] .hl-version { color: #4a5573; }
+[data-theme="cyber"] .hl-header-name { color: #5e9bff; }
+[data-theme="cyber"] .hl-header-value { color: #b8c5dd; }
+[data-theme="cyber"] .hl-var { color: #c66bff; }
+
+/* Paper -- warm light theme inspired by Things 3 / Bear / Notion. Cream
+   bg, warm dark text, muted teal accent. Low-chroma so the eye can sit
+   on it for hours. The hl-* highlights all need overrides because the
+   default dark-bg colors (#fbbf24 yellow, #60a5fa light blue) vanish on
+   a light bg. */
+[data-theme="paper"] {
+  --bg: #faf8f3; --bg-surface: #f4f1ea; --bg-elevated: #efebe2; --bg-hover: #e8e3d8; --bg-active: #ddd5c7;
+  --border: rgba(50,40,30,0.12); --border-light: rgba(50,40,30,0.18); --border-focus: rgba(28,124,144,0.45);
+  --text: #2a2823; --text-secondary: #5a554c; --text-tertiary: #847e72; --text-ghost: #b3ad9f;
+  --text-muted: #5a554c; --text-dim: #847e72;
+  --accent: #1c7c90; --accent-hover: #1a8aa1; --accent-dim: rgba(28,124,144,0.10); --accent-glow: rgba(28,124,144,0.16);
+  --red: #c0392b; --orange: #cf6e1c; --blue: #2c6cb0; --yellow: #c9930e; --purple: #7d4ec3;
+}
+[data-theme="paper"] .method-get { color: #1c7c90; }
+[data-theme="paper"] .method-post { color: #2c6cb0; }
+[data-theme="paper"] .method-put { color: #cf6e1c; }
+[data-theme="paper"] .method-delete { color: #c0392b; }
+[data-theme="paper"] .method-patch { color: #7d4ec3; }
+[data-theme="paper"] .status-2xx, [data-theme="paper"] .hl-status-2xx { color: #2d7a3a; }
+[data-theme="paper"] .status-3xx, [data-theme="paper"] .hl-status-3xx { color: #2c6cb0; }
+[data-theme="paper"] .status-4xx, [data-theme="paper"] .hl-status-4xx { color: #cf6e1c; }
+[data-theme="paper"] .status-5xx, [data-theme="paper"] .hl-status-5xx { color: #c0392b; }
+[data-theme="paper"] .hl-method { color: #b04500; }
+[data-theme="paper"] .hl-url { color: #1c7c90; }
+[data-theme="paper"] .hl-version { color: #847e72; }
+[data-theme="paper"] .hl-first-line { color: #b04500; }
+[data-theme="paper"] .hl-header-name { color: #2c6cb0; }
+[data-theme="paper"] .hl-colon { color: #847e72; }
+[data-theme="paper"] .hl-header-value { color: #2a2823; }
+[data-theme="paper"] .hl-body { color: #5a554c; }
+[data-theme="paper"] .hl-var { color: #7d4ec3; }
+[data-theme="paper"] .hl-json-key { color: #2c6cb0; }
+[data-theme="paper"] .hl-json-string { color: #2d7a3a; }
+[data-theme="paper"] .hl-json-number { color: #7d4ec3; }
+[data-theme="paper"] .hl-json-bool { color: #cf6e1c; }
+[data-theme="paper"] .hl-json-null { color: #c0392b; }
+[data-theme="paper"] .hl-html-tag { color: #2c6cb0; }
+[data-theme="paper"] .hl-html-attr { color: #cf6e1c; }
+[data-theme="paper"] .hl-html-value { color: #2d7a3a; }
+[data-theme="paper"] ::selection { background: rgba(28,124,144,0.22); }
+
+/* Row pop-in: brief left-border flash + bg-tint on traffic rows that
+   weren't in the previous render. ~600ms ease-out; respect reduced motion. */
+@keyframes row-pop {
+  0%   { background: var(--accent-dim); box-shadow: inset 3px 0 0 var(--accent); }
+  100% { background: transparent; box-shadow: inset 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  #traffic-body tr.new { animation: row-pop 600ms ease-out; }
+}
+
 /* ============================================================
    Intercept View
    ============================================================ */
