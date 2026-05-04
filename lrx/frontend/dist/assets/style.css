@@ -2184,8 +2184,8 @@ mark.find-match.find-current {
 /* Dracula */
 [data-theme="dracula"] {
   --bg: #282a36; --bg-surface: #21222c; --bg-elevated: #2d2f3d; --bg-hover: #343746; --bg-active: #3c3f52;
-  --border: rgba(255,255,255,0.08); --border-light: rgba(255,255,255,0.12); --border-focus: rgba(189,147,249,0.5);
-  --text: #f8f8f2; --text-secondary: #bfbfbf; --text-tertiary: #6272a4; --text-ghost: #44475a;
+  --border: rgba(255,255,255,0.12); --border-light: rgba(255,255,255,0.18); --border-focus: rgba(189,147,249,0.5);
+  --text: #f8f8f2; --text-secondary: #d4d4d4; --text-tertiary: #8a99c2; --text-ghost: #555770;
   --accent: #bd93f9; --accent-hover: #caa8fb; --accent-dim: rgba(189,147,249,0.12); --accent-glow: rgba(189,147,249,0.18);
   --red: #ff5555; --orange: #ffb86c; --blue: #8be9fd; --yellow: #f1fa8c; --purple: #ff79c6;
 }
@@ -2196,8 +2196,8 @@ mark.find-match.find-current {
 /* Gruvbox */
 [data-theme="gruvbox"] {
   --bg: #1d2021; --bg-surface: #282828; --bg-elevated: #32302f; --bg-hover: #3c3836; --bg-active: #504945;
-  --border: rgba(255,255,255,0.07); --border-light: rgba(255,255,255,0.1); --border-focus: rgba(215,153,33,0.5);
-  --text: #ebdbb2; --text-secondary: #bdae93; --text-tertiary: #7c6f64; --text-ghost: #504945;
+  --border: rgba(255,255,255,0.11); --border-light: rgba(255,255,255,0.16); --border-focus: rgba(215,153,33,0.5);
+  --text: #ebdbb2; --text-secondary: #d5c4a1; --text-tertiary: #a08c7a; --text-ghost: #665c54;
   --accent: #d79921; --accent-hover: #fabd2f; --accent-dim: rgba(215,153,33,0.12); --accent-glow: rgba(215,153,33,0.18);
   --red: #fb4934; --orange: #fe8019; --blue: #83a598; --yellow: #fabd2f; --purple: #d3869b;
 }
@@ -2208,8 +2208,8 @@ mark.find-match.find-current {
 /* Nord */
 [data-theme="nord"] {
   --bg: #2e3440; --bg-surface: #3b4252; --bg-elevated: #434c5e; --bg-hover: #4c566a; --bg-active: #5a657a;
-  --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.1); --border-focus: rgba(136,192,208,0.5);
-  --text: #eceff4; --text-secondary: #d8dee9; --text-tertiary: #7b88a1; --text-ghost: #4c566a;
+  --border: rgba(255,255,255,0.12); --border-light: rgba(255,255,255,0.18); --border-focus: rgba(136,192,208,0.5);
+  --text: #eceff4; --text-secondary: #d8dee9; --text-tertiary: #93a1bb; --text-ghost: #5e6c80;
   --accent: #88c0d0; --accent-hover: #8fbcbb; --accent-dim: rgba(136,192,208,0.12); --accent-glow: rgba(136,192,208,0.18);
   --red: #bf616a; --orange: #d08770; --blue: #81a1c1; --yellow: #ebcb8b; --purple: #b48ead;
 }
@@ -2220,8 +2220,8 @@ mark.find-match.find-current {
 /* Monokai Pro */
 [data-theme="monokai"] {
   --bg: #2d2a2e; --bg-surface: #221f22; --bg-elevated: #363337; --bg-hover: #403e41; --bg-active: #4a474b;
-  --border: rgba(255,255,255,0.07); --border-light: rgba(255,255,255,0.1); --border-focus: rgba(169,220,118,0.5);
-  --text: #fcfcfa; --text-secondary: #c1c0c0; --text-tertiary: #727072; --text-ghost: #5b595c;
+  --border: rgba(255,255,255,0.12); --border-light: rgba(255,255,255,0.17); --border-focus: rgba(169,220,118,0.5);
+  --text: #fcfcfa; --text-secondary: #d4d3d3; --text-tertiary: #8d8b8d; --text-ghost: #6c6a6d;
   --accent: #a9dc76; --accent-hover: #b5e085; --accent-dim: rgba(169,220,118,0.12); --accent-glow: rgba(169,220,118,0.18);
   --red: #ff6188; --orange: #fc9867; --blue: #78dce8; --yellow: #ffd866; --purple: #ab9df2;
 }
@@ -2232,8 +2232,8 @@ mark.find-match.find-current {
 /* Solarized Dark */
 [data-theme="solarized"] {
   --bg: #002b36; --bg-surface: #073642; --bg-elevated: #0a3f4e; --bg-hover: #0d4a5a; --bg-active: #115566;
-  --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.1); --border-focus: rgba(38,139,210,0.5);
-  --text: #fdf6e3; --text-secondary: #93a1a1; --text-tertiary: #657b83; --text-ghost: #586e75;
+  --border: rgba(255,255,255,0.11); --border-light: rgba(255,255,255,0.17); --border-focus: rgba(38,139,210,0.5);
+  --text: #fdf6e3; --text-secondary: #b1c0c0; --text-tertiary: #839496; --text-ghost: #5e7480;
   --accent: #268bd2; --accent-hover: #2e9ae0; --accent-dim: rgba(38,139,210,0.12); --accent-glow: rgba(38,139,210,0.18);
   --red: #dc322f; --orange: #cb4b16; --blue: #268bd2; --yellow: #b58900; --purple: #6c71c4;
 }
@@ -2244,8 +2244,8 @@ mark.find-match.find-current {
 /* Catppuccin Mocha */
 [data-theme="catppuccin"] {
   --bg: #1e1e2e; --bg-surface: #181825; --bg-elevated: #27273a; --bg-hover: #313244; --bg-active: #3b3b50;
-  --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.1); --border-focus: rgba(137,180,250,0.5);
-  --text: #cdd6f4; --text-secondary: #a6adc8; --text-tertiary: #6c7086; --text-ghost: #45475a;
+  --border: rgba(255,255,255,0.11); --border-light: rgba(255,255,255,0.16); --border-focus: rgba(137,180,250,0.5);
+  --text: #cdd6f4; --text-secondary: #c2c8de; --text-tertiary: #8388a0; --text-ghost: #585b70;
   --accent: #89b4fa; --accent-hover: #9ac0fb; --accent-dim: rgba(137,180,250,0.12); --accent-glow: rgba(137,180,250,0.18);
   --red: #f38ba8; --orange: #fab387; --blue: #89b4fa; --yellow: #f9e2af; --purple: #cba6f7;
 }
@@ -2256,8 +2256,8 @@ mark.find-match.find-current {
 /* Rosé Pine */
 [data-theme="rosepine"] {
   --bg: #191724; --bg-surface: #1f1d2e; --bg-elevated: #26233a; --bg-hover: #2a2740; --bg-active: #312e47;
-  --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.1); --border-focus: rgba(196,167,231,0.5);
-  --text: #e0def4; --text-secondary: #908caa; --text-tertiary: #6e6a86; --text-ghost: #524f67;
+  --border: rgba(255,255,255,0.11); --border-light: rgba(255,255,255,0.16); --border-focus: rgba(196,167,231,0.5);
+  --text: #e0def4; --text-secondary: #b3afc7; --text-tertiary: #8b87a3; --text-ghost: #6c6885;
   --accent: #c4a7e7; --accent-hover: #cfb5ec; --accent-dim: rgba(196,167,231,0.12); --accent-glow: rgba(196,167,231,0.18);
   --red: #eb6f92; --orange: #f6c177; --blue: #9ccfd8; --yellow: #f6c177; --purple: #c4a7e7;
 }
@@ -2268,8 +2268,8 @@ mark.find-match.find-current {
 /* Midnight Blue */
 [data-theme="midnight"] {
   --bg: #0a0e1a; --bg-surface: #101627; --bg-elevated: #161d32; --bg-hover: #1c243d; --bg-active: #232c48;
-  --border: rgba(100,140,255,0.08); --border-light: rgba(100,140,255,0.12); --border-focus: rgba(100,180,255,0.5);
-  --text: #e8ecf4; --text-secondary: #8b98b5; --text-tertiary: #5a6785; --text-ghost: #2e3a55;
+  --border: rgba(100,140,255,0.16); --border-light: rgba(100,140,255,0.24); --border-focus: rgba(100,180,255,0.5);
+  --text: #e8ecf4; --text-secondary: #b1bcd5; --text-tertiary: #7e8ca8; --text-ghost: #44537a;
   --accent: #64b5f6; --accent-hover: #7cc1f8; --accent-dim: rgba(100,181,246,0.12); --accent-glow: rgba(100,181,246,0.18);
   --red: #ef5350; --orange: #ffa726; --blue: #64b5f6; --yellow: #ffee58; --purple: #ab47bc;
 }
@@ -2280,8 +2280,8 @@ mark.find-match.find-current {
 /* Ember */
 [data-theme="ember"] {
   --bg: #1a1010; --bg-surface: #211414; --bg-elevated: #2a1a1a; --bg-hover: #332020; --bg-active: #3d2828;
-  --border: rgba(255,100,80,0.08); --border-light: rgba(255,100,80,0.12); --border-focus: rgba(255,138,101,0.5);
-  --text: #f5e6e0; --text-secondary: #c4a69c; --text-tertiary: #8a6b60; --text-ghost: #4d3530;
+  --border: rgba(255,100,80,0.16); --border-light: rgba(255,100,80,0.24); --border-focus: rgba(255,138,101,0.5);
+  --text: #f5e6e0; --text-secondary: #d8bdb2; --text-tertiary: #a88578; --text-ghost: #6a473f;
   --accent: #ff8a65; --accent-hover: #ff9e80; --accent-dim: rgba(255,138,101,0.12); --accent-glow: rgba(255,138,101,0.18);
   --red: #ff5252; --orange: #ff8a65; --blue: #4fc3f7; --yellow: #ffd54f; --purple: #ce93d8;
 }
