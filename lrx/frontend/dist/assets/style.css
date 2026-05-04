@@ -6,32 +6,34 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Backgrounds -- deep obsidian with subtle warmth */
-  --bg: #09090b;
-  --bg-surface: #111113;
-  --bg-elevated: #18181b;
-  --bg-hover: #1e1e22;
-  --bg-active: #252528;
+  /* Backgrounds -- deep obsidian, each step ~5pt brighter so panel
+     elevation actually reads instead of bleeding into the void. */
+  --bg: #0d0e12;
+  --bg-surface: #15171c;
+  --bg-elevated: #1c1f26;
+  --bg-hover: #232730;
+  --bg-active: #2b2f3a;
 
-  /* Borders -- subtle, translucent */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-light: rgba(255, 255, 255, 0.1);
-  --border-focus: rgba(45, 212, 142, 0.4);
+  /* Borders -- visible enough to anchor the eye on a dark bg. */
+  --border: rgba(255, 255, 255, 0.10);
+  --border-light: rgba(255, 255, 255, 0.16);
+  --border-focus: rgba(58, 235, 190, 0.45);
 
-  /* Text -- high contrast hierarchy */
+  /* Text -- high contrast hierarchy. Secondary/tertiary lifted so they
+     hit WCAG 4.5:1 against the new bg without going pure white. */
   --text: #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-tertiary: #71717a;
-  --text-ghost: #3f3f46;
+  --text-secondary: #c4c8cf;
+  --text-tertiary: #8a8e96;
+  --text-ghost: #4d525c;
   /* Legacy alias used by JS inline styles */
-  --text-muted: #a1a1aa;
-  --text-dim: #71717a;
+  --text-muted: #c4c8cf;
+  --text-dim: #8a8e96;
 
-  /* Accent -- teal-emerald */
-  --accent: #2dd4a8;
-  --accent-hover: #34d9ae;
-  --accent-dim: rgba(45, 212, 168, 0.1);
-  --accent-glow: rgba(45, 212, 168, 0.15);
+  /* Accent -- teal-emerald, saturated up so the cyan hits harder. */
+  --accent: #3aebbe;
+  --accent-hover: #4ff0c8;
+  --accent-dim: rgba(58, 235, 190, 0.12);
+  --accent-glow: rgba(58, 235, 190, 0.20);
 
   /* Semantic */
   --red: #f87171;
