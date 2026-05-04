@@ -1127,6 +1127,12 @@
   }
 
   var lastTrafficFingerprint = '';
+  // Set of row IDs we've already shown. Used by renderTraffic to mark rows
+  // that arrived since the previous render with class="new" so the CSS
+  // pop-in animation runs. Empty on first render so we don't flash 500
+  // rows at boot.
+  var seenTrafficIds = new Set();
+  var firstTrafficRender = true;
 
   function renderTraffic(forceRender) {
     var tbody = $('#traffic-body');
@@ -1171,8 +1177,9 @@
       var methodClass = 'method-' + method.toLowerCase();
       var statusClass = status >= 500 ? 'status-5xx' : status >= 400 ? 'status-4xx' : status >= 300 ? 'status-3xx' : status >= 200 ? 'status-2xx' : '';
       var selected = row.id === selectedTrafficId ? 'selected' : '';
+      var isNew = !firstTrafficRender && !seenTrafficIds.has(row.id) ? ' new' : '';
 
-      return '<tr class="' + selected + '" data-id="' + escapeAttr(row.id) + '">' +
+      return '<tr class="' + selected + isNew + '" data-id="' + escapeAttr(row.id) + '">' +
         '<td class="col-id">' + Math.round(row.index || 0) + '</td>' +
         '<td class="col-method"><span class="' + methodClass + '">' + escapeHtml(method) + '</span></td>' +
         '<td class="col-host">' + escapeHtml(row.host || '') + '</td>' +
@@ -1187,6 +1194,10 @@
     $$('#traffic-body tr').forEach(function(tr) {
       tr.addEventListener('click', function() { selectTrafficRow(tr.dataset.id); });
     });
+
+    // Update the seen-IDs set so the next render only flashes truly new rows.
+    for (var n = 0; n < trafficData.length; n++) seenTrafficIds.add(trafficData[n].id);
+    firstTrafficRender = false;
 
     // Re-apply any persisted highlight tints after each render.
     applyStoredHighlights();
