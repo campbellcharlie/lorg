@@ -11,13 +11,16 @@
 <body>
   <div id="app">
     <aside id="sidebar">
-      <div class="logo">lorg</div>
+      <div class="logo-row">
+        <div class="logo">lorg</div>
+        <button id="sidebar-toggle" class="sidebar-toggle" title="Collapse sidebar (\\)">&laquo;</button>
+      </div>
       <div class="sidebar-section">
         <nav id="nav">
-          <button class="nav-btn active" data-view="traffic">Traffic</button>
-          <button class="nav-btn" data-view="repeater">Repeater</button>
-          <button class="nav-btn" data-view="intercept">Intercept</button>
-          <button class="nav-btn" data-view="settings">Settings</button>
+          <button class="nav-btn active" data-view="traffic" data-letter="T">Traffic</button>
+          <button class="nav-btn" data-view="repeater" data-letter="R">Repeater</button>
+          <button class="nav-btn" data-view="intercept" data-letter="I">Intercept</button>
+          <button class="nav-btn" data-view="settings" data-letter="S">Settings</button>
         </nav>
       </div>
       <div id="host-list" class="sidebar-section">
@@ -53,6 +56,7 @@
           </label>
           <button id="traffic-refresh" class="btn btn-sm">Refresh</button>
           <span id="traffic-count" class="count-badge">0</span>
+          <svg id="traffic-sparkline" class="sparkline" width="120" height="20" viewBox="0 0 120 20" preserveAspectRatio="none" aria-hidden="true"></svg>
         </div>
         <div class="chip-strip" id="traffic-chips">
           <button class="chip" data-chip-type="method" data-chip="GET">GET</button>
