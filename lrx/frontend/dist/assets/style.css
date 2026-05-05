@@ -1299,30 +1299,26 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
 }
 
 /* Collapsible long-line marker — click to expand giant inline content
-   (minified <script>, base64 data URLs, etc.) without scrolling forever. */
+   (minified <script>, base64 data URLs, etc.) without scrolling forever.
+   Marker stays inline (not inline-block) and the meta stays at 1em
+   normal-style so the row keeps its monospace height/width grid; mixing
+   font-size or italics here breaks the line-num gutter alignment. */
 .rh-collapsed-marker {
   cursor: pointer;
   color: var(--text-tertiary);
   background: rgba(255, 255, 255, 0.04);
-  padding: 0 6px;
   border-radius: 3px;
-  font-style: normal;
   user-select: none;
-  display: inline-block;
 }
 .rh-collapsed-marker:hover {
   background: rgba(255, 255, 255, 0.10);
   color: var(--text);
 }
 .rh-collapsed-icon {
-  display: inline-block;
-  width: 1em;
   color: var(--accent);
 }
 .rh-collapsed-meta {
   color: var(--text-ghost);
-  font-style: italic;
-  font-size: 0.9em;
 }
 .rh-line.rh-expanded .rh-collapsed-marker {
   background: transparent;
