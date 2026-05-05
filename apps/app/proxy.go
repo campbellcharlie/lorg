@@ -65,21 +65,14 @@ func (pm *ProxyManager) GetNextProxyID() string {
 // initializeIndexFromDB queries the database to get the current max index
 func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
 	var count int
-	err := backend.DB.QueryRow("SELECT COUNT(*) FROM _data").Scan(&count)
+	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) FROM _data").Scan(&count)
 	if err != nil {
-		return fmt.Errorf("failed to query total rows: %w", err)
+		return fmt.Errorf("failed to query max row id: %w", err)
 	}
 
-	// Set the atomic counter to the total rows count
-	totalRows := uint64(count)
-	pm.index.Store(totalRows)
+	pm.index.Store(uint64(count))
 
-	log.Printf("[ProxyManager] ========================================")
-	log.Printf("[ProxyManager] Global Index Initialization:")
-	log.Printf("[ProxyManager]   - Total rows in database: %d", totalRows)
-	log.Printf("[ProxyManager]   - Next index will be: %d", totalRows+1)
-	log.Printf("[ProxyManager]   - Counter starting at: %d", totalRows)
-	log.Printf("[ProxyManager] ========================================")
+	log.Printf("[ProxyManager] Global index initialized to %d (next will be %d)", count, count+1)
 
 	return nil
 }
@@ -87,18 +80,14 @@ func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
 // initializeProxyIndexFromDB queries the database to get the current max proxy count
 func (pm *ProxyManager) initializeProxyIndexFromDB(backend *Backend) error {
 	var count int
-	err := backend.DB.QueryRow("SELECT COUNT(*) FROM _proxies").Scan(&count)
+	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) FROM _proxies").Scan(&count)
 	if err != nil {
-		return fmt.Errorf("failed to query total proxies: %w", err)
+		return fmt.Errorf("failed to query max proxy id: %w", err)
 	}
 
-	// Set the proxy index counter
-	totalProxies := uint64(count)
-	pm.proxyIndex.Store(totalProxies)
+	pm.proxyIndex.Store(uint64(count))
 
-	log.Printf("[ProxyManager] Proxy Index Initialization:")
-	log.Printf("[ProxyManager]   - Total proxies in database: %d", totalProxies)
-	log.Printf("[ProxyManager]   - Next proxy ID will use index: %d", totalProxies+1)
+	log.Printf("[ProxyManager] Proxy index initialized to %d", count)
 
 	return nil
 }
