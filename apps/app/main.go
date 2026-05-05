@@ -3,12 +3,15 @@ package app
 import (
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/campbellcharlie/lorg/internal/config"
 	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
 	"github.com/labstack/echo/v4"
+	"github.com/rs/xid"
 	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 )
 
@@ -27,15 +30,46 @@ type Backend struct {
 }
 
 func (backend *Backend) Serve() {
-	e := echo.New()
+	// Structured logging: JSON in production, text in a terminal.
+	var handler slog.Handler
+	if fi, _ := os.Stdout.Stat(); fi != nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	} else {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	}
+	slog.SetDefault(slog.New(handler))
 
-	// Simple request logging middleware
+	e := echo.New()
+	e.HideBanner = true
+
+	// Consistent JSON error shape: {"error": "message"}
+	setupErrorHandler(e)
+
+	// Trace ID: attach X-Trace-Id to every request for log correlation.
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			traceID := c.Request().Header.Get("X-Trace-Id")
+			if traceID == "" {
+				traceID = xid.New().String()
+			}
+			c.Response().Header().Set("X-Trace-Id", traceID)
+			c.Set("trace_id", traceID)
+			return next(c)
+		}
+	})
+
+	// Request logging with trace ID and duration.
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			err := next(c)
 			req := c.Request()
 			res := c.Response()
-			log.Printf("[HTTP] %s %s → %d", req.Method, req.URL.Path, res.Status)
+			slog.Info("http",
+				"method", req.Method,
+				"path", req.URL.Path,
+				"status", res.Status,
+				"trace_id", c.Get("trace_id"),
+			)
 			return err
 		}
 	})

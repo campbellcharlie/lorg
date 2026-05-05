@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,7 +17,7 @@ func serve(projectPath string) {
 
 	wappalyzerClient, err := wappalyzer.New()
 	if err != nil {
-		log.Println("Wappalyzer Error: ", err)
+		slog.Warn("wappalyzer init failed", "error", err)
 	}
 
 	os.MkdirAll(projectPath, 0755)
@@ -24,7 +25,7 @@ func serve(projectPath string) {
 	// Extract project ID from project path (the directory name)
 	projectID := filepath.Base(projectPath)
 	conf.ProjectID = projectID
-	log.Printf("Project ID: %s", projectID)
+	slog.Info("startup", "project_id", projectID)
 
 	// Open LorgDB
 	dbPath := filepath.Join(projectPath, "lorg", "pb_data", "data.db")
@@ -38,7 +39,7 @@ func serve(projectPath string) {
 
 	// Seed defaults for fresh databases
 	if err := ldb.SeedDefaults(); err != nil {
-		log.Printf("[Startup] Warning: seed defaults failed: %v", err)
+		log.Fatalf("[Startup] Seed defaults failed: %v", err)
 	}
 
 	// Create the backend

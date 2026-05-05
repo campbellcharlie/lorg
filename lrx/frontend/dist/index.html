@@ -164,6 +164,8 @@
               <label class="checkbox-label"><input type="checkbox" id="rep-tls" checked> TLS</label>
               <label>HTTP <select id="rep-http-version" class="input-sm input-narrow"><option value="1">1.1</option><option value="2">2</option></select></label>
               <button id="rep-send" class="btn btn-primary" title="Send request (Cmd/Ctrl+Enter)"><span class="btn-label">Send</span> <kbd class="kbd">&#8984;&#9166;</kbd></button>
+              <button id="rep-hist-back" class="btn btn-sm" title="Previous request" disabled>&#9664;</button>
+              <button id="rep-hist-fwd"  class="btn btn-sm" title="Next request"     disabled>&#9654;</button>
             </div>
             <div id="rep-note" class="repeater-note"></div>
             <details class="rep-vars">
@@ -283,7 +285,7 @@
             </label>
           </div>
           <div class="settings-group">
-            <label class="settings-label">Word Wrap in Response
+            <label class="settings-label">Word Wrap
               <select id="pref-wrap" class="input-sm settings-input">
                 <option value="pre-wrap" selected>Wrap</option>
                 <option value="pre">No Wrap (scroll)</option>
@@ -532,5 +534,14 @@
     setTimeout(applyNoiseFilter, 500);
   })();
   </script>
+
+  <!-- Error toast: shown by showError() in app.js for non-silent API failures -->
+  <div id="error-toast" role="alert" aria-live="assertive" style="
+    display:none;position:fixed;bottom:20px;right:20px;z-index:9999;
+    background:var(--danger,#c0392b);color:#fff;padding:10px 16px;
+    border-radius:6px;font-size:12px;font-family:var(--font-sans);
+    max-width:360px;box-shadow:0 4px 12px rgba(0,0,0,0.45);
+    border-left:3px solid rgba(255,255,255,0.4);
+  "></div>
 </body>
 </html>

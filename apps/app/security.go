@@ -34,9 +34,7 @@ func requireLocalhost(c echo.Context) error {
 	if remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost" {
 		return nil
 	}
-	return c.JSON(http.StatusForbidden, map[string]string{
-		"error": "This endpoint is only accessible from localhost",
-	})
+	return echo.NewHTTPError(http.StatusForbidden, "this endpoint is only accessible from localhost")
 }
 
 // validatePathContainment ensures that the resolved path stays within the

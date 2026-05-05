@@ -450,6 +450,9 @@ func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 		if err := requireLocalhost(c); err != nil {
 			return err
 		}
+		if err := requireMCPAuth(c); err != nil {
+			return err
+		}
 		if backend.MCP != nil && backend.MCP.active {
 			return c.JSON(http.StatusOK, map[string]any{"message": "MCP server already active"})
 		}
@@ -460,6 +463,9 @@ func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 
 	e.POST("/mcp/stop", func(c echo.Context) error {
 		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		if err := requireMCPAuth(c); err != nil {
 			return err
 		}
 		if backend.MCP == nil || !backend.MCP.active {

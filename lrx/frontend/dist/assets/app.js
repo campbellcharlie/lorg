@@ -33,7 +33,7 @@
         if (!res.ok) {
           // Don't retry on application-level errors (4xx/5xx) — only
           // on transport failures (which throw).
-          if (!opts.silent) console.error('API error: ' + path + ' → HTTP ' + res.status);
+          if (!opts.silent) { console.error('API error: ' + path + ' → HTTP ' + res.status); showError(path + ' failed (' + res.status + ')'); }
           return null;
         }
         return await res.json();
@@ -44,11 +44,24 @@
           await new Promise(function(r){ setTimeout(r, 60 * Math.pow(3, attempt)); });
           continue;
         }
-        if (!opts.silent) console.error('API error: ' + path, e);
+        if (!opts.silent) { console.error('API error: ' + path, e); showError('Network error on ' + path); }
         return null;
       }
     }
     return null;
+  }
+
+  var _errorToastTimer = null;
+  function showError(msg) {
+    var toast = document.getElementById('error-toast');
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    if (_errorToastTimer) clearTimeout(_errorToastTimer);
+    _errorToastTimer = setTimeout(function() {
+      toast.style.display = 'none';
+      _errorToastTimer = null;
+    }, 5000);
   }
 
   // --- Status Check ---
@@ -323,7 +336,9 @@
       if (cmd && typeof cmd.run === 'function') cmd.run();
     }
 
+    var _paletteTrigger = null;
     function openPalette() {
+      _paletteTrigger = document.activeElement;
       palette.classList.remove('hidden');
       input.value = '';
       renderList('');
@@ -331,6 +346,7 @@
     }
     function closePalette() {
       palette.classList.add('hidden');
+      if (_paletteTrigger) { _paletteTrigger.focus(); _paletteTrigger = null; }
     }
 
     // Public helper for the global shortcut listener.
@@ -463,6 +479,23 @@
     modal.querySelector('.cmd-palette-backdrop').addEventListener('click', closeTplModal);
     document.getElementById('tpl-cancel').addEventListener('click', closeTplModal);
     document.getElementById('tpl-save').addEventListener('click', saveTemplateFromRow);
+
+    // Focus trap: keep Tab cycling within the modal while it's open.
+    modal.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeTplModal(); return; }
+      if (e.key !== 'Tab' || modal.classList.contains('hidden')) return;
+      var focusable = Array.prototype.slice.call(modal.querySelectorAll(
+        'input, textarea, select, button, [tabindex]:not([tabindex="-1"])'
+      )).filter(function(el) { return !el.disabled && !el.closest('.hidden'); });
+      if (!focusable.length) return;
+      var first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
+
     loadTemplates();
   }
 
@@ -503,7 +536,9 @@
     });
   }
 
+  var _tplModalTrigger = null;
   function openSaveAsTemplate(rowId) {
+    _tplModalTrigger = document.activeElement;
     pendingTemplateRowId = rowId;
     var modal = document.getElementById('tpl-modal');
     if (!modal) return;
@@ -517,7 +552,9 @@
     setTimeout(function(){ document.getElementById('tpl-name').focus(); }, 50);
   }
   function closeTplModal() {
-    document.getElementById('tpl-modal')?.classList.add('hidden');
+    var modal = document.getElementById('tpl-modal');
+    if (modal) modal.classList.add('hidden');
+    if (_tplModalTrigger) { _tplModalTrigger.focus(); _tplModalTrigger = null; }
   }
 
   async function saveTemplateFromRow() {
@@ -1829,11 +1866,13 @@
     var wrap = $('#rep-request-edit-wrap');
     var pretty = $('#rep-request-pretty');
     if (!wrap || !pretty) return;
-    if (fmt === 'raw') {
-      wrap.classList.remove('hidden');
+    // The request editor is always visible and editable.
+    // Pretty == Raw here (syntax highlighting already renders in the editor).
+    // Headers/Tree/Cookies show a small read-only panel below the editor.
+    wrap.classList.remove('hidden');
+    if (fmt === 'raw' || fmt === 'pretty') {
       pretty.classList.add('hidden');
     } else {
-      wrap.classList.add('hidden');
       pretty.classList.remove('hidden');
       renderHTTPWithFormat(pretty, reqInput ? reqInput.value : '', fmt, '.rep-req-fmt-btn');
     }
@@ -1990,18 +2029,19 @@
 
   function saveCurrentTabState() {
     if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) return;
+    var prev = repeaterTabs[activeTabIndex];
     repeaterTabs[activeTabIndex] = {
       host: $('#rep-host').value,
       port: $('#rep-port').value,
       tls: $('#rep-tls').checked,
       request: reqInput ? reqInput.value : '',
       response: $('#rep-response').innerHTML || '',
-      // Raw response text + per-tab format choice so re-loading the tab
-      // restores the format toggle state instead of always going Pretty.
       responseRaw: lastRepRespRaw,
       respFmt: currentRepRespFormat,
       reqFmt: currentRepReqFormat,
       time: $('#rep-time').textContent || '',
+      history: prev ? prev.history : undefined,
+      histIdx: prev ? prev.histIdx : undefined,
     };
     saveRepeaterTabs();
   }
@@ -2028,6 +2068,7 @@
     }
     setRepRequestFormat(currentRepReqFormat);
     $('#rep-time').textContent = tab.time || '';
+    updateHistButtons();
   }
 
   function sendToRepeater() {
@@ -2104,10 +2145,50 @@
       if (resp.userdata) {
         $('#rep-note').textContent = 'Saved as #' + (resp.userdata.index || '?');
       }
+      pushRepHistory(request, resp.response || '', resp.time || '');
     } else {
       lastRepRespRaw = '';
       $('#rep-response').textContent = 'Request failed -- check host and port';
     }
+    saveCurrentTabState();
+  }
+
+  function pushRepHistory(req, respRaw, time) {
+    if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) return;
+    var tab = repeaterTabs[activeTabIndex];
+    if (!tab.history) tab.history = [];
+    // If we navigated back and then sent, drop the forward entries.
+    if (tab.histIdx !== undefined && tab.histIdx < tab.history.length - 1) {
+      tab.history = tab.history.slice(0, tab.histIdx + 1);
+    }
+    tab.history.push({ request: req, responseRaw: respRaw, time: time });
+    tab.histIdx = tab.history.length - 1;
+    updateHistButtons();
+  }
+
+  function updateHistButtons() {
+    var tab = activeTabIndex >= 0 ? repeaterTabs[activeTabIndex] : null;
+    var hist = tab && tab.history || [];
+    var idx = tab && tab.histIdx !== undefined ? tab.histIdx : hist.length - 1;
+    $('#rep-hist-back').disabled = hist.length < 2 || idx <= 0;
+    $('#rep-hist-fwd').disabled  = hist.length < 2 || idx >= hist.length - 1;
+  }
+
+  function navigateRepHistory(delta) {
+    if (activeTabIndex < 0 || activeTabIndex >= repeaterTabs.length) return;
+    var tab = repeaterTabs[activeTabIndex];
+    if (!tab.history || tab.history.length < 2) return;
+    if (tab.histIdx === undefined) tab.histIdx = tab.history.length - 1;
+    var next = tab.histIdx + delta;
+    if (next < 0 || next >= tab.history.length) return;
+    tab.histIdx = next;
+    var entry = tab.history[next];
+    if (reqInput) reqInput.value = entry.request || '';
+    syncRequestHighlight();
+    lastRepRespRaw = entry.responseRaw || '';
+    setRepResponseFormat(currentRepRespFormat);
+    $('#rep-time').textContent = entry.time || '';
+    updateHistButtons();
     saveCurrentTabState();
   }
 
@@ -2572,7 +2653,7 @@
       $('#pref-line-height').value = prefs.lineHeight;
     }
     if (prefs.wrap) {
-      document.querySelectorAll('.raw-editor.readonly, .raw-http').forEach(function(el) { el.style.whiteSpace = prefs.wrap; });
+      document.querySelectorAll('.raw-editor.readonly, .raw-http, .editor-input').forEach(function(el) { el.style.whiteSpace = prefs.wrap; });
       $('#pref-wrap').value = prefs.wrap;
     }
   }
@@ -2655,7 +2736,7 @@
         document.querySelectorAll('.raw-http, .raw-editor, .editor-input').forEach(function(el) { el.style.lineHeight = value; });
         break;
       case 'wrap':
-        document.querySelectorAll('.raw-editor.readonly, .raw-http').forEach(function(el) { el.style.whiteSpace = value; });
+        document.querySelectorAll('.raw-editor.readonly, .raw-http, .editor-input').forEach(function(el) { el.style.whiteSpace = value; });
         break;
     }
     savePreferences();
@@ -3261,6 +3342,8 @@
 
     // Repeater
     $('#rep-send').addEventListener('click', sendRepeaterRequest);
+    $('#rep-hist-back').addEventListener('click', function() { navigateRepHistory(-1); });
+    $('#rep-hist-fwd').addEventListener('click',  function() { navigateRepHistory(+1); });
 
     // Sync request textarea with highlight overlay (reqInput/reqHighlight are module-scoped)
     reqInput = $('#rep-request');
