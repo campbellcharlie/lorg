@@ -164,6 +164,7 @@
     var line = 'M ' + pts.join(' L ');
     var area = line + ' L 118,20 L 0,20 Z';
     svg.innerHTML =
+      '<title>Request rate over the last 60 seconds</title>' +
       '<path d="' + area + '" fill="currentColor" fill-opacity="0.22"/>' +
       '<path d="' + line + '" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>';
   }
@@ -2067,7 +2068,7 @@
     request = normalizeRequestVersion(request, httpVersion === 2);
 
     $('#rep-send').disabled = true;
-    $('#rep-send').textContent = 'Sending...';
+    var sendLabel = $('#rep-send .btn-label'); if (sendLabel) sendLabel.textContent = 'Sending\u2026';
     $('#rep-note').textContent = '';
 
     var resp = await api('/api/repeater/send', {
@@ -2086,7 +2087,7 @@
     });
 
     $('#rep-send').disabled = false;
-    $('#rep-send').textContent = 'Send';
+    if (sendLabel) sendLabel.textContent = 'Send';
 
     if (resp) {
       lastRepRespRaw = resp.response || '';
@@ -2568,31 +2569,36 @@
     }
   }
 
-  // Render the theme swatch grid below the theme select. Each swatch
-  // pulls --bg / --accent from a temporary [data-theme] attribute on
-  // the documentElement so themes never need to be hand-mirrored here.
+  // Render the theme swatch grid below the theme select.
+  // Color sampling cycles through every [data-theme] once on first call to
+  // read --bg / --accent, then caches. Themes are static at runtime, so
+  // re-rendering on each pref change just toggles the .active class
+  // instead of triggering 14 cascading restyles of the whole document.
+  var _themeSwatchCache = null;
+  function sampleThemeSwatches(sel) {
+    var prev = document.documentElement.getAttribute('data-theme');
+    var out = [];
+    Array.prototype.forEach.call(sel.options, function(opt) {
+      var name = opt.value;
+      if (name === 'obsidian') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', name);
+      var cs = getComputedStyle(document.documentElement);
+      out.push({ name: name, label: opt.textContent, bg: cs.getPropertyValue('--bg').trim(), accent: cs.getPropertyValue('--accent').trim() });
+    });
+    if (prev) document.documentElement.setAttribute('data-theme', prev);
+    else document.documentElement.removeAttribute('data-theme');
+    return out;
+  }
   function renderThemeSwatches() {
     var grid = document.getElementById('theme-swatches');
     var sel = document.getElementById('pref-theme');
     if (!grid || !sel) return;
+    if (!_themeSwatchCache) _themeSwatchCache = sampleThemeSwatches(sel);
     var current = sel.value;
-    var prevTheme = document.documentElement.getAttribute('data-theme');
-    var html = '';
-    Array.prototype.forEach.call(sel.options, function(opt) {
-      var name = opt.value;
-      // Sample colors for each theme by temporarily switching, reading,
-      // and reverting in a single layout pass. Cheaper than hardcoding.
-      if (name === 'obsidian') document.documentElement.removeAttribute('data-theme');
-      else document.documentElement.setAttribute('data-theme', name);
-      var cs = getComputedStyle(document.documentElement);
-      var bg = cs.getPropertyValue('--bg').trim();
-      var ac = cs.getPropertyValue('--accent').trim();
-      var active = name === current ? ' active' : '';
-      html += '<button type="button" class="theme-swatch' + active + '" data-theme="' + escapeAttr(name) + '" title="' + escapeAttr(opt.textContent) + '" style="--swatch-bg: ' + bg + '; --swatch-accent: ' + ac + ';"></button>';
-    });
-    if (prevTheme) document.documentElement.setAttribute('data-theme', prevTheme);
-    else document.documentElement.removeAttribute('data-theme');
-    grid.innerHTML = html;
+    grid.innerHTML = _themeSwatchCache.map(function(t) {
+      var active = t.name === current ? ' active' : '';
+      return '<button type="button" class="theme-swatch' + active + '" data-theme="' + escapeAttr(t.name) + '" title="' + escapeAttr(t.label) + '" style="--swatch-bg: ' + t.bg + '; --swatch-accent: ' + t.accent + ';"></button>';
+    }).join('');
     Array.prototype.forEach.call(grid.querySelectorAll('.theme-swatch'), function(btn) {
       btn.addEventListener('click', function() {
         var v = btn.dataset.theme;

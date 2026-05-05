@@ -37,10 +37,10 @@
           <div id="project-list" class="project-list"></div>
         </div>
       </div>
-      <div class="sidebar-footer">
+      <footer class="sidebar-footer">
         <div><span id="status-indicator" class="status-dot"></span> <span id="status-text">Connecting...</span></div>
         <div id="project-status" class="project-status"></div>
-      </div>
+      </footer>
     </aside>
 
     <main id="content">
@@ -57,7 +57,7 @@
           </label>
           <button id="traffic-refresh" class="btn btn-sm">Refresh</button>
           <span id="traffic-count" class="count-badge">0</span>
-          <svg id="traffic-sparkline" class="sparkline" width="120" height="20" viewBox="0 0 120 20" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <svg id="traffic-sparkline" class="sparkline" width="120" height="20" viewBox="0 0 120 20" preserveAspectRatio="none" role="img" aria-label="Request rate over the last 60 seconds"><title>Request rate over the last 60 seconds</title></svg>
         </div>
         <div class="chip-strip" id="traffic-chips">
           <span class="chip-group-label">Method</span>
@@ -163,7 +163,7 @@
               <label>Port <input type="number" id="rep-port" value="443" class="input-sm input-narrow"></label>
               <label class="checkbox-label"><input type="checkbox" id="rep-tls" checked> TLS</label>
               <label>HTTP <select id="rep-http-version" class="input-sm input-narrow"><option value="1">1.1</option><option value="2">2</option></select></label>
-              <button id="rep-send" class="btn btn-primary" title="Send request (Cmd/Ctrl+Enter)">Send <kbd class="kbd">&#8984;&#9166;</kbd></button>
+              <button id="rep-send" class="btn btn-primary" title="Send request (Cmd/Ctrl+Enter)"><span class="btn-label">Send</span> <kbd class="kbd">&#8984;&#9166;</kbd></button>
             </div>
             <div id="rep-note" class="repeater-note"></div>
             <details class="rep-vars">
@@ -205,7 +205,7 @@
             <div class="pane-header">Intercepted Request <span id="intercept-req-id" class="time-badge"></span></div>
             <div class="editor-wrap">
               <pre id="intercept-highlight" class="editor-highlight raw-http"></pre>
-              <textarea id="intercept-request" class="editor-input" spellcheck="false"></textarea>
+              <textarea id="intercept-request" class="editor-input" spellcheck="false" aria-label="Intercepted request body (editable before forwarding)"></textarea>
             </div>
             <div class="intercept-actions">
               <button id="intercept-forward" class="btn btn-primary btn-sm">Forward</button>
@@ -307,7 +307,7 @@
           <div class="settings-group">
             <div class="settings-label">Add Rule</div>
             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-              <select id="scope-type" class="input-sm" style="width:84px">
+              <select id="scope-type" class="input-sm" style="width:84px" aria-label="Scope rule action (include or exclude)">
                 <option value="include">Include</option>
                 <option value="exclude">Exclude</option>
               </select>
@@ -347,7 +347,7 @@
           <details class="mr-add" id="mr-add-form">
             <summary>+ Add new rule</summary>
             <div class="mr-add-grid">
-              <select id="mr-type">
+              <select id="mr-type" aria-label="Match-and-replace target part of the message">
                 <option value="request_header">Request header</option>
                 <option value="request_body">Request body</option>
                 <option value="response_header">Response header</option>
