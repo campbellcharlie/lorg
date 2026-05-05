@@ -271,6 +271,11 @@ func (backend *Backend) AddRequest(e *echo.Echo) {
 func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (types.UserData, error) {
 	log.Println("[SaveRequestToBackend] Called with index:", reqBody.Index)
 
+	// Respect setLogging — gate both global and per-project writes.
+	if !trafficLogging.shouldLog(reqBody.GeneratedBy) {
+		return types.UserData{}, nil
+	}
+
 	var newindex = float64(reqBody.Index)
 	var indexMinor float64 = -1
 

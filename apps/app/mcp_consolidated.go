@@ -424,8 +424,8 @@ type ConsolidatedProjectArgs struct {
 	OutputPath    string   `json:"outputPath,omitempty" jsonschema_description:"Output path for export (export)"`
 	ProjectName   string   `json:"projectName,omitempty" jsonschema_description:"Project name for export metadata (export)"`
 	HostFilter    string   `json:"hostFilter,omitempty" jsonschema_description:"Only export traffic for this host (export)"`
-	Enabled       bool     `json:"enabled,omitempty" jsonschema_description:"Enable or disable traffic logging (setLogging)"`
-	Sources       []string `json:"sources,omitempty" jsonschema_description:"Which sources to log: proxy, repeater, mcp, template, all (setLogging)"`
+	Enabled       bool     `json:"enabled,omitempty" jsonschema_description:"Enable or disable traffic capture. When false, no traffic is written to either the global store or the per-project mirror (setLogging)."`
+	Sources       []string `json:"sources,omitempty" jsonschema_description:"Which sources to gate: proxy, repeater, mcp, template, all — affects both global and per-project writes (setLogging)."`
 	RedactionMode string   `json:"redactionMode,omitempty" jsonschema_description:"Redaction mode: off, balanced, strict (setRedactionMode)"`
 }
 

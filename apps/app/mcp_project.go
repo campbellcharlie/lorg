@@ -827,19 +827,17 @@ func (backend *Backend) projectInfoHandler(ctx context.Context, request mcp.Call
 
 	info := projectDB.Info()
 
-	// Augment with host count from lorgdb for backward compat
-	allData, _ := backend.DB.FindRecords("_data", "1=1")
-
-	hostSet := map[string]struct{}{}
-	for _, rec := range allData {
-		h := rec.GetString("host")
-		if h != "" {
-			hostSet[h] = struct{}{}
+	// trafficCount is already set by Info() from the per-project DB.
+	// Compute hostCount from the same source so both numbers are consistent.
+	projectDB.mu.Lock()
+	activeDB := projectDB.db
+	projectDB.mu.Unlock()
+	if activeDB != nil {
+		var hostCount int
+		if err := activeDB.QueryRow("SELECT COUNT(DISTINCT host) FROM http_traffic").Scan(&hostCount); err == nil {
+			info["hostCount"] = hostCount
 		}
 	}
-
-	info["hostCount"] = len(hostSet)
-	info["trafficCount"] = len(allData)
 
 	return mcpJSONResult(info)
 }
@@ -892,8 +890,8 @@ func (backend *Backend) storeProjectName(name string) {
 // ---------------------------------------------------------------------------
 
 type SetTrafficLoggingArgs struct {
-	Enabled bool     `json:"enabled" jsonschema:"required" jsonschema_description:"Enable or disable traffic logging to project DB"`
-	Sources []string `json:"sources,omitempty" jsonschema_description:"Which sources to log: proxy, repeater, mcp, template, all (default: all)"`
+	Enabled bool     `json:"enabled" jsonschema:"required" jsonschema_description:"Enable or disable traffic capture. When false, no traffic is written to either the global store or the per-project mirror."`
+	Sources []string `json:"sources,omitempty" jsonschema_description:"Which sources to gate: proxy, repeater, mcp, template, all (default: all). Affects both global and per-project writes."`
 }
 
 func (backend *Backend) setTrafficLoggingHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
