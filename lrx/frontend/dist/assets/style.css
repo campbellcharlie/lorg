@@ -1005,10 +1005,12 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
    wrap is hidden and this pretty-render <pre> takes the same space.
    Both editor-wrap and rep-request-pretty grow to fill the pane height. */
 #rep-request-pretty {
-  flex: 1;
+  flex: 0 0 auto;
+  max-height: 35%;
   overflow: auto;
   margin: 0;
   padding: 10px 12px;
+  border-top: 1px solid var(--border);
 }
 #rep-response {
   flex: 1;
@@ -1089,11 +1091,11 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
   font-family: var(--font);
   font-size: var(--font-size);
   line-height: 1.5;
-  white-space: pre;
-  word-break: normal;
+  white-space: pre-wrap;
+  word-break: break-all;
   tab-size: 4;
-  word-wrap: normal;
-  overflow-wrap: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .editor-input {
@@ -1112,10 +1114,10 @@ textarea.raw-editor { white-space: pre; word-break: normal; }
   font-family: var(--font);
   font-size: var(--font-size);
   line-height: 1.5;
-  white-space: pre;
-  word-break: normal;
-  word-wrap: normal;
-  overflow-wrap: normal;
+  white-space: pre-wrap;
+  word-break: break-all;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
   overflow: auto;
   tab-size: 4;
   z-index: 2;
@@ -2697,7 +2699,9 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   margin-left: 8px;
 }
 .fmt-btn,
-.req-fmt-btn {
+.req-fmt-btn,
+.rep-req-fmt-btn,
+.rep-resp-fmt-btn {
   background: none;
   border: none;
   color: var(--text-ghost);
@@ -2712,11 +2716,15 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   transition: background var(--transition), color var(--transition);
 }
 .fmt-btn:hover,
-.req-fmt-btn:hover {
+.req-fmt-btn:hover,
+.rep-req-fmt-btn:hover,
+.rep-resp-fmt-btn:hover {
   color: var(--text-secondary);
 }
 .fmt-btn.active,
-.req-fmt-btn.active {
+.req-fmt-btn.active,
+.rep-req-fmt-btn.active,
+.rep-resp-fmt-btn.active {
   background: var(--accent-dim);
   color: var(--accent);
 }

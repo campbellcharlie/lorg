@@ -55,11 +55,6 @@ func (backend *Backend) RegisterRoutes(e *echo.Echo) {
 	backend.RunCommand(e)
 	backend.Tools(e)
 
-	// Cook (removed -- stub endpoints return 410 Gone)
-	backend.CookSearch(e)
-	backend.CookApplyMethods(e)
-	backend.CookGenerate(e)
-
 	// Playground
 	backend.PlaygroundNew(e)
 	backend.PlaygroundDelete(e)
