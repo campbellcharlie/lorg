@@ -133,7 +133,12 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 	rawReq = normalizeCRLF(rawReq)
 	rawReq = injectDefaultHeaders(rawReq)
 
-	// 5. Send via sendRepeaterLogic
+	// 5. Guard: MCP agents must not write into a project the user is only viewing.
+	if projectDB != nil && !projectDB.IsViewingActive() {
+		return mcp.NewToolResultError("cannot send requests while viewing a non-active project"), nil
+	}
+
+	// 6. Send via sendRepeaterLogic
 	start := time.Now()
 	resp, err := backend.sendRepeaterLogic(&RepeaterSendRequest{
 		Host:        host,
