@@ -1797,6 +1797,38 @@
 
   // --- Repeater ---
   var reqInput, reqHighlight;
+  // Per-tab format state. Raw response text is cached so format toggles
+  // re-render from the original instead of re-fetching.
+  var lastRepRespRaw = '';
+  var currentRepRespFormat = 'pretty';
+  var currentRepReqFormat = 'raw';
+
+  function setRepResponseFormat(fmt) {
+    currentRepRespFormat = fmt;
+    var el = $('#rep-response');
+    if (!el) return;
+    if (!lastRepRespRaw) {
+      $$('.rep-resp-fmt-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === fmt); });
+      return;
+    }
+    renderHTTPWithFormat(el, lastRepRespRaw, fmt, '.rep-resp-fmt-btn');
+  }
+
+  function setRepRequestFormat(fmt) {
+    currentRepReqFormat = fmt;
+    $$('.rep-req-fmt-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === fmt); });
+    var wrap = $('#rep-request-edit-wrap');
+    var pretty = $('#rep-request-pretty');
+    if (!wrap || !pretty) return;
+    if (fmt === 'raw') {
+      wrap.classList.remove('hidden');
+      pretty.classList.add('hidden');
+    } else {
+      wrap.classList.add('hidden');
+      pretty.classList.remove('hidden');
+      renderHTTPWithFormat(pretty, reqInput ? reqInput.value : '', fmt, '.rep-req-fmt-btn');
+    }
+  }
 
   // Highlight for editor overlay -- no line numbers, no text transforms.
   // The output must contain the exact same characters as the textarea so
@@ -1955,6 +1987,11 @@
       tls: $('#rep-tls').checked,
       request: reqInput ? reqInput.value : '',
       response: $('#rep-response').innerHTML || '',
+      // Raw response text + per-tab format choice so re-loading the tab
+      // restores the format toggle state instead of always going Pretty.
+      responseRaw: lastRepRespRaw,
+      respFmt: currentRepRespFormat,
+      reqFmt: currentRepReqFormat,
       time: $('#rep-time').textContent || '',
     };
     saveRepeaterTabs();
@@ -1968,11 +2005,19 @@
     $('#rep-tls').checked = tab.tls !== false;
     if (reqInput) reqInput.value = tab.request || '';
     syncRequestHighlight();
-    if (tab.response) {
+    // Restore cached raw response (preferred) and re-render in the saved
+    // format. Falls back to the legacy innerHTML field for older tabs.
+    lastRepRespRaw = tab.responseRaw || '';
+    currentRepRespFormat = tab.respFmt || 'pretty';
+    currentRepReqFormat = tab.reqFmt || 'raw';
+    if (lastRepRespRaw) {
+      setRepResponseFormat(currentRepRespFormat);
+    } else if (tab.response) {
       $('#rep-response').innerHTML = tab.response;
     } else {
       $('#rep-response').textContent = '';
     }
+    setRepRequestFormat(currentRepReqFormat);
     $('#rep-time').textContent = tab.time || '';
   }
 
@@ -2044,12 +2089,14 @@
     $('#rep-send').textContent = 'Send';
 
     if (resp) {
-      $('#rep-response').innerHTML = highlightHTTP(resp.response || 'Empty response');
+      lastRepRespRaw = resp.response || '';
+      setRepResponseFormat(currentRepRespFormat);
       $('#rep-time').textContent = resp.time || '';
       if (resp.userdata) {
         $('#rep-note').textContent = 'Saved as #' + (resp.userdata.index || '?');
       }
     } else {
+      lastRepRespRaw = '';
       $('#rep-response').textContent = 'Request failed -- check host and port';
     }
     saveCurrentTabState();
@@ -3344,6 +3391,14 @@
       if (e.target.classList.contains('req-fmt-btn')) {
         var detailPane = $('#traffic-detail');
         renderRequestWithFormat(detailPane._rawRequest || '', e.target.dataset.fmt);
+      }
+      // Repeater format toggles -- separate selectors so they don't fight
+      // the detail-view handler above.
+      if (e.target.classList.contains('rep-resp-fmt-btn')) {
+        setRepResponseFormat(e.target.dataset.fmt);
+      }
+      if (e.target.classList.contains('rep-req-fmt-btn')) {
+        setRepRequestFormat(e.target.dataset.fmt);
       }
     });
 

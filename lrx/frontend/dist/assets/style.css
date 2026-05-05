@@ -996,6 +996,22 @@ td.col-length { font-family: var(--font-mono); font-size: var(--font-size-xs); c
 }
 /* No border needed — the .detail-split-handle between panes is the divider. */
 
+/* When the repeater request pane is in a non-Raw format mode, the editor
+   wrap is hidden and this pretty-render <pre> takes the same space.
+   Both editor-wrap and rep-request-pretty grow to fill the pane height. */
+#rep-request-pretty {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+}
+#rep-response {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+}
+
 /* Pane header -- accent underline */
 .pane-header {
   padding: 8px 12px;
@@ -1712,6 +1728,10 @@ mark.find-match.find-current {
   padding-left: 4px;
   user-select: none;
 }
+
+/* Generic hide utility. !important is the convention for state classes
+   so they win over base id-scoped display rules without per-call CSS. */
+.hidden { display: none !important; }
 
 /* Visually hidden but available to screen readers + dev tools outline. */
 .visually-hidden {
