@@ -343,6 +343,14 @@
       else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(paletteIndex - 1); }
       else if (e.key === 'Enter')  { e.preventDefault(); execute(paletteIndex); }
       else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+      else if (e.key === 'Tab')    { e.preventDefault(); input.focus(); }
+    });
+    // Trap Tab globally while the palette is open: any element inside
+    // the modal (or the backdrop) bounces focus back to the input.
+    palette.addEventListener('keydown', function(e) {
+      if (e.key !== 'Tab' || palette.classList.contains('hidden')) return;
+      e.preventDefault();
+      input.focus();
     });
     list.addEventListener('click', function(e) {
       var li = e.target.closest('li[data-idx]');

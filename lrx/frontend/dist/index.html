@@ -47,7 +47,7 @@
       <!-- Traffic View -->
       <div id="view-traffic" class="view active">
         <h1 class="visually-hidden">Traffic</h1>
-        <div class="toolbar">
+        <header class="toolbar">
           <input type="text" id="traffic-filter" placeholder="status:200  |  method:POST  |  path:/api  |  host:example  |  source:ai" class="filter-input">
           <label class="filter-toggle">
             <input type="checkbox" id="filter-hide-noise" checked> Hide noise
@@ -58,7 +58,7 @@
           <button id="traffic-refresh" class="btn btn-sm">Refresh</button>
           <span id="traffic-count" class="count-badge">0</span>
           <svg id="traffic-sparkline" class="sparkline" width="120" height="20" viewBox="0 0 120 20" preserveAspectRatio="none" role="img" aria-label="Request rate over the last 60 seconds"><title>Request rate over the last 60 seconds</title></svg>
-        </div>
+        </header>
         <div class="chip-strip" id="traffic-chips">
           <span class="chip-group-label">Method</span>
           <button class="chip" data-chip-type="method" data-chip="GET">GET</button>
@@ -192,11 +192,11 @@
       <!-- Intercept View -->
       <div id="view-intercept" class="view">
         <h1 class="visually-hidden">Intercept</h1>
-        <div class="toolbar">
+        <header class="toolbar">
           <span id="intercept-status">Intercept is off</span>
           <button id="intercept-toggle" class="btn btn-sm">Enable</button>
           <span id="intercept-count" class="count-badge" style="margin-left:auto;">0</span>
-        </div>
+        </header>
         <div id="intercept-list" class="intercept-split">
           <div id="intercept-queue" class="intercept-queue">
             <p class="empty-state" id="intercept-empty">No intercepted requests. Enable intercept on a proxy first.</p>

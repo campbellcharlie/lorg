@@ -573,12 +573,17 @@ body.viewing-readonly #tpl-save {
 .table-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
+/* Fixed layout so columns respect their declared widths and the path
+   column truncates with ellipsis instead of pushing the table wider
+   than its container. The col-path column has no explicit width and
+   gets the remaining space under fixed layout. */
 #traffic-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 #traffic-table thead {
