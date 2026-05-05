@@ -65,7 +65,7 @@ func (pm *ProxyManager) GetNextProxyID() string {
 // initializeIndexFromDB queries the database to get the current max index
 func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
 	var count int
-	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) FROM _data").Scan(&count)
+	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(REPLACE(id,'_','') AS INTEGER)), 0) FROM _data").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to query max row id: %w", err)
 	}
@@ -80,7 +80,7 @@ func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
 // initializeProxyIndexFromDB queries the database to get the current max proxy count
 func (pm *ProxyManager) initializeProxyIndexFromDB(backend *Backend) error {
 	var count int
-	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) FROM _proxies").Scan(&count)
+	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(REPLACE(id,'_','') AS INTEGER)), 0) FROM _proxies").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to query max proxy id: %w", err)
 	}
