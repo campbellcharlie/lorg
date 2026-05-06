@@ -3198,6 +3198,13 @@
 
     container.innerHTML = html;
 
+    // JS hover fallback for WKWebView hosts (e.g. cmux) that don't reliably
+    // propagate CSS :hover when the pane isn't the first responder.
+    $$('.project-item', container).forEach(function(el) {
+      el.addEventListener('mouseenter', function() { el.classList.add('js-hover'); });
+      el.addEventListener('mouseleave', function() { el.classList.remove('js-hover'); });
+    });
+
     // DB switcher click — flips the read-only VIEWER (not active write target).
     // Active is changed only via the explicit "Set active" button.
     $$('[data-db-name]', container).forEach(function(el) {
@@ -3833,7 +3840,10 @@
     // Project switcher
     var projToggle = document.getElementById('project-toggle');
     if (projToggle) {
-      projToggle.addEventListener('click', toggleProjectDropdown);
+      projToggle.addEventListener('pointerdown', function(e) {
+        e.preventDefault();
+        toggleProjectDropdown();
+      });
     }
 
     // Close project dropdown when clicking elsewhere
