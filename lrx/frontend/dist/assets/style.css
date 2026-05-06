@@ -362,7 +362,8 @@ html, body {
   transition: background var(--transition), color var(--transition);
   border-left: 2px solid transparent;
 }
-.project-item:hover {
+.project-item:hover,
+.project-item.js-hover {
   background: var(--bg-hover);
   color: var(--text);
 }
@@ -416,7 +417,8 @@ html, body {
   font-family: inherit;
   transition: opacity var(--transition);
 }
-.project-item:hover .btn-set-active {
+.project-item:hover .btn-set-active,
+.project-item.js-hover .btn-set-active {
   opacity: 1;
   pointer-events: auto;
 }
