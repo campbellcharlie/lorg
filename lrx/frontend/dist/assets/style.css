@@ -297,8 +297,8 @@ html, body {
 .project-toggle:hover {
   background: var(--bg-hover);
 }
-.project-toggle.dropdown-open {
-  display: none;
+.project-toggle.dropdown-open .project-arrow {
+  transform: rotate(180deg);
 }
 .project-current-name {
   font-family: var(--font-mono);
@@ -314,6 +314,8 @@ html, body {
   color: var(--text-ghost);
   flex-shrink: 0;
   margin-left: 4px;
+  transition: transform var(--transition);
+  display: inline-block;
 }
 .project-dropdown {
   max-height: 360px;
@@ -401,7 +403,8 @@ html, body {
    Visible on hover so the row stays compact when the user is just
    browsing the list. */
 .project-item .btn-set-active {
-  display: none;
+  opacity: 0;
+  pointer-events: none;
   margin-left: auto;
   padding: 2px 6px;
   background: transparent;
@@ -411,9 +414,11 @@ html, body {
   font-size: 9px;
   cursor: pointer;
   font-family: inherit;
+  transition: opacity var(--transition);
 }
 .project-item:hover .btn-set-active {
-  display: inline-block;
+  opacity: 1;
+  pointer-events: auto;
 }
 .project-item .btn-set-active:hover {
   background: var(--accent-dim);
