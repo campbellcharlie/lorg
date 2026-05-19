@@ -24,14 +24,31 @@ var trustNetwork bool
 // Wired from main when -allow-lan is set.
 func SetTrustNetwork(v bool) { trustNetwork = v }
 
+// isLoopbackRequest reports whether the request's RealIP is a loopback address.
+// Shared by requireLocalhost, requireLoopbackOnly, and requireMCPAuth so they
+// agree on what "local" means.
+func isLoopbackRequest(c echo.Context) bool {
+	remoteAddr := c.RealIP()
+	return remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost"
+}
+
 // requireLocalhost checks that the request originates from a loopback address.
 // This is a defense-in-depth measure for sensitive endpoints.
 func requireLocalhost(c echo.Context) error {
 	if trustNetwork {
 		return nil
 	}
-	remoteAddr := c.RealIP()
-	if remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == "localhost" {
+	if isLoopbackRequest(c) {
+		return nil
+	}
+	return echo.NewHTTPError(http.StatusForbidden, "this endpoint is only accessible from localhost")
+}
+
+// requireLoopbackOnly is like requireLocalhost but ignores the trustNetwork
+// (-allow-lan) bypass. Used for endpoints that must never be exposed to the
+// LAN even when -allow-lan is set (e.g. tool enumeration / recon surfaces).
+func requireLoopbackOnly(c echo.Context) error {
+	if isLoopbackRequest(c) {
 		return nil
 	}
 	return echo.NewHTTPError(http.StatusForbidden, "this endpoint is only accessible from localhost")

@@ -63,6 +63,23 @@ func main() {
 	flag.BoolVar(&allowLAN, "allow-lan", false, "Allow API access from non-loopback addresses (off by default; only enable on a trusted network)")
 
 	flag.Parse()
+
+	// Allow MCP_TOKEN env to populate the token if -mcp-token wasn't passed.
+	// The -allow-lan refusal below references this fallback.
+	if conf.MCPToken == "" {
+		if env := strings.TrimSpace(os.Getenv("MCP_TOKEN")); env != "" {
+			conf.MCPToken = env
+		}
+	}
+
+	// Refuse to start when -allow-lan is set without a token: the combination
+	// would silently expose unauthenticated MCP to the LAN. Explicit token
+	// required — no auto-generation, so the failure is obvious.
+	if allowLAN && conf.MCPToken == "" {
+		fmt.Fprintln(os.Stderr, "lorg: -allow-lan requires -mcp-token (or MCP_TOKEN env) to avoid exposing unauthenticated MCP to the LAN")
+		os.Exit(1)
+	}
+
 	app.SetTrustNetwork(allowLAN)
 
 	if len(os.Args) > 1 {
