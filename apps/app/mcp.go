@@ -1,6 +1,7 @@
 package app
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -428,23 +429,38 @@ func (backend *Backend) mcpInit() {
 // HTTP endpoints
 // ---------------------------------------------------------------------------
 
+// requireMCPAuth is MCP's token-authentication gate.
+//
+// When a token is configured, every caller must present a matching
+// Authorization: Bearer header (constant-time compared). When no token is
+// configured, only loopback callers are allowed through — empty token used
+// to mean "auth disabled", which exposed unauthenticated MCP to the LAN
+// under -allow-lan. Empty token + LAN now returns 401.
+func (backend *Backend) requireMCPAuth(c echo.Context) error {
+	if backend.Config.MCPToken == "" {
+		if isLoopbackRequest(c) {
+			return nil
+		}
+		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "MCP token required for non-loopback callers"})
+	}
+	auth := c.Request().Header.Get("Authorization")
+	if auth == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header required"})
+	}
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid bearer token"})
+	}
+	got := strings.TrimPrefix(auth, "Bearer ")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(backend.Config.MCPToken)) != 1 {
+		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid bearer token"})
+	}
+	return nil
+}
+
 func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 	backend.mcpInit()
 
-	// MCP token authentication middleware
-	requireMCPAuth := func(c echo.Context) error {
-		if backend.Config.MCPToken == "" {
-			return nil // no token configured, allow all
-		}
-		auth := c.Request().Header.Get("Authorization")
-		if auth == "" {
-			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header required"})
-		}
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != backend.Config.MCPToken {
-			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid bearer token"})
-		}
-		return nil
-	}
+	requireMCPAuth := backend.requireMCPAuth
 
 	e.POST("/mcp/start", func(c echo.Context) error {
 		if err := requireLocalhost(c); err != nil {
@@ -477,27 +493,21 @@ func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 	})
 
 	e.GET("/mcp/health", func(c echo.Context) error {
-		if backend.MCP == nil || !backend.MCP.active {
-			return c.JSON(http.StatusOK, map[string]any{"active": false})
-		}
-
-		tools := backend.MCP.server.ListTools()
-		toolNames := make([]string, 0, len(tools))
-		for name := range tools {
-			toolNames = append(toolNames, name)
-		}
-
-		return c.JSON(http.StatusOK, map[string]any{
-			"active":      true,
-			"status":      "ok",
-			"server":      "lorg",
-			"version":     version.CURRENT_BACKEND_VERSION,
-			"tools":       toolNames,
-			"connections": backend.MCP.conns.Load(),
-		})
+		// Intentionally unauthenticated and minimal: cmd/lorg-app/main.go's
+		// probeLorgBin polls this endpoint to detect a running backend and
+		// only checks for HTTP 200. The response body is trimmed to
+		// {active: bool} so this LAN-reachable endpoint can't be used for
+		// recon (no tool list, no version, no connection count).
+		active := backend.MCP != nil && backend.MCP.active
+		return c.JSON(http.StatusOK, map[string]any{"active": active})
 	})
 
 	e.GET("/mcp/listtools", func(c echo.Context) error {
+		// requireLoopbackOnly ignores -allow-lan: the tool inventory is
+		// recon-sensitive and must never be exposed to the LAN.
+		if err := requireLoopbackOnly(c); err != nil {
+			return err
+		}
 		if backend.MCP == nil || !backend.MCP.active {
 			return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "MCP server not active"})
 		}
@@ -553,6 +563,9 @@ func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 
 	e.POST("/mcp/setup/claude", func(c echo.Context) error {
 		if err := requireLocalhost(c); err != nil {
+			return err
+		}
+		if err := requireMCPAuth(c); err != nil {
 			return err
 		}
 		var body struct {
