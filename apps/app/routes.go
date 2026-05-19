@@ -53,7 +53,6 @@ func (backend *Backend) RegisterRoutes(e *echo.Echo) {
 
 	// Commands
 	backend.RunCommand(e)
-	backend.Tools(e)
 
 	// Playground
 	backend.PlaygroundNew(e)
