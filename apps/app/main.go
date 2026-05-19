@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 
@@ -59,15 +60,30 @@ func (backend *Backend) Serve() {
 	})
 
 	// Request logging with trace ID and duration.
+	//
+	// Status derivation: a middleware (e.g. requireMCPAuth) that returns
+	// echo.NewHTTPError surfaces here as a non-nil err BEFORE e.HTTPErrorHandler
+	// runs. At that point c.Response().Status is still the default 200, so
+	// logging res.Status directly mislabels rejected requests as 200 even
+	// though the wire response is the error code. Prefer the HTTPError.Code
+	// when err != nil so the structured log matches what the client actually
+	// received.
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			err := next(c)
+			status := c.Response().Status
+			if err != nil {
+				if he, ok := err.(*echo.HTTPError); ok {
+					status = he.Code
+				} else {
+					status = http.StatusInternalServerError
+				}
+			}
 			req := c.Request()
-			res := c.Response()
 			slog.Info("http",
 				"method", req.Method,
 				"path", req.URL.Path,
-				"status", res.Status,
+				"status", status,
 				"trace_id", c.Get("trace_id"),
 			)
 			return err

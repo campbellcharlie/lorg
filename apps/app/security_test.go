@@ -113,17 +113,21 @@ func TestRequireMCPAuth(t *testing.T) {
 			c := e.NewContext(req, rec)
 
 			err := backend.requireMCPAuth(c)
-			if err != nil {
-				t.Fatalf("requireMCPAuth returned unexpected error: %v", err)
-			}
 
 			if tt.wantNextRun {
-				if rec.Code != http.StatusOK { // default recorder status
-					t.Errorf("expected pass-through (no response written), got status %d body=%q", rec.Code, rec.Body.String())
+				if err != nil {
+					t.Fatalf("expected pass-through (nil err), got %v", err)
 				}
 			} else {
-				if rec.Code != tt.wantStatus {
-					t.Errorf("want status %d, got %d body=%q", tt.wantStatus, rec.Code, rec.Body.String())
+				if err == nil {
+					t.Fatalf("expected *echo.HTTPError, got nil (rec status=%d)", rec.Code)
+				}
+				he, ok := err.(*echo.HTTPError)
+				if !ok {
+					t.Fatalf("expected *echo.HTTPError, got %T: %v", err, err)
+				}
+				if he.Code != tt.wantStatus {
+					t.Errorf("want status %d, got %d", tt.wantStatus, he.Code)
 				}
 			}
 		})

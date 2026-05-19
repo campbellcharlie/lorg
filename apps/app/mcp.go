@@ -437,22 +437,28 @@ func (backend *Backend) mcpInit() {
 // to mean "auth disabled", which exposed unauthenticated MCP to the LAN
 // under -allow-lan. Empty token + LAN now returns 401.
 func (backend *Backend) requireMCPAuth(c echo.Context) error {
+	// Return *echo.HTTPError (not c.JSON) so route handlers' `return err` pattern
+	// actually short-circuits. c.JSON commits a status to the wire but returns
+	// nil — leaving callers' `if err != nil` checks false and letting handlers
+	// keep running past the auth gate. setupErrorHandler normalizes
+	// *echo.HTTPError into the same {"error": "..."} shape c.JSON used to
+	// produce, so the wire response is identical to clients.
 	if backend.Config.MCPToken == "" {
 		if isLoopbackRequest(c) {
 			return nil
 		}
-		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "MCP token required for non-loopback callers"})
+		return echo.NewHTTPError(http.StatusUnauthorized, "MCP token required for non-loopback callers")
 	}
 	auth := c.Request().Header.Get("Authorization")
 	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header required"})
+		return echo.NewHTTPError(http.StatusUnauthorized, "Authorization header required")
 	}
 	if !strings.HasPrefix(auth, "Bearer ") {
-		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid bearer token"})
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid bearer token")
 	}
 	got := strings.TrimPrefix(auth, "Bearer ")
 	if subtle.ConstantTimeCompare([]byte(got), []byte(backend.Config.MCPToken)) != 1 {
-		return c.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid bearer token"})
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid bearer token")
 	}
 	return nil
 }
