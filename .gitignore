@@ -112,3 +112,7 @@ ca.crt
 # Release artifacts (built locally for `make release` then uploaded
 # to GitHub via `make publish` — no need to track them).
 dist/
+# Exception: the embedded frontend bundle lives under lrx/frontend/dist
+# and is checked in because go:embed picks it up at build time.
+!lrx/frontend/dist/
+!lrx/frontend/dist/**
