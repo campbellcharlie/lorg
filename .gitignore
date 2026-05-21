@@ -114,5 +114,15 @@ ca.crt
 dist/
 # Exception: the embedded frontend bundle lives under lrx/frontend/dist
 # and is checked in because go:embed picks it up at build time.
+# Allow only the files actually tracked — re-ignore everything else
+# under there so a future bundler's stray sourcemaps/chunks/stats
+# don't slip in via `git add .`.
 !lrx/frontend/dist/
-!lrx/frontend/dist/**
+!lrx/frontend/dist/assets/
+lrx/frontend/dist/**
+!lrx/frontend/dist/index.html
+!lrx/frontend/dist/favicon.png
+!lrx/frontend/dist/lorg-icon.svg
+!lrx/frontend/dist/lorg-app-icon.svg
+!lrx/frontend/dist/assets/app.js
+!lrx/frontend/dist/assets/style.css
