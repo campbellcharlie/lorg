@@ -441,6 +441,14 @@ body.viewing-readonly #tpl-save {
   cursor: not-allowed;
 }
 
+/* The read-only banner is position:fixed across the top of the viewport.
+   Without this, it overlays the traffic toolbar (filter input, chips).
+   Pad the flex root down by the banner height; box-sizing: border-box
+   keeps #app at 100vh total. */
+body.viewing-readonly #app {
+  padding-top: 30px;
+}
+
 /* ============================================================
    Main Content
    ============================================================ */
@@ -2901,4 +2909,211 @@ td.col-time { font-family: var(--font-mono); font-size: var(--font-size-xs); col
   z-index: 100;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* ============================================================
+   Traffic table — column resize handles
+   ============================================================ */
+#traffic-table th { position: relative; }
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 3;
+  background: transparent;
+  transition: background 80ms ease;
+}
+.col-resize-handle:hover,
+.col-resize-handle.dragging {
+  background: var(--accent);
+  opacity: 0.6;
+}
+body.col-resizing,
+body.col-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+/* ============================================================
+   Pretty HTML — foldable tag pairs
+   ============================================================ */
+.fold-toggle {
+  display: inline-block;
+  width: 1em;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1;
+  text-align: center;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+.fold-toggle:hover { color: var(--accent); }
+.fold-body[hidden] { display: none; }
+
+/* ============================================================
+   Pretty pane — sticky breadcrumb (parent-tag chain)
+   ============================================================ */
+.breadcrumb-bar {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  padding: 2px 12px;
+  min-height: 20px;
+  line-height: 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+}
+/* Collapse to zero footprint when there's nothing to show — keeps the
+   pane chrome flush at the top of short responses or non-Pretty modes. */
+.breadcrumb-bar:empty {
+  padding: 0;
+  min-height: 0;
+  border-bottom: 0;
+}
+
+/* ============================================================
+   JWT tab — one card per detected token
+   ============================================================ */
+.jwt-view {
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.jwt-view .empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.jwt-card {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.jwt-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  background: var(--bg-active);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-tertiary);
+}
+.jwt-card-alg {
+  color: var(--accent);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+  text-transform: none;
+}
+.jwt-card-loc {
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.jwt-badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 2px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.jwt-badge + .jwt-badge { margin-left: 4px; }
+.jwt-badge-ok   { background: rgba(58,235,190,0.12); color: var(--accent); }
+.jwt-badge-bad  { background: rgba(235, 75, 75, 0.15); color: var(--red, #e85a5a); }
+.jwt-badge-warn { background: rgba(244, 194, 128, 0.15); color: var(--orange, #f4c280); }
+.jwt-section { padding: 6px 10px; border-top: 1px solid var(--border); }
+.jwt-section:first-of-type { border-top: 0; }
+.jwt-section-label {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-tertiary);
+  padding-bottom: 2px;
+}
+.jwt-json {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+.jwt-sig {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+.jwt-sig-meta {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding-top: 2px;
+}
+
+/* ============================================================
+   Headers tab — property-sheet layout (key/value grid)
+   ============================================================ */
+.headers-view {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: 8px 12px 12px;
+  color: var(--text);
+}
+.headers-view .empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 8px 0;
+}
+.headers-firstline {
+  padding: 4px 0 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-size-md);
+  word-break: break-all;
+  line-height: 1.5;
+}
+.headers-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, max-content) 1fr;
+  column-gap: 16px;
+  row-gap: 1px;
+  align-items: baseline;
+}
+.headers-key {
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 2px 0;
+}
+.headers-val {
+  color: var(--text);
+  word-break: break-word;
+  padding: 2px 0;
+}
+.headers-row-orphan {
+  grid-column: 1 / -1;
+  color: var(--text-tertiary);
+  padding: 2px 0;
+}
+.headers-empty {
+  grid-column: 1 / -1;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 8px 0;
 }

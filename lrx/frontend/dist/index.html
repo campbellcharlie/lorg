@@ -116,7 +116,7 @@
           </div>
           <div class="detail-split">
             <div class="detail-split-pane" id="detail-pane-request">
-              <div class="pane-header">Request <span class="detail-format-toggle"><button class="req-fmt-btn active" data-fmt="pretty">Pretty</button><button class="req-fmt-btn" data-fmt="tree">Tree</button><button class="req-fmt-btn" data-fmt="raw">Raw</button><button class="req-fmt-btn" data-fmt="headers">Headers</button><button class="req-fmt-btn" data-fmt="cookies">Cookies</button></span></div>
+              <div class="pane-header">Request <span class="detail-format-toggle"><button class="req-fmt-btn active" data-fmt="pretty">Pretty</button><button class="req-fmt-btn" data-fmt="tree">Tree</button><button class="req-fmt-btn" data-fmt="raw">Raw</button><button class="req-fmt-btn" data-fmt="headers">Headers</button><button class="req-fmt-btn" data-fmt="cookies">Cookies</button><button class="req-fmt-btn" data-fmt="jwt" hidden>JWT</button></span></div>
               <pre id="detail-request-raw" class="raw-http" tabindex="0"></pre>
               <div class="find-bar hidden" data-target="detail-request-raw">
                 <input type="text" class="find-input" placeholder="Find in request">
@@ -131,7 +131,7 @@
             </div>
             <div id="detail-split-handle" class="detail-split-handle"></div>
             <div class="detail-split-pane" id="detail-pane-response">
-              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="tree">Tree</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button><button class="fmt-btn" data-fmt="cookies">Cookies</button><button class="fmt-btn" data-fmt="render">Render</button></span></div>
+              <div class="pane-header">Response <span class="detail-format-toggle"><button class="fmt-btn active" data-fmt="pretty">Pretty</button><button class="fmt-btn" data-fmt="tree">Tree</button><button class="fmt-btn" data-fmt="raw">Raw</button><button class="fmt-btn" data-fmt="headers">Headers</button><button class="fmt-btn" data-fmt="cookies">Cookies</button><button class="fmt-btn" data-fmt="jwt" hidden>JWT</button><button class="fmt-btn" data-fmt="render">Render</button></span></div>
               <pre id="detail-response-raw" class="raw-http" tabindex="0"></pre>
               <div class="pane-footer-stats" id="resp-pane-stats"></div>
               <div class="find-bar hidden" data-target="detail-response-raw">
@@ -175,7 +175,7 @@
           </div>
           <div class="repeater-panes">
             <div class="repeater-pane" id="rep-pane-request">
-              <div class="pane-header">Request <span class="detail-format-toggle"><button class="rep-req-fmt-btn active" data-fmt="raw">Raw</button><button class="rep-req-fmt-btn" data-fmt="pretty">Pretty</button><button class="rep-req-fmt-btn" data-fmt="tree">Tree</button><button class="rep-req-fmt-btn" data-fmt="headers">Headers</button><button class="rep-req-fmt-btn" data-fmt="cookies">Cookies</button></span></div>
+              <div class="pane-header">Request <span class="detail-format-toggle"><button class="rep-req-fmt-btn active" data-fmt="raw">Raw</button><button class="rep-req-fmt-btn" data-fmt="pretty">Pretty</button><button class="rep-req-fmt-btn" data-fmt="tree">Tree</button><button class="rep-req-fmt-btn" data-fmt="headers">Headers</button><button class="rep-req-fmt-btn" data-fmt="cookies">Cookies</button><button class="rep-req-fmt-btn" data-fmt="jwt" hidden>JWT</button></span></div>
               <div class="editor-wrap" id="rep-request-edit-wrap">
                 <pre id="rep-request-highlight" class="editor-highlight raw-http"></pre>
                 <textarea id="rep-request" class="editor-input" spellcheck="false" placeholder="GET / HTTP/1.1&#10;Host: example.com&#10;&#10;"></textarea>
@@ -184,7 +184,7 @@
             </div>
             <div id="rep-split-handle" class="detail-split-handle" title="Drag to resize · double-click to reset"></div>
             <div class="repeater-pane" id="rep-pane-response">
-              <div class="pane-header">Response <span id="rep-time" class="time-badge"></span> <span class="detail-format-toggle"><button class="rep-resp-fmt-btn active" data-fmt="pretty">Pretty</button><button class="rep-resp-fmt-btn" data-fmt="tree">Tree</button><button class="rep-resp-fmt-btn" data-fmt="raw">Raw</button><button class="rep-resp-fmt-btn" data-fmt="headers">Headers</button><button class="rep-resp-fmt-btn" data-fmt="cookies">Cookies</button></span></div>
+              <div class="pane-header">Response <span id="rep-time" class="time-badge"></span> <span class="detail-format-toggle"><button class="rep-resp-fmt-btn active" data-fmt="pretty">Pretty</button><button class="rep-resp-fmt-btn" data-fmt="tree">Tree</button><button class="rep-resp-fmt-btn" data-fmt="raw">Raw</button><button class="rep-resp-fmt-btn" data-fmt="headers">Headers</button><button class="rep-resp-fmt-btn" data-fmt="cookies">Cookies</button><button class="rep-resp-fmt-btn" data-fmt="jwt" hidden>JWT</button></span></div>
               <pre id="rep-response" class="raw-http"></pre>
             </div>
           </div>
