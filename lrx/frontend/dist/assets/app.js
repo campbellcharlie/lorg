@@ -105,10 +105,27 @@
   }
 
   // --- Host List ---
-  async function loadHosts() {
-    var data = await api('/api/collections/_hosts/records?perPage=200&sort=-created', bootOpts());
-    if (!data || !data.items) return;
-    hosts = data.items;
+  // Derive the sidebar's host list from the already-loaded traffic
+  // window (allTrafficData). The legacy /_hosts collection is a global
+  // index across every project ever seen by the proxy — using it made
+  // the sidebar leak hosts from other projects after a project switch.
+  // Sourcing from allTrafficData inherits whatever scoping loadTraffic
+  // applied (active projectDB or ?project= filter on lorgdb).
+  //
+  // While a host filter is active, allTrafficData is already narrowed
+  // to that one host by the backend, so deriving from it would collapse
+  // the sidebar to a single entry. Skip the rebuild in that case — the
+  // list refreshes on the next poll once the filter clears.
+  function loadHosts() {
+    if (hostFilter) return;
+    var seen = Object.create(null);
+    var list = [];
+    for (var i = 0; i < allTrafficData.length; i++) {
+      var h = allTrafficData[i] && allTrafficData[i].host;
+      if (h && !seen[h]) { seen[h] = 1; list.push({ host: h }); }
+    }
+    list.sort(function(a, b) { return a.host.localeCompare(b.host); });
+    hosts = list;
     renderHosts();
   }
 
@@ -148,6 +165,7 @@
     allTrafficData = data.items;
     applyClientFilter();
     renderSparkline();
+    loadHosts();
   }
 
   // Live request sparkline: 60 1-second buckets of `created` timestamps from
@@ -411,6 +429,17 @@
         if (!palette) return;
         if (palette.classList.contains('hidden')) palette._open();
         else palette._close();
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+T — reopen the most recently closed Repeater tab,
+      // mirroring the browser-tab convention. Fires regardless of focus so
+      // the user can recover a tab from anywhere in the app.
+      if (e.shiftKey && (e.key === 'T' || e.key === 't')) {
+        if (reopenLastClosedTab()) {
+          e.preventDefault();
+          switchView('repeater');
+        }
         return;
       }
 
@@ -1365,6 +1394,20 @@
     if (!el) return;
     if (!raw) { el.innerHTML = 'No data'; return; }
 
+    // Conditional JWT tab: present in this toggle group only when the
+    // message contains at least one decodable JWT. If the user was on
+    // the JWT tab and the new message has none, silently fall back to
+    // Pretty so the pane doesn't render an empty stub.
+    var jwtBtn = document.querySelector(btnSelector + '[data-fmt="jwt"]');
+    if (jwtBtn) {
+      if (findJWTs(raw).length > 0) {
+        jwtBtn.removeAttribute('hidden');
+      } else {
+        jwtBtn.setAttribute('hidden', '');
+        if (format === 'jwt') format = 'pretty';
+      }
+    }
+
     // Update active button within the same toggle group only.
     $$(btnSelector).forEach(function(b) { b.classList.toggle('active', b.dataset.fmt === format); });
 
@@ -1381,12 +1424,11 @@
     } else if (format === 'raw') {
       el.textContent = raw;
     } else if (format === 'headers') {
-      var headerEnd = raw.indexOf('\r\n\r\n');
-      if (headerEnd < 0) headerEnd = raw.indexOf('\n\n');
-      var headers = headerEnd >= 0 ? raw.substring(0, headerEnd) : raw;
-      el.innerHTML = highlightHTTP(headers);
+      el.innerHTML = renderHeadersView(raw);
     } else if (format === 'cookies') {
       el.innerHTML = renderCookiesView(raw);
+    } else if (format === 'jwt') {
+      el.innerHTML = renderJWTView(raw);
     } else if (format === 'tree') {
       el.innerHTML = renderTreeView(raw);
     } else if (format === 'render') {
@@ -1407,6 +1449,172 @@
       }
       el.innerHTML = renderHTMLView(raw);
     }
+  }
+
+  // renderHeadersView is the property-sheet style view for the Headers
+  // tab. Headers come back as an auto-sized two-column key/value grid
+  // (longest header name sets the key column width), preceded by the
+  // request-line / status-line styled like a row badge. Reuses the
+  // existing canonicalizeHeaderOrder so the order matches Pretty.
+  function renderHeadersView(raw) {
+    if (!raw) return '<div class="headers-view"><div class="empty">No data</div></div>';
+    var normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    var sep = normalized.indexOf('\n\n');
+    var headerBlock = sep >= 0 ? normalized.substring(0, sep) : normalized;
+    headerBlock = canonicalizeHeaderOrder(headerBlock);
+    var lines = headerBlock.split('\n');
+    if (!lines.length) return '<div class="headers-view"><div class="empty">No headers</div></div>';
+
+    var firstLine = lines[0];
+    var firstHTML = '';
+    var respMatch = firstLine.match(/^(HTTP\/[\d.]+)\s+(\d{3})\s*(.*)/i);
+    var reqMatch = !respMatch && firstLine.match(/^(\S+)\s+(\S+)\s+(HTTP\/[\d.]+)\s*$/);
+    if (respMatch) {
+      var s = parseInt(respMatch[2], 10);
+      var sCls = s >= 500 ? 'hl-status-5xx' : s >= 400 ? 'hl-status-4xx' : s >= 300 ? 'hl-status-3xx' : 'hl-status-2xx';
+      firstHTML =
+        '<span class="hl-version">' + escapeHtml(respMatch[1]) + '</span> ' +
+        '<span class="' + sCls + '">' + escapeHtml(respMatch[2]) + ' ' + escapeHtml(respMatch[3]) + '</span>';
+    } else if (reqMatch) {
+      firstHTML =
+        '<span class="hl-method">' + escapeHtml(reqMatch[1]) + '</span> ' +
+        '<span class="hl-url">' + escapeHtml(reqMatch[2]) + '</span> ' +
+        '<span class="hl-version">' + escapeHtml(reqMatch[3]) + '</span>';
+    } else {
+      firstHTML = escapeHtml(firstLine);
+    }
+
+    var rows = '';
+    for (var i = 1; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line) continue;
+      var ci = line.indexOf(':');
+      if (ci <= 0) {
+        rows += '<div class="headers-row headers-row-orphan">' +
+          '<div class="headers-val">' + escapeHtml(line) + '</div>' +
+        '</div>';
+        continue;
+      }
+      var key = line.substring(0, ci);
+      var val = line.substring(ci + 1).replace(/^\s+/, '');
+      rows +=
+        '<div class="headers-key">' + escapeHtml(key) + '</div>' +
+        '<div class="headers-val">' + escapeHtml(val) + '</div>';
+    }
+    if (!rows) rows = '<div class="headers-empty">No header fields</div>';
+
+    return '<div class="headers-view">' +
+      '<div class="headers-firstline">' + firstHTML + '</div>' +
+      '<div class="headers-grid">' + rows + '</div>' +
+    '</div>';
+  }
+
+  // Base64url decode — JWT segments use the URL-safe alphabet (- and _
+  // instead of + and /) and omit padding. Normalize, then atob.
+  function b64urlDecode(s) {
+    var b = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    return atob(b);
+  }
+
+  // Try to decode one candidate token. Returns { header, payload, signature }
+  // or null. Discriminator: header must parse as JSON and carry an `alg`
+  // field — that's what separates a real JWT from a coincidental
+  // "word.word.word" base64-looking string.
+  function decodeJWT(token) {
+    var parts = token.split('.');
+    if (parts.length !== 3) return null;
+    try {
+      var header = JSON.parse(b64urlDecode(parts[0]));
+      var payload = JSON.parse(b64urlDecode(parts[1]));
+      if (!header || typeof header.alg === 'undefined') return null;
+      return { header: header, payload: payload, signature: parts[2] };
+    } catch (e) { return null; }
+  }
+
+  // Scan a raw HTTP message for JWTs. JWTs almost always start with the
+  // base64 prefix `eyJ` (it's `{"` encoded). Match those, dedupe, decode,
+  // and label each with where in the message it was found (header name,
+  // cookie name, or body).
+  function findJWTs(raw) {
+    if (!raw) return [];
+    var re = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
+    var out = [];
+    var seen = Object.create(null);
+    var m;
+    while ((m = re.exec(raw)) !== null) {
+      var token = m[0];
+      if (seen[token]) continue;
+      seen[token] = 1;
+      var decoded = decodeJWT(token);
+      if (!decoded) continue;
+      decoded.token = token;
+      decoded.location = locateJWT(raw, m.index);
+      out.push(decoded);
+    }
+    return out;
+  }
+
+  // Walk back to find the header name / cookie name preceding the match.
+  function locateJWT(raw, idx) {
+    var lineStart = raw.lastIndexOf('\n', idx - 1) + 1;
+    var lineEnd = raw.indexOf('\n', idx);
+    if (lineEnd < 0) lineEnd = raw.length;
+    var line = raw.substring(lineStart, lineEnd);
+    var colon = line.indexOf(':');
+    if (colon <= 0 || colon >= idx - lineStart) return 'Body';
+    var hdr = line.substring(0, colon).trim();
+    var hdrLower = hdr.toLowerCase();
+    if (hdrLower === 'cookie' || hdrLower === 'set-cookie') {
+      var before = line.substring(0, idx - lineStart);
+      var ck = before.match(/([\w.-]+)\s*=\s*[^;]*$/);
+      if (ck) return 'Cookie: ' + ck[1];
+    }
+    return 'Header: ' + hdr;
+  }
+
+  function renderJWTView(raw) {
+    var jwts = findJWTs(raw);
+    if (!jwts.length) return '<div class="jwt-view"><div class="empty">No JWTs detected</div></div>';
+    var now = Math.floor(Date.now() / 1000);
+    var html = '<div class="jwt-view">';
+    for (var i = 0; i < jwts.length; i++) {
+      var j = jwts[i];
+      var alg = j.header && j.header.alg;
+      var status = '';
+      if (j.payload && typeof j.payload.exp === 'number') {
+        if (j.payload.exp < now) status = '<span class="jwt-badge jwt-badge-bad">expired</span>';
+        else status = '<span class="jwt-badge jwt-badge-ok">unexpired</span>';
+      }
+      if (j.payload && typeof j.payload.nbf === 'number' && j.payload.nbf > now) {
+        status += '<span class="jwt-badge jwt-badge-warn">not yet valid</span>';
+      }
+      var sig = j.signature || '';
+      var sigMeta = sig.length ? sig.length + ' base64url chars' : 'empty (alg=' + escapeHtml(String(alg)) + ')';
+      html +=
+        '<div class="jwt-card">' +
+          '<div class="jwt-card-header">' +
+            '<span class="jwt-card-alg">' + escapeHtml(String(alg || '?')) + '</span>' +
+            '<span class="jwt-card-loc">' + escapeHtml(j.location) + '</span>' +
+            status +
+          '</div>' +
+          '<div class="jwt-section">' +
+            '<div class="jwt-section-label">Header</div>' +
+            '<pre class="jwt-json">' + highlightJSON(escapeHtml(JSON.stringify(j.header, null, 2))) + '</pre>' +
+          '</div>' +
+          '<div class="jwt-section">' +
+            '<div class="jwt-section-label">Payload</div>' +
+            '<pre class="jwt-json">' + highlightJSON(escapeHtml(JSON.stringify(j.payload, null, 2))) + '</pre>' +
+          '</div>' +
+          '<div class="jwt-section">' +
+            '<div class="jwt-section-label">Signature</div>' +
+            '<pre class="jwt-sig">' + escapeHtml(sig || '(none)') + '</pre>' +
+            '<div class="jwt-sig-meta">' + sigMeta + '</div>' +
+          '</div>' +
+        '</div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   // renderCookiesView parses a raw HTTP message and produces an HTML
@@ -1804,6 +2012,7 @@
     if (marks.length > 0) {
       findState.current = 0;
       marks[0].classList.add('find-current');
+      revealFolds(marks[0]);
       marks[0].scrollIntoView({ block: 'center' });
     }
     countEl.textContent = (marks.length ? '1' : '0') + '/' + marks.length;
@@ -1816,25 +2025,45 @@
     findState.current = (findState.current + dir + findState.matches.length) % findState.matches.length;
     var next = findState.matches[findState.current];
     next.classList.add('find-current');
+    revealFolds(next);
     next.scrollIntoView({ block: 'center' });
     var countEl = bar.querySelector('.find-count');
     if (countEl) countEl.textContent = (findState.current + 1) + '/' + findState.matches.length;
   }
 
+  // Walk up from a match and unhide every collapsed .fold-body wrapping
+  // it, updating the matching toggle so the UI state stays consistent.
+  function revealFolds(el) {
+    for (var n = el && el.parentNode; n && n !== document; n = n.parentNode) {
+      if (n.nodeType === 1 && n.classList && n.classList.contains('fold-body') && n.hasAttribute('hidden')) {
+        n.removeAttribute('hidden');
+        var id = n.getAttribute('data-fold-id');
+        var pane = n.closest('.raw-http') || document;
+        var btn = pane.querySelector('.fold-toggle[data-fold-id="' + id + '"]');
+        if (btn) {
+          btn.textContent = '\u25BE';
+          btn.setAttribute('aria-expanded', 'true');
+        }
+      }
+    }
+  }
+
   // walkTextNodes invokes cb for every Text node under root, ignoring
-  // <script>, <style>, and existing <mark.find-match> nodes.
+  // <script>, <style>, existing <mark.find-match> nodes, and the
+  // per-tag fold-toggle buttons whose arrow glyph would otherwise show
+  // up as a spurious search hit.
   function walkTextNodes(root, cb) {
     var stack = [root];
     while (stack.length) {
       var n = stack.pop();
       for (var c = n.firstChild; c; c = c.nextSibling) {
         if (c.nodeType === 3) {
-          // Text node
           cb(c);
         } else if (c.nodeType === 1) {
           var tag = c.tagName;
           if (tag === 'SCRIPT' || tag === 'STYLE') continue;
           if (tag === 'MARK' && c.classList && c.classList.contains('find-match')) continue;
+          if (c.classList && c.classList.contains('fold-toggle')) continue;
           stack.push(c);
         }
       }
@@ -1930,6 +2159,32 @@
   var repeaterTabs = [];
   var activeTabIndex = -1;
   var MAX_REPEATER_TABS = 20;
+  // Stack of recently closed tabs (most-recent last). Cmd/Ctrl+Shift+T
+  // pops the last one back into the strip. Capped + persisted so the
+  // shortcut still works across reloads.
+  var closedRepeaterStack = [];
+  var MAX_CLOSED_REPEATER_TABS = 10;
+
+  function loadClosedRepeaterStack() {
+    try { closedRepeaterStack = JSON.parse(localStorage.getItem('lorg-repeater-closed-stack') || '[]'); }
+    catch (e) { closedRepeaterStack = []; }
+  }
+  function saveClosedRepeaterStack() {
+    try { localStorage.setItem('lorg-repeater-closed-stack', JSON.stringify(closedRepeaterStack)); }
+    catch (e) {}
+  }
+  function reopenLastClosedTab() {
+    if (!closedRepeaterStack.length) return false;
+    var tab = closedRepeaterStack.pop();
+    saveClosedRepeaterStack();
+    if (repeaterTabs.length >= MAX_REPEATER_TABS) repeaterTabs.shift();
+    repeaterTabs.push(tab);
+    activeTabIndex = repeaterTabs.length - 1;
+    saveRepeaterTabs();
+    renderRepeaterTabs();
+    loadRepeaterTabData(activeTabIndex);
+    return true;
+  }
 
   function loadRepeaterTabs() {
     try { repeaterTabs = JSON.parse(localStorage.getItem('lorg-repeater-history') || '[]'); } catch(e) { repeaterTabs = []; }
@@ -2009,6 +2264,12 @@
 
   function closeRepeaterTab(idx) {
     if (idx < 0 || idx >= repeaterTabs.length) return;
+    // Snapshot the about-to-close tab onto the reopen stack (cap MRU).
+    closedRepeaterStack.push(repeaterTabs[idx]);
+    if (closedRepeaterStack.length > MAX_CLOSED_REPEATER_TABS) {
+      closedRepeaterStack.splice(0, closedRepeaterStack.length - MAX_CLOSED_REPEATER_TABS);
+    }
+    saveClosedRepeaterStack();
     repeaterTabs.splice(idx, 1);
     if (activeTabIndex >= repeaterTabs.length) activeTabIndex = repeaterTabs.length - 1;
     if (activeTabIndex < 0) activeTabIndex = -1;
@@ -2462,9 +2723,9 @@
     // only matched .rh-line.
     var lineCount = output.split('\n').length;
     if (lineCount > MAX_HIGHLIGHT_LINES) {
-      return wrapLinesNoNumbers(output);
+      return applyFolds(wrapLinesNoNumbers(output));
     }
-    return addLineNumbers(output);
+    return applyFolds(addLineNumbers(output));
   }
 
   function wrapLinesNoNumbers(html) {
@@ -2472,6 +2733,39 @@
     return lines.map(function(line) {
       return wrapOneLine(line, null);
     }).join('');
+  }
+
+  // Post-process wrapped output: turn the FO/FC sentinels emitted by
+  // prettyPrintHTML into actual toggle buttons + .fold-body wrappers.
+  //
+  // Each FO marker lives inside an .rh-line; we replace the marker
+  // with a toggle button and inject `<div class="fold-body" hidden?>`
+  // right after the .rh-line's </div>. The matching FC marker (also
+  // inside an .rh-line) is replaced with empty text and a closing
+  // </div> is injected after its .rh-line.
+  //
+  // The greedy/lazy split is safe because rh-line content never
+  // nests another <div> — only spans and marks.
+  function applyFolds(html) {
+    if (html.indexOf('\u2016F') === -1) return html;
+    html = html.replace(/\u2016FO_(\d+)_([CE])_(\w+)\u2016([\s\S]*?<\/div>)/g, function(_, id, mode, tag, tail) {
+      var collapsed = mode === 'C';
+      var arrow = collapsed ? '\u25B8' : '\u25BE';
+      var toggle =
+        '<button type="button" class="fold-toggle" ' +
+          'data-fold-id="' + id + '" ' +
+          'data-tag="' + tag + '" ' +
+          'aria-expanded="' + (collapsed ? 'false' : 'true') + '" ' +
+          'title="' + (collapsed ? 'Expand' : 'Collapse') + ' &lt;' + tag + '&gt;">' +
+          arrow +
+        '</button>';
+      var hidden = collapsed ? ' hidden' : '';
+      return toggle + tail + '<div class="fold-body" data-fold-id="' + id + '"' + hidden + '>';
+    });
+    html = html.replace(/\u2016FC_(\d+)\u2016([\s\S]*?<\/div>)/g, function(_, id, tail) {
+      return tail + '</div>';
+    });
+    return html;
   }
 
   // Pretty-print body — JSON gets JSON.stringify(_, null, 2); HTML/XML gets
@@ -2501,13 +2795,23 @@
   // skips depth changes for void/self-closing/doctype/comment/CDATA tags,
   // and preserves the contents of <script> and <style> blocks verbatim
   // so inline JS/CSS doesn't get mangled.
+  // Tag pairs that get a click-to-fold wrapper in the rendered output.
+  // FOLD_DEFAULT_COLLAPSED start collapsed on first render — they're
+  // typically the largest blocks (CSS/JS/head metadata) and the most
+  // useful to hide while skimming a response.
+  var FOLDABLE_TAGS = /^(html|head|body|script|style|template|svg|table|thead|tbody|tfoot|tr|ul|ol|nav|aside|section|article|header|footer|main|form|fieldset|details|div|span)$/i;
+  var FOLD_DEFAULT_COLLAPSED = /^(script|style|head)$/i;
+
   function prettyPrintHTML(html) {
     // Pull out script/style blocks by content; replace with placeholders
-    // so the tag splitter doesn't touch their bodies.
+    // so the tag splitter doesn't touch their bodies. Surround the
+    // placeholder with newlines so the open/close tags land on their
+    // own lines — required so foldable script/style blocks get
+    // recognized as multi-line by the loop below.
     var stash = [];
     html = html.replace(/<(script|style)([^>]*)>([\s\S]*?)<\/\1>/gi, function(_, tag, attrs, body) {
       stash.push({ tag: tag, attrs: attrs, body: body });
-      return '<' + tag + attrs + '>__LORG_HTMLSTASH_' + (stash.length - 1) + '__</' + tag + '>';
+      return '<' + tag + attrs + '>\n__LORG_HTMLSTASH_' + (stash.length - 1) + '__\n</' + tag + '>';
     });
 
     // One tag per line — break wherever a tag boundary meets the next.
@@ -2519,6 +2823,8 @@
     var depth = 0;
     var indentUnit = '  ';
     var voidRe = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr|!doctype|!--)$/i;
+    var foldStack = [];
+    var foldCounter = 0;
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].replace(/^\s+|\s+$/g, '');
@@ -2531,12 +2837,29 @@
       var isVoid = voidRe.test(name);
       var isComment = /^<!--/.test(line);
       var isProcessingOrDoctype = /^<[!?]/.test(line) && !isComment;
+      var hasInlineClose = name && new RegExp('</' + name + '\\s*>$', 'i').test(line);
 
-      // Closing tag: dedent first, then emit.
+      // Closing tag: dedent first, then emit. If it matches the top of
+      // the fold stack, append a close-fold marker so applyFolds can
+      // wrap the intervening lines.
       if (isClose) {
         depth = Math.max(0, depth - 1);
+        if (foldStack.length && foldStack[foldStack.length - 1].name.toLowerCase() === name.toLowerCase()) {
+          var topClose = foldStack.pop();
+          line = line + '\u2016FC_' + topClose.id + '\u2016';
+        }
         out.push(indentUnit.repeat(depth) + line);
         continue;
+      }
+
+      // Opening tag for a foldable block — emit an open-fold marker
+      // before it. Only multi-line blocks (no inline close) get marked
+      // so trivial cases like <title>foo</title> stay inline.
+      if (name && FOLDABLE_TAGS.test(name) && !isSelfClose && !isVoid && !isProcessingOrDoctype && !isComment && !hasInlineClose) {
+        var id = foldCounter++;
+        var mode = FOLD_DEFAULT_COLLAPSED.test(name) ? 'C' : 'E';
+        foldStack.push({ id: id, name: name });
+        line = '\u2016FO_' + id + '_' + mode + '_' + name.toLowerCase() + '\u2016' + line;
       }
 
       out.push(indentUnit.repeat(depth) + line);
@@ -2544,10 +2867,19 @@
       // Increase depth only for opening tags that aren't self-closing,
       // void, doctype/comment, or end with their own close on the same
       // line (e.g. "<title>foo</title>").
-      var hasInlineClose = new RegExp('</' + name + '\\s*>$', 'i').test(line);
       if (!isClose && !isSelfClose && !isVoid && !isProcessingOrDoctype && !isComment && !hasInlineClose && name) {
         depth++;
       }
+    }
+
+    // Drain any folds left open by truncation/malformed input so the
+    // post-process always sees matched FO/FC pairs. Emit a synthetic
+    // close tag alongside the marker so the visible line still reads
+    // as HTML rather than as an empty stub.
+    while (foldStack.length) {
+      depth = Math.max(0, depth - 1);
+      var drained = foldStack.pop();
+      out.push(indentUnit.repeat(depth) + '</' + drained.name + '>\u2016FC_' + drained.id + '\u2016');
     }
 
     var result = out.join('\n');
@@ -3101,7 +3433,7 @@
     if (!banner) {
       banner = document.createElement('div');
       banner.id = 'readonly-banner';
-      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 14px;background:#3a2a14;color:#f4c280;font-family:var(--font-sans,sans-serif);font-size:11px;text-align:center;border-bottom:1px solid #5c4220;display:none;';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;height:30px;padding:6px 14px;box-sizing:border-box;background:#3a2a14;color:#f4c280;font-family:var(--font-sans,sans-serif);font-size:11px;line-height:16px;text-align:center;border-bottom:1px solid #5c4220;display:none;';
       document.body.appendChild(banner);
     }
     if (readOnly) {
@@ -3309,6 +3641,131 @@
     }
   }
 
+  // Drag handles on each #traffic-table th, persisted by data-sort key.
+  // The table is already table-layout: fixed, so setting th.style.width
+  // propagates to the column; col-path absorbs slack via min-width.
+  function initColumnResize() {
+    var STORAGE_KEY = 'lorg-traffic-col-widths';
+    var widths = {};
+    try { widths = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) {}
+    function save() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(widths)); } catch (e) {}
+    }
+    $$('#traffic-table thead th').forEach(function(th) {
+      var key = th.dataset.sort;
+      if (key && widths[key]) th.style.width = widths[key] + 'px';
+      var handle = document.createElement('div');
+      handle.className = 'col-resize-handle';
+      handle.title = 'Drag to resize · double-click to reset';
+      handle.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var startX = e.clientX;
+        var startW = th.getBoundingClientRect().width;
+        handle.classList.add('dragging');
+        document.body.classList.add('col-resizing');
+        function onMove(ev) {
+          var newW = Math.max(30, Math.round(startW + (ev.clientX - startX)));
+          th.style.width = newW + 'px';
+        }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          handle.classList.remove('dragging');
+          document.body.classList.remove('col-resizing');
+          if (key) {
+            widths[key] = parseInt(th.style.width, 10) || null;
+            if (widths[key]) save();
+          }
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      handle.addEventListener('dblclick', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        th.style.width = '';
+        if (key && widths[key] != null) {
+          delete widths[key];
+          save();
+        }
+      });
+      // Sort handler is on th.click — stop the click that follows the
+      // drag-handle's mousedown so resizing doesn't also toggle the sort.
+      handle.addEventListener('click', function(e) { e.stopPropagation(); });
+      th.appendChild(handle);
+    });
+  }
+
+  // Sticky breadcrumb above each Pretty pane: when the user scrolls past
+  // an opening tag, the chain of ancestor tags ("html › body › div")
+  // stays visible at the top. Sourced from yesterday's fold tree —
+  // each .fold-body has data-fold-id matching a .fold-toggle that
+  // carries data-tag for its tag name. When the pre's content isn't a
+  // Pretty render (e.g. Headers tab), the probe finds no .rh-line and
+  // the bar collapses to 0 via the :empty CSS rule.
+  function initBreadcrumbs() {
+    ['#detail-response-raw', '#detail-request-raw', '#rep-response', '#rep-request-pretty'].forEach(function(sel) {
+      var pre = document.querySelector(sel);
+      if (!pre || !pre.parentNode) return;
+      var bar = document.createElement('div');
+      bar.className = 'breadcrumb-bar';
+      pre.parentNode.insertBefore(bar, pre);
+
+      var pending = false;
+      function update() {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(function() {
+          pending = false;
+          var rect = pre.getBoundingClientRect();
+          var probe = document.elementFromPoint(rect.left + 30, rect.top + 4);
+          var line = probe && probe.closest && probe.closest('.rh-line');
+          if (!line || !pre.contains(line)) { bar.textContent = ''; return; }
+          var crumbs = [];
+          for (var n = line.parentNode; n && n !== pre; n = n.parentNode) {
+            if (n.nodeType !== 1 || !n.classList) continue;
+            if (n.classList.contains('fold-body')) {
+              var id = n.getAttribute('data-fold-id');
+              var toggle = pre.querySelector('.fold-toggle[data-fold-id="' + id + '"]');
+              if (toggle && toggle.dataset.tag) crumbs.unshift(toggle.dataset.tag);
+            }
+          }
+          bar.textContent = crumbs.join(' \u203A ');
+        });
+      }
+      pre.addEventListener('scroll', update, { passive: true });
+    });
+  }
+
+  // Delegated click handler for fold toggles emitted by applyFolds().
+  // Each toggle pairs with a sibling .fold-body via data-fold-id.
+  // The fold-id is per-render — collisions across panes are impossible
+  // because both opener and body live in the same pane's innerHTML.
+  function initHTMLFolds() {
+    document.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest && e.target.closest('.fold-toggle');
+      if (!btn) return;
+      var id = btn.dataset.foldId;
+      if (!id) return;
+      // Scope to the same pre — find the fold-body sibling within the
+      // same ancestor pane element.
+      var pane = btn.closest('.raw-http') || document;
+      var body = pane.querySelector('.fold-body[data-fold-id="' + id + '"]');
+      if (!body) return;
+      var collapsed = body.hasAttribute('hidden');
+      if (collapsed) {
+        body.removeAttribute('hidden');
+        btn.textContent = '\u25BE';
+        btn.setAttribute('aria-expanded', 'true');
+      } else {
+        body.setAttribute('hidden', '');
+        btn.textContent = '\u25B8';
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
   // --- Event Listeners ---
   function init() {
     // Navigation
@@ -3340,6 +3797,10 @@
       });
     });
 
+    initColumnResize();
+    initHTMLFolds();
+    initBreadcrumbs();
+
     // Traffic controls
     $('#traffic-refresh').addEventListener('click', function() { loadTraffic(); loadHosts(); });
     $('#traffic-filter').addEventListener('input', debounce(applyClientFilter, 150));
@@ -3361,6 +3822,17 @@
       reqHighlight.scrollTop = reqInput.scrollTop;
       reqHighlight.scrollLeft = reqInput.scrollLeft;
     });
+
+    // Persist tab edits as the user types. saveCurrentTabState() was only
+    // called on tab switch / close / send, so an unsent edit was lost on
+    // reload. Debounce so localStorage isn't hammered on every keystroke.
+    var persistTab = debounce(saveCurrentTabState, 250);
+    reqInput.addEventListener('input', persistTab);
+    $('#rep-host').addEventListener('input', persistTab);
+    $('#rep-port').addEventListener('input', persistTab);
+    $('#rep-tls').addEventListener('change', persistTab);
+    var repHttpVer = $('#rep-http-version');
+    if (repHttpVer) repHttpVer.addEventListener('change', persistTab);
 
     // Tab inserts a literal tab instead of moving focus out of the editor.
     // Esc still tabs out for accessibility.
@@ -3514,6 +3986,7 @@
     if (dropBtn) dropBtn.addEventListener('click', function() { interceptAction('drop'); });
 
     // Load repeater tabs
+    loadClosedRepeaterStack();
     loadRepeaterTabs();
 
     // Resizable detail pane (drag handle between table and detail).
@@ -3597,17 +4070,32 @@
     // Resizable request/response split (horizontal drag handle).
     // Same fix pattern as the vertical splitter above: after a drag, store
     // the ratio so a later window resize re-derives proportional widths.
+    // Ratio also persists across reloads via localStorage so the split a
+    // user dragged into place yesterday is still there today.
     (function() {
       var handle = document.getElementById('detail-split-handle');
       var reqPane = document.getElementById('detail-pane-request');
       var respPane = document.getElementById('detail-pane-response');
       if (!handle || !reqPane || !respPane) return;
 
+      var STORAGE_KEY = 'lorg-detail-split-ratio';
       var isDragging = false;
       var startX = 0;
       var startReqW = 0;
       var startRespW = 0;
       var reqRatio = null; // null when flex defaults apply
+
+      try {
+        var saved = parseFloat(localStorage.getItem(STORAGE_KEY));
+        if (isFinite(saved) && saved > 0.05 && saved < 0.95) reqRatio = saved;
+      } catch (e) {}
+
+      function saveRatio() {
+        try {
+          if (reqRatio == null) localStorage.removeItem(STORAGE_KEY);
+          else localStorage.setItem(STORAGE_KEY, String(reqRatio));
+        } catch (e) {}
+      }
 
       function applyRatio() {
         if (reqRatio == null) return;
@@ -3660,7 +4148,7 @@
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         var totalW = reqPane.offsetWidth + respPane.offsetWidth;
-        if (totalW > 0) reqRatio = reqPane.offsetWidth / totalW;
+        if (totalW > 0) { reqRatio = reqPane.offsetWidth / totalW; saveRatio(); }
       });
 
       // Double-click to reset to 50/50 (clear pinned widths and ratio).
@@ -3670,9 +4158,17 @@
         respPane.style.flex = '1';
         respPane.style.width = '';
         reqRatio = null;
+        saveRatio();
       });
 
       window.addEventListener('resize', applyRatio);
+      applyRatio();
+      // Detail pane starts `hidden`, so parent.offsetWidth is 0 at init
+      // and applyRatio() early-returns. Re-apply whenever the parent
+      // resizes — including the first time the pane becomes visible.
+      if (typeof ResizeObserver !== 'undefined' && reqPane.parentElement) {
+        new ResizeObserver(applyRatio).observe(reqPane.parentElement);
+      }
     })();
 
     // Context menu (right-click on traffic rows)
