@@ -98,7 +98,7 @@ func itoa(n int) string {
 // clustering handlers against a controlled fixture DB. It verifies:
 //   - clusters are grouped correctly with the modal one ranked first
 //   - anomaly detection picks up exactly the non-modal rows on an endpoint
-//   - has_resp=false and fingerprint='' rows are filtered out
+//   - has_resp=false and fingerprint=” rows are filtered out
 //   - a different endpoint does not pollute the result
 func TestCluster_ModalAndAnomalyQueries(t *testing.T) {
 	db := setupClusterTestDB(t)

@@ -18,10 +18,10 @@ import (
 
 // ScopeRule defines a single scope inclusion or exclusion pattern.
 type ScopeRule struct {
-	Protocol string `json:"protocol" yaml:"protocol"` // http, https, or empty for any
-	Host     string `json:"host" yaml:"host"`         // exact or glob pattern (e.g. *.example.com)
-	Port     string `json:"port" yaml:"port"`         // port or empty for any
-	Path     string `json:"path" yaml:"path"`         // path prefix or empty for any
+	Protocol string `json:"protocol" yaml:"protocol"`       // http, https, or empty for any
+	Host     string `json:"host" yaml:"host"`               // exact or glob pattern (e.g. *.example.com)
+	Port     string `json:"port" yaml:"port"`               // port or empty for any
+	Path     string `json:"path" yaml:"path"`               // path prefix or empty for any
 	Reason   string `json:"reason,omitempty" yaml:"reason"` // why this rule exists
 }
 

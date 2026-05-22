@@ -1,6 +1,5 @@
 package types
 
-
 type BaseCollection struct {
 	Id         string
 	Name       string

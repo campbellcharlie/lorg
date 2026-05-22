@@ -109,15 +109,15 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 	items := make([]TrafficListItem, 0, perPage)
 	for rows.Next() {
 		var (
-			id             int64
-			host, method   string
-			path, query    string
-			status         int
-			respLen        int64
-			mime, ext      string
-			tool, ts       string
-			protocol       string
-			port           int
+			id           int64
+			host, method string
+			path, query  string
+			status       int
+			respLen      int64
+			mime, ext    string
+			tool, ts     string
+			protocol     string
+			port         int
 		)
 		if err := rows.Scan(&id, &host, &method, &path, &query, &status, &respLen, &mime, &ext, &tool, &ts, &protocol, &port); err != nil {
 			continue

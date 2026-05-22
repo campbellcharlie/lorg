@@ -248,8 +248,8 @@ type trafficSearchRecord struct {
 }
 
 func (t trafficSearchRecord) GetString(key string) string { return t.inner.GetString(key) }
-func (t trafficSearchRecord) GetFloat(key string) float64  { return t.inner.GetFloat(key) }
-func (t trafficSearchRecord) Get(key string) any           { return t.inner.Get(key) }
+func (t trafficSearchRecord) GetFloat(key string) float64 { return t.inner.GetFloat(key) }
+func (t trafficSearchRecord) Get(key string) any          { return t.inner.Get(key) }
 
 // wrapRecords converts a slice of *lorgdb.Record into []trafficSearchRecord.
 func wrapRecords(recs []*lorgdb.Record) []trafficSearchRecord {

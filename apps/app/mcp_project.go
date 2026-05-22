@@ -248,9 +248,10 @@ func initProjectSchema(db *sql.DB, isNew bool) error {
 }
 
 // currentSchemaVersion is the latest schema version this build understands.
-//   v4: original burp-mcp-enhanced schema with `request_hash TEXT UNIQUE`
-//   v5: drops the UNIQUE so identical replayed requests aren't silently
-//       deduped (a fuzz/repeater workflow needs every iteration recorded).
+//
+//	v4: original burp-mcp-enhanced schema with `request_hash TEXT UNIQUE`
+//	v5: drops the UNIQUE so identical replayed requests aren't silently
+//	    deduped (a fuzz/repeater workflow needs every iteration recorded).
 const currentSchemaVersion = 5
 
 // migrateProjectSchema brings an existing project DB up to currentSchemaVersion.
@@ -1314,24 +1315,24 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 
 		// Insert traffic record
 		result, err := txTraffic.Exec(
-			timestamp,    // timestamp
-			tool,         // tool
-			method,       // method
-			exportHost,   // host
-			path,         // path
-			query,        // query
-			paramCount,   // param_count
-			status,       // status_code
-			respLength,   // response_length
-			protocol,     // protocol
-			port,         // port
-			fullURL,      // url
-			mime,         // mime_type
-			ext,          // extension
-			title,        // page_title
-			contentType,  // content_type
-			requestHash,  // request_hash
-			"",           // session_tag
+			timestamp,   // timestamp
+			tool,        // tool
+			method,      // method
+			exportHost,  // host
+			path,        // path
+			query,       // query
+			paramCount,  // param_count
+			status,      // status_code
+			respLength,  // response_length
+			protocol,    // protocol
+			port,        // port
+			fullURL,     // url
+			mime,        // mime_type
+			ext,         // extension
+			title,       // page_title
+			contentType, // content_type
+			requestHash, // request_hash
+			"",          // session_tag
 		)
 		if err != nil {
 			// Skip duplicates (unique constraint on request_hash)
@@ -1400,18 +1401,18 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 
 					// Build a JSON representation of the template
 					tmplData := map[string]any{
-						"name":            name,
-						"tls":             tr.GetBool("tls"),
-						"host":            tr.GetString("host"),
-						"port":            tr.GetFloat("port"),
-						"http_version":    tr.GetFloat("http_version"),
+						"name":             name,
+						"tls":              tr.GetBool("tls"),
+						"host":             tr.GetString("host"),
+						"port":             tr.GetFloat("port"),
+						"http_version":     tr.GetFloat("http_version"),
 						"request_template": tr.GetString("request_template"),
-						"variables":       tr.Get("variables"),
-						"description":     tr.GetString("description"),
-						"inject_session":  tr.GetBool("inject_session"),
+						"variables":        tr.Get("variables"),
+						"description":      tr.GetString("description"),
+						"inject_session":   tr.GetBool("inject_session"),
 						"json_escape_vars": tr.GetBool("json_escape_vars"),
-						"extract_regex":   tr.GetString("extract_regex"),
-						"extract_group":   tr.GetFloat("extract_group"),
+						"extract_regex":    tr.GetString("extract_regex"),
+						"extract_group":    tr.GetFloat("extract_group"),
 					}
 					tmplJSON, _ := json.Marshal(tmplData)
 

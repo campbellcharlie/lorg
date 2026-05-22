@@ -158,11 +158,11 @@ func migrationCreateAllTables(db *sql.DB) error {
 // and updated (TEXT) plus the schema-defined columns.
 //
 // Column type conventions:
-//   - Text / Editor / File / Relation → TEXT DEFAULT '' NOT NULL
+//   - Text / Editor / File / Relation → TEXT DEFAULT ” NOT NULL
 //   - Number                          → REAL DEFAULT 0 NOT NULL
 //   - Bool                            → BOOLEAN DEFAULT FALSE NOT NULL
 //   - Json                            → JSON DEFAULT NULL
-//   - Date                            → TEXT DEFAULT '' NOT NULL
+//   - Date                            → TEXT DEFAULT ” NOT NULL
 var allTableSQL = []string{
 	// -----------------------------------------------------------------------
 	// Core traffic tables (from schemas.Collections)

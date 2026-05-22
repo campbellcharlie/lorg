@@ -21,7 +21,7 @@ var ProjectPath string
 var ProxyAddress string // removed, we use api now
 var ProjectsDir string  // directory containing per-project .db files for the UI switcher
 var showLogs bool
-var allowLAN bool       // when true, permit non-loopback callers to /api/*
+var allowLAN bool // when true, permit non-loopback callers to /api/*
 
 func init() {
 	// Ensure timestamps are included in standard log output.

@@ -36,7 +36,7 @@ var hostProtoCache sync.Map // map[string]string  (host:port → "h2" | "http/1.
 type UTLSRoundTripper struct {
 	fingerprint    BrowserFingerprint
 	serverName     string
-	dialer         ContextDialer // supports SOCKS5 upstream
+	dialer         ContextDialer    // supports SOCKS5 upstream
 	clientCert     *tls.Certificate // mTLS client certificate (optional)
 	http2Transport *http2.Transport
 	http1Transport *http.Transport

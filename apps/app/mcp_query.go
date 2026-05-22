@@ -30,8 +30,8 @@ type QueryArgs struct {
 type tokenType int
 
 const (
-	tokField  tokenType = iota // e.g. req.host.cont
-	tokValue                   // "example.com" or 200
+	tokField tokenType = iota // e.g. req.host.cont
+	tokValue                  // "example.com" or 200
 	tokAND
 	tokOR
 	tokLParen

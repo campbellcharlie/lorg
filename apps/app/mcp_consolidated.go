@@ -204,18 +204,18 @@ func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallTool
 
 // ConsolidatedScopeArgs is the union argument struct for the scope tool.
 type ConsolidatedScopeArgs struct {
-	Action   string `json:"action" jsonschema:"required" jsonschema_description:"Operation: load, check, checkMultiple, getRules, addRule, removeRule, reset"`
-	FilePath string `json:"filePath,omitempty" jsonschema_description:"Path to scope.yaml (load)"`
-	Url      string `json:"url,omitempty" jsonschema_description:"URL to check (check)"`
+	Action   string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: load, check, checkMultiple, getRules, addRule, removeRule, reset"`
+	FilePath string   `json:"filePath,omitempty" jsonschema_description:"Path to scope.yaml (load)"`
+	Url      string   `json:"url,omitempty" jsonschema_description:"URL to check (check)"`
 	Urls     []string `json:"urls,omitempty" jsonschema_description:"URLs to check (checkMultiple)"`
-	RuleType string `json:"ruleType,omitempty" jsonschema_description:"include or exclude (addRule, removeRule)"`
-	Host     string `json:"host,omitempty" jsonschema_description:"Host pattern (addRule)"`
-	Protocol string `json:"protocol,omitempty" jsonschema_description:"http, https, or empty (addRule)"`
-	Port     string `json:"port,omitempty" jsonschema_description:"Port or empty (addRule)"`
-	Path     string `json:"path,omitempty" jsonschema_description:"Path prefix or empty (addRule)"`
-	Reason   string `json:"reason,omitempty" jsonschema_description:"Reason for rule (addRule)"`
-	Index    int    `json:"index,omitempty" jsonschema_description:"Rule index to remove (removeRule)"`
-	Confirm  bool   `json:"confirm,omitempty" jsonschema_description:"Must be true to confirm (reset)"`
+	RuleType string   `json:"ruleType,omitempty" jsonschema_description:"include or exclude (addRule, removeRule)"`
+	Host     string   `json:"host,omitempty" jsonschema_description:"Host pattern (addRule)"`
+	Protocol string   `json:"protocol,omitempty" jsonschema_description:"http, https, or empty (addRule)"`
+	Port     string   `json:"port,omitempty" jsonschema_description:"Port or empty (addRule)"`
+	Path     string   `json:"path,omitempty" jsonschema_description:"Path prefix or empty (addRule)"`
+	Reason   string   `json:"reason,omitempty" jsonschema_description:"Reason for rule (addRule)"`
+	Index    int      `json:"index,omitempty" jsonschema_description:"Rule index to remove (removeRule)"`
+	Confirm  bool     `json:"confirm,omitempty" jsonschema_description:"Must be true to confirm (reset)"`
 }
 
 func (backend *Backend) scopeHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -331,23 +331,23 @@ func (backend *Backend) jwtHandler(ctx context.Context, request mcp.CallToolRequ
 
 // ConsolidatedTemplateArgs is the union argument struct for the template tool.
 type ConsolidatedTemplateArgs struct {
-	Action          string                `json:"action" jsonschema:"required" jsonschema_description:"Operation: register, send, sendBatch, sendSequence, list, delete"`
-	Name            string                `json:"name,omitempty" jsonschema_description:"Template name (register, delete)"`
-	TLS             bool                  `json:"tls,omitempty" jsonschema_description:"Use HTTPS (register)"`
-	Host            string                `json:"host,omitempty" jsonschema_description:"Target hostname (register)"`
-	Port            int                   `json:"port,omitempty" jsonschema_description:"Target port (register)"`
-	HttpVersion     int                   `json:"httpVersion,omitempty" jsonschema_description:"HTTP version: 1 or 2 (register)"`
-	RequestTemplate string                `json:"requestTemplate,omitempty" jsonschema_description:"Raw HTTP request with ${VAR} placeholders (register)"`
-	Variables       map[string]string     `json:"variables,omitempty" jsonschema_description:"Default variable values (register) or overrides (send)"`
-	Description     string                `json:"description,omitempty" jsonschema_description:"Template description (register)"`
-	InjectSession   bool                  `json:"injectSession,omitempty" jsonschema_description:"Auto-inject active session cookies/headers (register)"`
-	JsonEscapeVars  bool                  `json:"jsonEscapeVars,omitempty" jsonschema_description:"JSON-escape variable values before substitution (register)"`
-	ExtractRegex    string                `json:"extractRegex,omitempty" jsonschema_description:"Regex to extract from response (register)"`
-	ExtractGroup    int                   `json:"extractGroup,omitempty" jsonschema_description:"Capture group for extraction (register)"`
-	TemplateName    string                `json:"templateName,omitempty" jsonschema_description:"Template name to use (send, sendBatch)"`
-	VariableSets    []map[string]string   `json:"variableSets,omitempty" jsonschema_description:"Array of variable sets (sendBatch)"`
+	Action          string                 `json:"action" jsonschema:"required" jsonschema_description:"Operation: register, send, sendBatch, sendSequence, list, delete"`
+	Name            string                 `json:"name,omitempty" jsonschema_description:"Template name (register, delete)"`
+	TLS             bool                   `json:"tls,omitempty" jsonschema_description:"Use HTTPS (register)"`
+	Host            string                 `json:"host,omitempty" jsonschema_description:"Target hostname (register)"`
+	Port            int                    `json:"port,omitempty" jsonschema_description:"Target port (register)"`
+	HttpVersion     int                    `json:"httpVersion,omitempty" jsonschema_description:"HTTP version: 1 or 2 (register)"`
+	RequestTemplate string                 `json:"requestTemplate,omitempty" jsonschema_description:"Raw HTTP request with ${VAR} placeholders (register)"`
+	Variables       map[string]string      `json:"variables,omitempty" jsonschema_description:"Default variable values (register) or overrides (send)"`
+	Description     string                 `json:"description,omitempty" jsonschema_description:"Template description (register)"`
+	InjectSession   bool                   `json:"injectSession,omitempty" jsonschema_description:"Auto-inject active session cookies/headers (register)"`
+	JsonEscapeVars  bool                   `json:"jsonEscapeVars,omitempty" jsonschema_description:"JSON-escape variable values before substitution (register)"`
+	ExtractRegex    string                 `json:"extractRegex,omitempty" jsonschema_description:"Regex to extract from response (register)"`
+	ExtractGroup    int                    `json:"extractGroup,omitempty" jsonschema_description:"Capture group for extraction (register)"`
+	TemplateName    string                 `json:"templateName,omitempty" jsonschema_description:"Template name to use (send, sendBatch)"`
+	VariableSets    []map[string]string    `json:"variableSets,omitempty" jsonschema_description:"Array of variable sets (sendBatch)"`
 	Steps           []TemplateSequenceStep `json:"steps,omitempty" jsonschema_description:"Ordered steps to execute (sendSequence)"`
-	Note            string                `json:"note,omitempty" jsonschema_description:"Note to attach to request (send, sendBatch)"`
+	Note            string                 `json:"note,omitempty" jsonschema_description:"Note to attach to request (send, sendBatch)"`
 }
 
 func (backend *Backend) templateHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

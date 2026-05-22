@@ -970,18 +970,18 @@ func proxyUserdataToTyped(ud map[string]any, reqCtx *RequestContext) types.UserD
 	// Convert req_json map to typed RequestData
 	if rj, ok := ud["req_json"].(map[string]any); ok {
 		typed.ReqJson = types.RequestData{
-			Method: proxyMapStr(rj,"method"),
-			Path:   proxyMapStr(rj,"path"),
-			Query:  proxyMapStr(rj,"query"),
-			Ext:    proxyMapStr(rj,"ext"),
+			Method: proxyMapStr(rj, "method"),
+			Path:   proxyMapStr(rj, "path"),
+			Query:  proxyMapStr(rj, "query"),
+			Ext:    proxyMapStr(rj, "ext"),
 		}
 	}
 
 	// Convert resp_json map to typed ResponseData
 	if rj, ok := ud["resp_json"].(map[string]any); ok {
 		typed.RespJson = types.ResponseData{
-			Title: proxyMapStr(rj,"title"),
-			Mime:  proxyMapStr(rj,"mime"),
+			Title: proxyMapStr(rj, "title"),
+			Mime:  proxyMapStr(rj, "mime"),
 		}
 		if s, ok := rj["status"].(int); ok {
 			typed.RespJson.Status = s
