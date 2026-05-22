@@ -1,8 +1,8 @@
 module github.com/campbellcharlie/lorg
 
-go 1.24.0
+go 1.25.0
 
-toolchain go1.24.1
+toolchain go1.26.3
 
 require (
 	github.com/SierraSoftworks/multicast/v2 v2.0.0
@@ -15,13 +15,13 @@ require (
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/projectdiscovery/wappalyzergo v0.2.64
-	github.com/refraction-networking/utls v1.8.1
+	github.com/refraction-networking/utls v1.8.2
 	github.com/rs/xid v1.5.0
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.11.1
 	github.com/wailsapp/wails/v2 v2.12.0
-	golang.org/x/net v0.48.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/net v0.53.0
+	golang.org/x/sync v0.20.0
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.29.5
 )
@@ -68,9 +68,9 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/crypto v0.46.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/gc/v3 v3.0.0-20240304020402-f0dba7c97c2b // indirect
