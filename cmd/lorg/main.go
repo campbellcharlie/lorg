@@ -59,7 +59,6 @@ func main() {
 	flag.StringVar(&ProjectsDir, "projects-dir", "", "Directory containing per-project .db files for the UI switcher (default: $HOME/.lorg/projects)")
 	flag.BoolVar(&showLogs, "log", false, "Show debug logs")
 	flag.StringVar(&conf.MCPToken, "mcp-token", "", "Bearer token for MCP endpoint authentication")
-	flag.BoolVar(&conf.EnableTerminal, "enable-terminal", false, "Enable xterm terminal routes (disabled by default)")
 	flag.BoolVar(&allowLAN, "allow-lan", false, "Allow API access from non-loopback addresses (off by default; only enable on a trusted network)")
 
 	flag.Parse()

@@ -22,7 +22,6 @@ type Backend struct {
 	Wappalyzer     *wappalyzer.Wappalyze
 	CmdChannel     chan process.RunCommandData
 	CounterManager *CounterManager
-	XtermManager   *XtermManager
 	MCP            *MCP
 	AuditLog       *AuditLogger
 
