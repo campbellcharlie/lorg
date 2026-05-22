@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/campbellcharlie/lorg/lrx/rawhttp"
 	_ "github.com/campbellcharlie/lorg/internal/logflags"
+	"github.com/campbellcharlie/lorg/lrx/rawhttp"
 )
 
 const ModeClusterBomb = "cluster_bomb"

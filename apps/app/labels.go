@@ -125,7 +125,6 @@ func (backend *Backend) LabelAttach(e *echo.Echo) {
 			return err
 		}
 
-
 		// log.Println("[LabelNew]: ", result2)
 
 		// Attaching to the row

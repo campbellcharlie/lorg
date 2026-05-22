@@ -146,12 +146,12 @@ func (backend *Backend) mirrorHandler(ctx context.Context, request mcp.CallToolR
 	respPreview, truncated := truncateBody(resp.Response, maxBody)
 
 	return mcpJSONResult(map[string]any{
-		"id":               resp.UserData.ID,
-		"time":             resp.Time,
-		"mutationsApplied": summary,
-		"response":         respPreview,
+		"id":                  resp.UserData.ID,
+		"time":                resp.Time,
+		"mutationsApplied":    summary,
+		"response":            respPreview,
 		"responseTruncatedAt": ifTrue(truncated, maxBody),
-		"originalLength":   len(resp.Response),
+		"originalLength":      len(resp.Response),
 	})
 }
 

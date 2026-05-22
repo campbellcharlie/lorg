@@ -27,4 +27,4 @@ func (d *RunCommandData) Scan(value interface{}) error {
 	default:
 		return fmt.Errorf("unsupported type: %T", v)
 	}
-} 
+}

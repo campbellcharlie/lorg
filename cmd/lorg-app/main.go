@@ -274,14 +274,14 @@ func pickFreePort() int {
 // resolveBackendPort decides which local port the embedded lorg-bin
 // should bind to. Resolution order:
 //
-//   1. LORG_APP_PORT env var (explicit override)
-//   2. Default :8090 (matches the standalone lorg-bin default — keeps
-//      Claude Code's MCP config "just working" without per-launch
-//      reconfiguration)
-//   3. Free port from the OS, but only if the preferred port is in
-//      use AND not already serving a lorg-bin (in which case we
-//      abort — that means a user copy is running and lorg-app would
-//      fight it for the SQLite write lock anyway).
+//  1. LORG_APP_PORT env var (explicit override)
+//  2. Default :8090 (matches the standalone lorg-bin default — keeps
+//     Claude Code's MCP config "just working" without per-launch
+//     reconfiguration)
+//  3. Free port from the OS, but only if the preferred port is in
+//     use AND not already serving a lorg-bin (in which case we
+//     abort — that means a user copy is running and lorg-app would
+//     fight it for the SQLite write lock anyway).
 //
 // The fallback is a soft warning rather than a hard error so a user
 // who has port :8090 occupied by something else (Vite, FastAPI, etc.)

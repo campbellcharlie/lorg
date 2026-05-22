@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/campbellcharlie/lorg/lrx/version"
 	"github.com/campbellcharlie/lorg/internal/save"
+	"github.com/campbellcharlie/lorg/lrx/version"
 	"github.com/labstack/echo/v4"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"

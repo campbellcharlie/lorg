@@ -36,14 +36,14 @@ type ProbeAuthArgs struct {
 }
 
 type endpointSummary struct {
-	Method            string   `json:"method"`
-	PathTemplate      string   `json:"pathTemplate"`
-	ConcreteSamples   []string `json:"concreteSamples"`
-	Count             int      `json:"count"`
-	DistinctFps       int      `json:"distinctFingerprints"`
-	ModalFingerprint  string   `json:"modalFingerprint,omitempty"`
+	Method             string      `json:"method"`
+	PathTemplate       string      `json:"pathTemplate"`
+	ConcreteSamples    []string    `json:"concreteSamples"`
+	Count              int         `json:"count"`
+	DistinctFps        int         `json:"distinctFingerprints"`
+	ModalFingerprint   string      `json:"modalFingerprint,omitempty"`
 	StatusDistribution map[int]int `json:"statusDistribution"`
-	HasParams         bool     `json:"hasParams"`
+	HasParams          bool        `json:"hasParams"`
 }
 
 type authEndpoint struct {

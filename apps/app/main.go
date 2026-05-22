@@ -12,8 +12,8 @@ import (
 	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/process"
 	"github.com/labstack/echo/v4"
-	"github.com/rs/xid"
 	wappalyzer "github.com/projectdiscovery/wappalyzergo"
+	"github.com/rs/xid"
 )
 
 type Backend struct {

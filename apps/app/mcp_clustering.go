@@ -124,8 +124,8 @@ func (backend *Backend) clusterResponsesHandler(ctx context.Context, request mcp
 	}
 
 	return mcpJSONResult(map[string]any{
-		"clusters":      clusters,
-		"clusterCount":  len(clusters),
+		"clusters":       clusters,
+		"clusterCount":   len(clusters),
 		"totalResponses": totalRows,
 		"filter": map[string]any{
 			"host":   args.Host,
@@ -218,8 +218,8 @@ func (backend *Backend) findAnomaliesHandler(ctx context.Context, request mcp.Ca
 			"fingerprint": modalFP,
 			"count":       modalCount,
 		},
-		"anomalies":     anomalies,
-		"anomalyCount":  len(anomalies),
+		"anomalies":    anomalies,
+		"anomalyCount": len(anomalies),
 		"filter": map[string]any{
 			"host":   args.Host,
 			"method": args.Method,
