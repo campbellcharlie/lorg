@@ -137,12 +137,5 @@ func serve(projectPath string) {
 		}
 	}()
 
-	// Xterm (Terminal) - only if explicitly enabled
-	if conf.EnableTerminal {
-		log.Println("[Security] Terminal routes enabled")
-	} else {
-		log.Println("[Security] Terminal routes disabled (use --enable-terminal to enable)")
-	}
-
 	API.Serve()
 }

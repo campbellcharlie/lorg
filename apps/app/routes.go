@@ -103,11 +103,6 @@ func (backend *Backend) RegisterRoutes(e *echo.Echo) {
 	// MCP
 	backend.MCPEndpoint(e)
 
-	// Xterm (Terminal) - only if explicitly enabled
-	if backend.Config.EnableTerminal {
-		backend.RegisterXtermRoutes(e)
-	}
-
 	// Generic collection CRUD REST API.
 	backend.registerCollectionCRUD(e)
 }
