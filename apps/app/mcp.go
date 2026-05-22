@@ -499,13 +499,27 @@ func (backend *Backend) MCPEndpoint(e *echo.Echo) {
 	})
 
 	e.GET("/mcp/health", func(c echo.Context) error {
-		// Intentionally unauthenticated and minimal: cmd/lorg-app/main.go's
-		// probeLorgBin polls this endpoint to detect a running backend and
-		// only checks for HTTP 200. The response body is trimmed to
-		// {active: bool} so this LAN-reachable endpoint can't be used for
-		// recon (no tool list, no version, no connection count).
+		// Intentionally unauthenticated. Non-loopback (LAN) callers get a
+		// minimal {active: bool} so this endpoint can't be used for recon
+		// (no tool inventory, no version) — see a881c56. Loopback callers,
+		// i.e. the web UI's status bar, get the richer payload they render
+		// ({status, version, tools}); the UI flags "Disconnected" without it.
 		active := backend.MCP != nil && backend.MCP.active
-		return c.JSON(http.StatusOK, map[string]any{"active": active})
+		if !isLoopbackRequest(c) || !active {
+			return c.JSON(http.StatusOK, map[string]any{"active": active})
+		}
+
+		tools := backend.MCP.server.ListTools()
+		toolNames := make([]string, 0, len(tools))
+		for name := range tools {
+			toolNames = append(toolNames, name)
+		}
+		return c.JSON(http.StatusOK, map[string]any{
+			"active":  true,
+			"status":  "ok",
+			"version": version.CURRENT_BACKEND_VERSION,
+			"tools":   toolNames,
+		})
 	})
 
 	e.GET("/mcp/listtools", func(c echo.Context) error {
