@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/campbellcharlie/lorg/apps/app"
 	"github.com/campbellcharlie/lorg/internal/config"
@@ -22,6 +23,10 @@ var ProxyAddress string // removed, we use api now
 var ProjectsDir string  // directory containing per-project .db files for the UI switcher
 var showLogs bool
 var allowLAN bool // when true, permit non-loopback callers to /api/*
+
+// Optional Serval traffic ingestion. Empty servalDB == feature off.
+var servalDB string
+var servalPoll time.Duration
 
 func init() {
 	// Ensure timestamps are included in standard log output.
@@ -60,6 +65,8 @@ func main() {
 	flag.BoolVar(&showLogs, "log", false, "Show debug logs")
 	flag.StringVar(&conf.MCPToken, "mcp-token", "", "Bearer token for MCP endpoint authentication")
 	flag.BoolVar(&allowLAN, "allow-lan", false, "Allow API access from non-loopback addresses (off by default; only enable on a trusted network)")
+	flag.StringVar(&servalDB, "serval-db", "", "Path to a Serval traffic.db to mirror into lorg's traffic views (e.g. ~/.serval/projects/default/traffic.db); empty disables the feature")
+	flag.DurationVar(&servalPoll, "serval-poll", time.Second, "Poll interval for -serval-db")
 
 	flag.Parse()
 
@@ -97,7 +104,7 @@ func main() {
 
 		fmt.Println("Initializing done")
 		fmt.Println("Projects DB directory:", ProjectsDir)
-		serve(ProjectPath)
+		serve(ProjectPath, servalDB, servalPoll)
 	} else {
 		fmt.Println("No project path provided")
 	}

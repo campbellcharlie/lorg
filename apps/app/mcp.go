@@ -33,11 +33,31 @@ type MCP struct {
 // Tool registration
 // ---------------------------------------------------------------------------
 
+// lorgMCPInstructions is sent to the client at initialize. It's an
+// intent→tool routing map: tool selection is driven by what's in context at
+// decision time, and a capable tool the agent never thinks to call is, in
+// practice, invisible. Keep it short — it's always in context.
+const lorgMCPInstructions = `lorg is an HTTP proxy + request toolkit for web security testing. Captured traffic lives in SQLite; every request/response has a numeric rowId.
+
+CORE RULE — reference, never reproduce. Do not hand-write cookies, auth tokens, or a whole captured request. Reference it by id/handle and let lorg expand it server-side; re-emitting a large blob token by token is slow and error-prone.
+
+Choose a tool by intent:
+- Replay / iterate on a captured request → mirror(rowId, {method,path,query,setHeaders,removeHeaders,body}). For sweeps, mirror batch:[{...},{...}]. Do NOT rebuild it with sendHttpRequest.
+- Reuse auth across requests → session(action:create) once, then injectSession:true on sendHttpRequest (captureSession:true to auto-store Set-Cookie/CSRF). Never paste Cookie headers.
+- Auto-rewrite requests/responses through the proxy → matchReplace.
+- One-off request with all params known → sendHttpRequest. Raw byte control → sendRaw.
+- Find / read captured traffic → searchTraffic or query (HTTPQL); full bytes → getRequestResponseFromID(id).
+- Access-control testing → authzTest / probeAuth. JWT attacks → jwt. Out-of-band → oob.
+- Parameterized, repeatable flows → template (register / send / sendSequence).
+
+Prefer the by-reference tools (mirror, session+injectSession, matchReplace) — they exist so you never regenerate large payloads by hand.`
+
 func (backend *Backend) mcpInit() {
 	s := mcpserver.NewMCPServer(
 		"lorg",
 		version.CURRENT_BACKEND_VERSION,
 		mcpserver.WithToolCapabilities(true),
+		mcpserver.WithInstructions(lorgMCPInstructions),
 	)
 
 	// =====================================================================

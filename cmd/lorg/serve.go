@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/campbellcharlie/lorg/apps/app"
@@ -13,7 +14,7 @@ import (
 	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 )
 
-func serve(projectPath string) {
+func serve(projectPath, servalDB string, servalPoll time.Duration) {
 
 	wappalyzerClient, err := wappalyzer.New()
 	if err != nil {
@@ -136,6 +137,12 @@ func serve(projectPath string) {
 			log.Printf("[Startup] Proxy auto-started: %v", result)
 		}
 	}()
+
+	// Optional: mirror a Serval browser's captured traffic into lorg. Off
+	// unless -serval-db is set; a missing DB just stays dormant.
+	if strings.TrimSpace(servalDB) != "" {
+		go app.NewServalSync(&API, servalDB, servalPoll).Start()
+	}
 
 	API.Serve()
 }

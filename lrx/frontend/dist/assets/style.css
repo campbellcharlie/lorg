@@ -685,7 +685,7 @@ th.sort-desc::after {
 }
 
 /* Column widths -- hints only, table-layout: auto sizes naturally */
-.col-id { width: 48px; color: var(--text-ghost); }
+.col-id { white-space: nowrap; color: var(--text-ghost); }
 td.col-id { font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--text-ghost); }
 .col-method { width: 60px; }
 .col-host { width: 180px; }
@@ -3117,3 +3117,35 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   font-style: italic;
   padding: 8px 0;
 }
+.source-serval {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+}
+
+.jump-input { max-width: 110px; -moz-appearance: textfield; appearance: textfield; }
+.jump-input::-webkit-outer-spin-button,
+.jump-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.jump-highlight { animation: jump-flash 2s ease-out; }
+@keyframes jump-flash {
+  0%   { background: rgba(52, 211, 153, 0.35); }
+  100% { background: transparent; }
+}
+
+/* Set-active button overlays the row's right edge instead of reserving width,
+   so non-active project names get the same width as the active one. */
+.project-item { position: relative; }
+.btn-set-active {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+}
+.project-item:hover .project-item-size,
+.project-item.js-hover .project-item-size { visibility: hidden; }
