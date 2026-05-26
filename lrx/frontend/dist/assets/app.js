@@ -154,18 +154,118 @@
 
   // --- Traffic Table ---
   var allTrafficData = [];
+  var trafficSeen = {};         // id -> true, dedup across pages/polls
+  var trafficLoadingMore = false;
+  var trafficNoMore = false;    // true once an older page returns < a full page
+  var trafficJump = false;      // true while viewing a jumped-to section (pauses live prepend)
+  var trafficScroller = null;   // .table-container, assigned at init
 
-  async function loadTraffic() {
+  function trafficListURL(before) {
     var hostParam = hostFilter ? '&host=' + encodeURIComponent(hostFilter) : '';
     var projectParam = activeProjectFilter ? '&project=' + encodeURIComponent(activeProjectFilter) : '';
-    var data = await api('/api/traffic/list?perPage=500' + hostParam + projectParam, bootOpts());
+    var beforeParam = before ? '&before=' + before : '';
+    return '/api/traffic/list?perPage=500' + beforeParam + hostParam + projectParam;
+  }
 
+  // Merge items by id (dedup). prepend=true puts new rows at the front (live
+  // tail, newest first); prepend=false appends them (older pages stay in
+  // DESC order). Client filters run over the accumulated set, so they apply
+  // across every loaded page automatically.
+  function mergeTraffic(items, prepend) {
+    var fresh = [];
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!trafficSeen[it.id]) { trafficSeen[it.id] = true; fresh.push(it); }
+    }
+    if (fresh.length === 0) return;
+    allTrafficData = prepend ? fresh.concat(allTrafficData) : allTrafficData.concat(fresh);
+  }
+
+  // Reset accumulation and load the newest page. Called on initial load and
+  // whenever the server-side scope changes (project switch, host filter).
+  async function loadTraffic() {
+    allTrafficData = [];
+    trafficSeen = {};
+    trafficNoMore = false;
+    trafficJump = false;
+    var data = await api(trafficListURL(0), bootOpts());
     if (!data || !data.items) return;
-
-    allTrafficData = data.items;
+    if (data.items.length < 500) trafficNoMore = true;
+    mergeTraffic(data.items, false);
     applyClientFilter();
     renderSparkline();
     loadHosts();
+  }
+
+  // Live tail: merge only newer rows at the front, preserving any older pages
+  // the user has scrolled in. Called by the 1.5s poll.
+  async function pollTraffic() {
+    if (trafficJump) return; // paused while viewing a jumped-to section
+    var data = await api(trafficListURL(0), bootOpts());
+    if (!data || !data.items) return;
+    mergeTraffic(data.items, true);
+    applyClientFilter();
+    renderSparkline();
+    loadHosts();
+  }
+
+  // Infinite scroll: append the next older page. Auto-fills when an active
+  // client filter leaves too few rows to make the list scrollable, so the
+  // user can keep reaching back even through a narrow filter.
+  async function loadMoreTraffic(depth) {
+    depth = depth || 0;
+    if (trafficLoadingMore || trafficNoMore || allTrafficData.length === 0) return;
+    var oldest = allTrafficData[allTrafficData.length - 1].index; // DESC: last row = smallest id
+    if (!oldest) return;
+    trafficLoadingMore = true;
+    try {
+      var data = await api(trafficListURL(oldest), bootOpts());
+      if (data && data.items) {
+        if (data.items.length < 500) trafficNoMore = true;
+        mergeTraffic(data.items, false);
+        applyClientFilter();
+      }
+    } finally {
+      trafficLoadingMore = false;
+    }
+    // Auto-fill at most a few pages so an aggressive filter can't pull the
+    // entire DB into the DOM chasing a scrollable height.
+    if (depth < 5 && trafficScroller && !trafficNoMore &&
+        trafficScroller.scrollHeight <= trafficScroller.clientHeight + 50) {
+      loadMoreTraffic(depth + 1);
+    }
+  }
+
+  // Jump to a specific request number (the # in the ID column): load a window
+  // starting just-newer than it, pause the live tail, and highlight the row.
+  async function jumpToTraffic(target) {
+    if (!target || target < 1) return;
+    allTrafficData = [];
+    trafficSeen = {};
+    trafficNoMore = false;
+    trafficJump = true;
+    var data = await api(trafficListURL(target + 1), bootOpts());
+    if (!data || !data.items) return;
+    if (data.items.length < 500) trafficNoMore = true;
+    mergeTraffic(data.items, false);
+    applyClientFilter();
+    if (trafficScroller) trafficScroller.scrollTop = 0;
+    highlightTrafficRow(target);
+  }
+
+  function highlightTrafficRow(target) {
+    var match = null;
+    for (var i = 0; i < allTrafficData.length; i++) {
+      if (Math.round(allTrafficData[i].index || 0) === target) { match = allTrafficData[i]; break; }
+    }
+    if (!match) return;
+    var sel = (window.CSS && CSS.escape) ? CSS.escape(match.id) : match.id;
+    var tr = document.querySelector('#traffic-body tr[data-id="' + sel + '"]');
+    if (tr) {
+      tr.scrollIntoView({ block: 'center' });
+      tr.classList.add('jump-highlight');
+      setTimeout(function() { tr.classList.remove('jump-highlight'); }, 2000);
+    }
   }
 
   // Live request sparkline: 60 1-second buckets of `created` timestamps from
@@ -1214,6 +1314,18 @@
   var seenTrafficIds = new Set();
   var firstTrafficRender = true;
 
+  // The # (id) column always fits its widest value so request numbers are
+  // never truncated; other columns stay user-resizable.
+  function autoSizeIdColumn() {
+    var maxLen = 1;
+    for (var i = 0; i < trafficData.length; i++) {
+      var str = String(Math.round(trafficData[i].index || 0));
+      if (str.length > maxLen) maxLen = str.length;
+    }
+    var th = document.querySelector('#traffic-table th.col-id');
+    if (th) th.style.width = (maxLen * 8 + 26) + 'px';
+  }
+
   function renderTraffic(forceRender) {
     var tbody = $('#traffic-body');
 
@@ -1250,8 +1362,8 @@
       var status = resp.status || '';
       var length = resp.length || row.length || '';
       var genBy = row.generated_by || '';
-      var source = genBy.indexOf('ai/mcp') !== -1 || genBy === 'MCP' ? 'AI' : genBy.indexOf('repeater/') !== -1 || genBy === 'Repeater' ? 'Repeater' : genBy === 'Template' || genBy.indexOf('template') !== -1 ? 'Template' : 'Proxy';
-      var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : source === 'Template' ? 'source-template' : 'source-proxy';
+      var source = genBy.indexOf('ai/mcp') !== -1 || genBy === 'MCP' ? 'AI' : genBy.indexOf('repeater/') !== -1 || genBy === 'Repeater' ? 'Repeater' : genBy === 'Template' || genBy.indexOf('template') !== -1 ? 'Template' : genBy.indexOf('serval') !== -1 ? 'Serval' : 'Proxy';
+      var sourceClass = source === 'AI' ? 'source-ai' : source === 'Repeater' ? 'source-repeater' : source === 'Template' ? 'source-template' : source === 'Serval' ? 'source-serval' : 'source-proxy';
       var created = row.created || '';
       var timeStr = created ? formatTime(created) : '';
       var timeAbs = created ? escapeAttr(created) : '';
@@ -1271,6 +1383,8 @@
         '<td class="col-time" title="' + timeAbs + '">' + escapeHtml(timeStr) + '</td>' +
         '</tr>';
     }).join('');
+
+    autoSizeIdColumn();
 
     $$('#traffic-body tr').forEach(function(tr) {
       tr.addEventListener('click', function() { selectTrafficRow(tr.dataset.id); });
@@ -3653,6 +3767,7 @@
     }
     $$('#traffic-table thead th').forEach(function(th) {
       var key = th.dataset.sort;
+      if (key === 'index') return; // first column auto-fits its content; not resizable
       if (key && widths[key]) th.style.width = widths[key] + 'px';
       var handle = document.createElement('div');
       handle.className = 'col-resize-handle';
@@ -3803,7 +3918,30 @@
 
     // Traffic controls
     $('#traffic-refresh').addEventListener('click', function() { loadTraffic(); loadHosts(); });
-    $('#traffic-filter').addEventListener('input', debounce(applyClientFilter, 150));
+    $('#traffic-filter').addEventListener('input', debounce(function() { applyClientFilter(); loadMoreTraffic(); }, 150));
+
+    var jumpEl = document.getElementById('traffic-jump');
+    if (jumpEl) {
+      jumpEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          var n = parseInt(jumpEl.value, 10);
+          if (n > 0) jumpToTraffic(n);
+        }
+      });
+    }
+
+    // Infinite scroll: load older pages as the user scrolls toward the bottom
+    // of the (descending) traffic list. .table-container is the scroll element.
+    var trafficTable = document.getElementById('traffic-table');
+    trafficScroller = trafficTable ? trafficTable.parentElement : null;
+    if (trafficScroller) {
+      trafficScroller.addEventListener('scroll', function() {
+        if (currentView !== 'traffic') return;
+        if (trafficScroller.scrollTop + trafficScroller.clientHeight >= trafficScroller.scrollHeight - 300) {
+          loadMoreTraffic();
+        }
+      });
+    }
     $('#filter-ai-only').addEventListener('change', applyClientFilter);
     var hideNoiseEl = $('#filter-hide-noise');
     if (hideNoiseEl) hideNoiseEl.addEventListener('change', applyClientFilter);
@@ -4381,7 +4519,7 @@
     // an AI agent's bursts feel live without thrashing the API.
     setInterval(function() {
       if (currentView === 'traffic') {
-        loadTraffic();
+        pollTraffic();
       }
     }, 1500);
 

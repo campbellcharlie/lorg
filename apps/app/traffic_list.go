@@ -72,24 +72,38 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 		return nil, false
 	}
 
-	perPage, page, hostFilter := parseTrafficParams(c)
+	perPage, page, hostFilter, before := parseTrafficParams(c)
 	offset := (page - 1) * perPage
 
+	// Count reflects the full host-scoped set, independent of the keyset window.
+	countWhere := ""
+	var countArgs []any
+	if hostFilter != "" {
+		countWhere = " WHERE host LIKE ?"
+		countArgs = append(countArgs, "%"+hostFilter+"%")
+	}
+	var totalItems int
+	if err := db.QueryRow("SELECT COUNT(*) FROM http_traffic"+countWhere, countArgs...).Scan(&totalItems); err != nil {
+		totalItems = rowCount
+	}
+
+	// Row query: host filter + optional keyset (request_id < before). Keyset
+	// supersedes page/offset so "load older" stays exact even while new rows
+	// arrive at the top.
 	var conditions []string
 	var args []any
 	if hostFilter != "" {
 		conditions = append(conditions, "host LIKE ?")
 		args = append(args, "%"+hostFilter+"%")
 	}
+	if before > 0 {
+		conditions = append(conditions, "request_id < ?")
+		args = append(args, before)
+		offset = 0
+	}
 	whereClause := ""
 	if len(conditions) > 0 {
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	var totalItems int
-	countArgs := append([]any{}, args...)
-	if err := db.QueryRow("SELECT COUNT(*) FROM http_traffic"+whereClause, countArgs...).Scan(&totalItems); err != nil {
-		totalItems = rowCount
 	}
 
 	q := `SELECT request_id, COALESCE(host,''), COALESCE(method,''), COALESCE(path,''),
@@ -151,7 +165,7 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 
 // serveLegacyTraffic queries the legacy lorgdb _data collection.
 func serveLegacyTraffic(c echo.Context, backend *Backend) error {
-	perPage, page, hostFilter := parseTrafficParams(c)
+	perPage, page, hostFilter, before := parseTrafficParams(c)
 	projectFilter := c.QueryParam("project")
 	offset := (page - 1) * perPage
 
@@ -179,10 +193,24 @@ func serveLegacyTraffic(c echo.Context, backend *Backend) error {
 		totalItems = 0
 	}
 
-	selectQuery := `SELECT id, "index", COALESCE(project,'') as project, host, port, is_https, has_resp, generated_by, req_json, resp_json, created
-		FROM _data` + whereClause + ` ORDER BY "index" DESC LIMIT ? OFFSET ?`
+	// Row query adds optional keyset ("index" < before); the count above stays
+	// on the full host/project-scoped set so totalItems is stable.
+	rowConditions := append([]string{}, conditions...)
+	rowArgs := append([]any{}, args...)
+	if before > 0 {
+		rowConditions = append(rowConditions, `"index" < ?`)
+		rowArgs = append(rowArgs, before)
+		offset = 0
+	}
+	rowWhere := ""
+	if len(rowConditions) > 0 {
+		rowWhere = " WHERE " + strings.Join(rowConditions, " AND ")
+	}
 
-	selectArgs := append(append([]any{}, args...), perPage, offset)
+	selectQuery := `SELECT id, "index", COALESCE(project,'') as project, host, port, is_https, has_resp, generated_by, req_json, resp_json, created
+		FROM _data` + rowWhere + ` ORDER BY "index" DESC LIMIT ? OFFSET ?`
+
+	selectArgs := append(append([]any{}, rowArgs...), perPage, offset)
 
 	var items []TrafficListItem
 	rows, err := backend.DB.Query(selectQuery, selectArgs...)
@@ -219,7 +247,7 @@ func serveLegacyTraffic(c echo.Context, backend *Backend) error {
 	return c.JSON(http.StatusOK, trafficResponse(items, page, perPage, totalItems))
 }
 
-func parseTrafficParams(c echo.Context) (perPage, page int, hostFilter string) {
+func parseTrafficParams(c echo.Context) (perPage, page int, hostFilter string, before int64) {
 	perPage = 500
 	if v := c.QueryParam("perPage"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
@@ -230,6 +258,12 @@ func parseTrafficParams(c echo.Context) (perPage, page int, hostFilter string) {
 	if v := c.QueryParam("page"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			page = n
+		}
+	}
+	// before: keyset cursor — return rows strictly older than this id/index.
+	if v := c.QueryParam("before"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			before = n
 		}
 	}
 	hostFilter = normalizeHostFilter(c.QueryParam("host"))
