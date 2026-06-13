@@ -427,7 +427,10 @@ func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (
 		}
 	}()
 
-	// Log to project SQLite DB in real-time (non-blocking)
+	// Log to project SQLite DB in real-time (non-blocking). Carry the addressed
+	// project so LogTraffic routes to that project's write handle without
+	// changing the Active target (ADR-002). Empty = Active, unchanged.
+	userdata.Project = reqBody.Project
 	go projectDB.LogTraffic(userdata, reqBody.Request, reqBody.Response)
 
 	return userdata, nil

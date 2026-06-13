@@ -20,6 +20,11 @@ type RepeaterSendRequest struct {
 	Url         string  `json:"url"`
 	GeneratedBy string  `json:"generated_by"`
 	Note        string  `json:"note,omitempty"`
+	// Project addresses the saved row to a specific project's write handle
+	// (ADR-002) without changing the Active target. Empty = Active. This is the
+	// shared chokepoint for every sender (sendHttpRequest, mirror, graphql,
+	// templates, authz), so setting it here routes them all.
+	Project string `json:"project,omitempty"`
 }
 
 type RepeaterSendResponse struct {
@@ -51,6 +56,7 @@ func (backend *Backend) sendRepeaterLogic(reqData *RepeaterSendRequest) (*Repeat
 		Response:    respString,
 		GeneratedBy: "repeater/" + reqData.GeneratedBy,
 		Note:        reqData.Note,
+		Project:     reqData.Project,
 	}
 
 	userdata, err := backend.SaveRequestToBackend(addReqBody)
