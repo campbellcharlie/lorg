@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -35,16 +36,34 @@ type ServalSync struct {
 	backend  *Backend
 	dbPath   string
 	interval time.Duration
+	project  string // lorg project tag applied to every imported row
 	db       *sql.DB
 }
 
 // NewServalSync builds a poller for the given Serval traffic.db path. An
 // interval <= 0 defaults to one second, matching Serval's own drain cadence.
-func NewServalSync(backend *Backend, dbPath string, interval time.Duration) *ServalSync {
+// project is the lorg project tag applied to every imported row so they are
+// returned by project-scoped reads (query project:<id>); empty leaves rows
+// untagged.
+func NewServalSync(backend *Backend, dbPath string, interval time.Duration, project string) *ServalSync {
 	if interval <= 0 {
 		interval = time.Second
 	}
-	return &ServalSync{backend: backend, dbPath: dbPath, interval: interval}
+	return &ServalSync{backend: backend, dbPath: dbPath, interval: interval, project: project}
+}
+
+// DeriveProjectFromDBPath extracts the lorg project id from a Serval traffic.db
+// path of the form ".../projects/<id>/traffic.db". It returns the segment that
+// follows the last "projects" path component, or "" when the path carries no
+// such segment (in which case the caller leaves the sync untagged).
+func DeriveProjectFromDBPath(dbPath string) string {
+	parts := strings.Split(filepath.ToSlash(dbPath), "/")
+	for i := len(parts) - 2; i >= 0; i-- {
+		if parts[i] == "projects" && parts[i+1] != "" {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
 
 // Start runs the poll loop until the process exits; intended to run in its own
@@ -159,6 +178,9 @@ func (s *ServalSync) poll() error {
 			Response:    buildServalRawResponse(int(status.Int64), respHeaders.String, respBody),
 			GeneratedBy: ServalSource,
 			Note:        "Imported from Serval",
+			// Tag with the resolved project so query project:<id> returns
+			// Serval rows, mirroring the proxy's _data project tag.
+			Project: s.project,
 		}
 		if _, err := s.backend.SaveRequestToBackend(body); err != nil {
 			// Stop the batch so the watermark never skips a row that failed;

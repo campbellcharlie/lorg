@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "generatedOn": "2026-06-05",
+  "dimensions": {
+    "product-completeness": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "ux-quality": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "ui-quality": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "code-quality": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "test-coverage": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "eval-coverage": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "performance": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "accessibility": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "security": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "observability": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    },
+    "deployment-readiness": {
+      "status": "unknown",
+      "summary": "",
+      "evidence": [],
+      "updatedOn": "2026-06-05"
+    }
+  }
+}

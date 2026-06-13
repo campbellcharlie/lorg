@@ -381,6 +381,12 @@ func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (
 
 	dataRecord.Load(m)
 
+	// Tag the project so project-scoped reads (query project:<id>) return this
+	// row. UserData carries no project, so set it explicitly after Load —
+	// mirroring the proxy's _data tag in proxy_rawproxy.go. Empty is the
+	// untagged default and leaves prior callers (REST add, repeater) unchanged.
+	dataRecord.Set("project", reqBody.Project)
+
 	// Compute response fingerprint for clustering / anomaly tools — same
 	// scheme used by the proxy raw path so MCP-tool traffic and repeater
 	// traffic cluster together with proxy traffic.

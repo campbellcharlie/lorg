@@ -33,6 +33,15 @@ func InitProjectsDir(dbDir string) error {
 	return projectDB.Init(dbDir)
 }
 
+// SetActiveProject points the Active write-target project DB at name, creating
+// the DB if needed and keeping the configured projects directory. Used at
+// startup to align the write target with an external read source (e.g. a Serval
+// traffic.db under .../projects/<name>/) so reads and writes agree without a
+// later setActive call or a restart.
+func SetActiveProject(name string) error {
+	return projectDB.SetProject(name, "")
+}
+
 // projectDB is the package-level singleton for live traffic recording.
 // Package-level because action-dispatch handlers access it without Backend reference.
 // Thread-safe: all methods on ProjectDB use internal mutex protection.

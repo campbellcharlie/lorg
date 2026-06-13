@@ -28,6 +28,10 @@ var allowLAN bool // when true, permit non-loopback callers to /api/*
 var servalDB string
 var servalPoll time.Duration
 
+// Optional override for the project tag applied to Serval-imported traffic.
+// Empty means derive it from the -serval-db path's .../projects/<id>/ segment.
+var servalProject string
+
 func init() {
 	// Ensure timestamps are included in standard log output.
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -67,6 +71,7 @@ func main() {
 	flag.BoolVar(&allowLAN, "allow-lan", false, "Allow API access from non-loopback addresses (off by default; only enable on a trusted network)")
 	flag.StringVar(&servalDB, "serval-db", "", "Path to a Serval traffic.db to mirror into lorg's traffic views (e.g. ~/.serval/projects/default/traffic.db); empty disables the feature")
 	flag.DurationVar(&servalPoll, "serval-poll", time.Second, "Poll interval for -serval-db")
+	flag.StringVar(&servalProject, "project", "", "Project tag for Serval-imported traffic and the startup active project; empty derives it from the -serval-db path's .../projects/<id>/ segment")
 
 	flag.Parse()
 
@@ -104,7 +109,7 @@ func main() {
 
 		fmt.Println("Initializing done")
 		fmt.Println("Projects DB directory:", ProjectsDir)
-		serve(ProjectPath, servalDB, servalPoll)
+		serve(ProjectPath, servalDB, servalPoll, servalProject)
 	} else {
 		fmt.Println("No project path provided")
 	}
