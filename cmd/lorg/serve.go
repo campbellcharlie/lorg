@@ -14,7 +14,7 @@ import (
 	wappalyzer "github.com/projectdiscovery/wappalyzergo"
 )
 
-func serve(projectPath, servalDB string, servalPoll time.Duration) {
+func serve(projectPath, servalDB string, servalPoll time.Duration, servalProject string) {
 
 	wappalyzerClient, err := wappalyzer.New()
 	if err != nil {
@@ -141,7 +141,26 @@ func serve(projectPath, servalDB string, servalPoll time.Duration) {
 	// Optional: mirror a Serval browser's captured traffic into lorg. Off
 	// unless -serval-db is set; a missing DB just stays dormant.
 	if strings.TrimSpace(servalDB) != "" {
-		go app.NewServalSync(&API, servalDB, servalPoll).Start()
+		// Resolve the project tag: explicit -project wins, else derive it from
+		// the Serval DB path's .../projects/<id>/ segment.
+		project := strings.TrimSpace(servalProject)
+		if project == "" {
+			project = app.DeriveProjectFromDBPath(servalDB)
+		}
+
+		// Startup alignment: make the active write-target project DB match the
+		// Serval read source so query/UI reads and the dual-write target agree
+		// without a later setActive call or a restart. Skipped when the project
+		// can't be resolved, leaving prior (untagged) behavior intact.
+		if project != "" {
+			if err := app.SetActiveProject(project); err != nil {
+				log.Printf("[Startup] Serval project alignment to %q failed: %v", project, err)
+			} else {
+				log.Printf("[Startup] Active project aligned to Serval source: %q", project)
+			}
+		}
+
+		go app.NewServalSync(&API, servalDB, servalPoll, project).Start()
 	}
 
 	API.Serve()

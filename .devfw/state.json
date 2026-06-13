@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "name": "lorg",
+    "framework": "devfw",
+    "frameworkVersion": 1,
+    "createdOn": "2026-06-05"
+  },
+  "mode": "brownfield",
+  "status": "active",
+  "currentPhase": "review",
+  "lastPhaseChangeOn": "2026-06-05",
+  "preflight": "assess",
+  "stack": {
+    "primary": "unknown",
+    "platforms": []
+  },
+  "notes": []
+}
