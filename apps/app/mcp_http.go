@@ -34,6 +34,7 @@ type SendHttpRequestArgs struct {
 	MaxBodyLength   int               `json:"maxBodyLength,omitempty" jsonschema_description:"Truncate response body to this many characters (0 = no limit). Useful for large HTML responses that would overwhelm agent context."`
 	HeadersOnly     bool              `json:"headersOnly,omitempty" jsonschema_description:"Return only response headers, no body. Overrides bodyOnly."`
 	Note            string            `json:"note,omitempty" jsonschema_description:"Note to attach to request"`
+	Project         string            `json:"project,omitempty" jsonschema_description:"Address this request to a specific project's traffic DB without changing the active project. Lets you fire requests at another project while a browser/Serval keeps capturing into the active one. Empty = active project."`
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +152,7 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 		Url:         fmt.Sprintf("%s://%s:%d", scheme, host, port),
 		Note:        args.Note,
 		GeneratedBy: "ai/mcp/http",
+		Project:     args.Project,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -277,6 +279,7 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 				Url:         fmt.Sprintf("%s://%s:%d", currentScheme, currentHost, currentPort),
 				Note:        args.Note,
 				GeneratedBy: "ai/mcp/http/redirect",
+				Project:     args.Project,
 			})
 			if redirErr != nil {
 				break

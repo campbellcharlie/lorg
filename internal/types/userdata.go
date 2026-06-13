@@ -62,6 +62,12 @@ type UserData struct {
 
 	// Action didn't get saved anywhere, it for intercept forward/drop. Although for below {RealtimeRecord} it's saved in `_intercept` collection.
 	Action string `db:"action,omitempty" json:"action,omitempty"`
+
+	// Project routes the captured row to a per-project write handle in
+	// ProjectDB.LogTraffic without changing the Active write target (ADR-002).
+	// db:"-" keeps it out of the _data record marshaling — the _data.project
+	// tag is set explicitly in SaveRequestToBackend. Empty = Active handle.
+	Project string `db:"-" json:"project,omitempty"`
 }
 
 func (userdata *UserData) RequestUpdateKey(req *http.Request, key string, value any) {

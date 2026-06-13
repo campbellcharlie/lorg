@@ -928,6 +928,10 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 	// searchTraffic, analytics, and export alongside MCP tool traffic.
 	go func() {
 		typed := proxyUserdataToTyped(userdata, reqCtx)
+		// Capture stays bound to THIS proxy's project (ADR-002), so a browser
+		// streaming through this listener always logs to its own project even
+		// while addressed sends target another. Empty = Active, unchanged.
+		typed.Project = rp.project
 		projectDB.LogTraffic(typed, reqCtx.RawRequest, reqCtx.RawResponse)
 	}()
 

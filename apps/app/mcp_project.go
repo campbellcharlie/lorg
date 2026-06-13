@@ -119,6 +119,12 @@ type ProjectDB struct {
 	viewedDB   *sql.DB
 	viewedName string
 	viewedPath string
+
+	// writeHandles caches open read/write handles for projects OTHER than the
+	// Active one, so a per-call addressed send (ADR-002) can log into another
+	// project's DB without changing the Active write target. Keyed by sanitized
+	// project name. Opened lazily by writeHandleForLocked, closed in Close().
+	writeHandles map[string]*sql.DB
 }
 
 // Init opens the default TemporaryProject.db in dbDir.
@@ -361,6 +367,18 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 		return nil
 	}
 
+	// Route to the addressed project's write handle (ADR-002). Empty project,
+	// or a project equal to the Active one, uses the Active handle — preserving
+	// today's behavior for every caller that sets no project.
+	db := p.db
+	if proj := sanitizeProjectName(userdata.Project); proj != "" && proj != p.name {
+		h, err := p.writeHandleForLocked(proj)
+		if err != nil {
+			return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, err)
+		}
+		db = h
+	}
+
 	// Derive host -- strip protocol prefix
 	host := userdata.Host
 	if u, parseErr := url.Parse(host); parseErr == nil && u.Host != "" {
@@ -438,7 +456,7 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 	// Insert every row — fuzz/repeater workflows want each iteration captured.
 	// Duplicate detection is still possible via request_hash + GROUP BY queries,
 	// but the dedup is no longer enforced at write time.
-	result, err := p.db.Exec(`INSERT INTO http_traffic
+	result, err := db.Exec(`INSERT INTO http_traffic
 		(timestamp, tool, method, host, path, query, param_count, status_code,
 		 response_length, protocol, port, url, mime_type, extension, page_title,
 		 content_type, request_hash, session_tag)
@@ -472,19 +490,75 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 	}
 
 	// Insert message record
-	_, _ = p.db.Exec(`INSERT OR IGNORE INTO http_messages
+	_, _ = db.Exec(`INSERT OR IGNORE INTO http_messages
 		(request_id, request_headers, request_body, response_headers, response_body)
 		VALUES (?, ?, ?, ?, ?)`,
 		requestID, reqHeaders, []byte(reqBody), respHeaders, []byte(respBody),
 	)
 
 	// Insert FTS entry
-	_, _ = p.db.Exec(`INSERT INTO traffic_fts (rowid, url, request_headers, request_body, response_headers, response_body)
+	_, _ = db.Exec(`INSERT INTO traffic_fts (rowid, url, request_headers, request_body, response_headers, response_body)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		requestID, fullURL, reqHeaders, reqBody, respHeaders, respBody,
 	)
 
 	return nil
+}
+
+// writeHandleForLocked returns an open read/write *sql.DB for the named project,
+// opening and caching it on first use. Caller must hold p.mu. Used by LogTraffic
+// to route a captured/sent row to a project OTHER than the Active one without
+// changing the Active write target (ADR-002). Empty name (or the Active name)
+// resolves to the Active handle. Mirrors openLocked's open/PRAGMA/schema steps.
+func (p *ProjectDB) writeHandleForLocked(name string) (*sql.DB, error) {
+	sanitized := sanitizeProjectName(name)
+	if sanitized == "" || sanitized == p.name {
+		return p.db, nil
+	}
+	if h, ok := p.writeHandles[sanitized]; ok {
+		return h, nil
+	}
+
+	dir := p.dbDir
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("writeHandleForLocked: cannot determine home directory: %w", err)
+		}
+		dir = home
+	}
+
+	dbFile := filepath.Join(dir, sanitized+".db")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("writeHandleForLocked: create db directory %s: %w", dir, err)
+	}
+
+	_, existErr := os.Stat(dbFile)
+	isNew := os.IsNotExist(existErr)
+
+	db, err := sql.Open("sqlite", dbFile)
+	if err != nil {
+		return nil, fmt.Errorf("writeHandleForLocked: open %s: %w", dbFile, err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("writeHandleForLocked: set WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("writeHandleForLocked: set busy_timeout: %w", err)
+	}
+	if err := initProjectSchema(db, isNew); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("writeHandleForLocked: schema init for %s: %w", dbFile, err)
+	}
+
+	if p.writeHandles == nil {
+		p.writeHandles = make(map[string]*sql.DB)
+	}
+	p.writeHandles[sanitized] = db
+	log.Printf("[ProjectDB] opened addressed write handle: %s", dbFile)
+	return db, nil
 }
 
 // Close closes the current database connection.
@@ -498,6 +572,12 @@ func (p *ProjectDB) Close() {
 	p.viewedDB = nil
 	p.viewedName = ""
 	p.viewedPath = ""
+
+	// Release any addressed write handles opened by writeHandleForLocked.
+	for _, h := range p.writeHandles {
+		_ = h.Close()
+	}
+	p.writeHandles = nil
 
 	if p.db != nil {
 		_ = p.db.Close()
