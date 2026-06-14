@@ -129,8 +129,16 @@ type ProjectDB struct {
 	// Active one, so a per-call addressed send (ADR-002) can log into another
 	// project's DB without changing the Active write target. Keyed by sanitized
 	// project name. Opened lazily by writeHandleForLocked, closed in Close().
-	writeHandles map[string]*sql.DB
+	// Bounded to maxWriteHandles (ADR-003 A2) with FIFO eviction tracked by
+	// writeHandleOrder so the registry can't grow without limit.
+	writeHandles     map[string]*sql.DB
+	writeHandleOrder []string
 }
+
+// maxWriteHandles caps the number of open addressed (non-Active) write handles.
+// A pentest agent juggles a handful of projects; this is a backstop against
+// unbounded growth, not a hot-path tuning knob. Eviction is FIFO (oldest-opened).
+const maxWriteHandles = 16
 
 // Init opens the default TemporaryProject.db in dbDir.
 // If dbDir is empty, it defaults to the user's home directory.
@@ -592,7 +600,16 @@ func (p *ProjectDB) writeHandleForLocked(name string) (*sql.DB, error) {
 	if p.writeHandles == nil {
 		p.writeHandles = make(map[string]*sql.DB)
 	}
+	// Evict oldest-opened handles to keep the registry bounded (ADR-003 A2).
+	// Safe here: writeHandleForLocked runs under the exclusive lock, so no
+	// in-flight LogTraffic (which holds the read lock) is mid-insert.
+	for len(p.writeHandles) >= maxWriteHandles && len(p.writeHandleOrder) > 0 {
+		evicted := p.writeHandleOrder[0]
+		p.closeHandlesForProjectLocked(evicted)
+		log.Printf("[ProjectDB] evicted write handle (registry at cap %d): %s", maxWriteHandles, evicted)
+	}
 	p.writeHandles[sanitized] = db
+	p.writeHandleOrder = append(p.writeHandleOrder, sanitized)
 	log.Printf("[ProjectDB] opened addressed write handle: %s", dbFile)
 	return db, nil
 }
@@ -607,6 +624,12 @@ func (p *ProjectDB) closeHandlesForProjectLocked(name string) {
 	if h, ok := p.writeHandles[sanitized]; ok {
 		_ = h.Close()
 		delete(p.writeHandles, sanitized)
+	}
+	for i, n := range p.writeHandleOrder {
+		if n == sanitized {
+			p.writeHandleOrder = append(p.writeHandleOrder[:i], p.writeHandleOrder[i+1:]...)
+			break
+		}
 	}
 }
 
@@ -627,6 +650,7 @@ func (p *ProjectDB) Close() {
 		_ = h.Close()
 	}
 	p.writeHandles = nil
+	p.writeHandleOrder = nil
 
 	if p.db != nil {
 		_ = p.db.Close()
