@@ -175,7 +175,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("session",
-			mcp.WithDescription("Manage sessions, cookies, and CSRF tokens. Actions: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract"),
+			mcp.WithDescription("Manage sessions, cookies, and CSRF tokens. Sessions are per-project (each project keeps its own cookie jar). Actions: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract, copyCookies"),
 			mcp.WithInputSchema[ConsolidatedSessionArgs](),
 		),
 		backend.sessionHandler,

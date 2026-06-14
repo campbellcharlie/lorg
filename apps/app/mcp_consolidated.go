@@ -56,7 +56,7 @@ func (backend *Backend) encodeHandler(ctx context.Context, request mcp.CallToolR
 // same concept (e.g. "name" means session name for most actions but cookie
 // name for setCookie). Actions that would conflict use dedicated fields.
 type ConsolidatedSessionArgs struct {
-	Action         string            `json:"action" jsonschema:"required" jsonschema_description:"Operation: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract"`
+	Action         string            `json:"action" jsonschema:"required" jsonschema_description:"Operation: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract, copyCookies"`
 	Name           string            `json:"name,omitempty" jsonschema_description:"Session name (create, switch, delete, getHeaders, updateCookies, getCookies, setCookie)"`
 	Cookies        map[string]string `json:"cookies,omitempty" jsonschema_description:"Initial cookies as name:value (create)"`
 	Headers        FlexibleStringMap `json:"headers,omitempty" jsonschema_description:"Custom headers (create)"`
@@ -67,6 +67,14 @@ type ConsolidatedSessionArgs struct {
 	CustomPatterns []string          `json:"customPatterns,omitempty" jsonschema_description:"Custom regex patterns (csrfExtract)"`
 	SessionName    string            `json:"sessionName,omitempty" jsonschema_description:"Session to store extracted CSRF token in (csrfExtract)"`
 	Project        string            `json:"project,omitempty" jsonschema_description:"Project the session belongs to (default: the default project). Each project keeps its own cookie jar (ADR-002)."`
+
+	// copyCookies: move selected cookies between two (project, session) jars.
+	// Empty from/to session = that project's active session.
+	FromProject string   `json:"fromProject,omitempty" jsonschema_description:"Source project (copyCookies; default: the default project)"`
+	FromName    string   `json:"fromName,omitempty" jsonschema_description:"Source session name (copyCookies; default: source project's active session)"`
+	ToProject   string   `json:"toProject,omitempty" jsonschema_description:"Destination project (copyCookies; default: the default project)"`
+	ToName      string   `json:"toName,omitempty" jsonschema_description:"Destination session name (copyCookies; default: destination project's active session)"`
+	Names       []string `json:"names,omitempty" jsonschema_description:"Cookie names to copy (copyCookies; empty = all cookies in the source jar)"`
 }
 
 func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -196,8 +204,25 @@ func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallTool
 		// json:"sessionName" -- all match consolidated struct field names.
 		return backend.csrfExtractHandler(ctx, request)
 
+	case "copyCookies":
+		// Explicit, selective cross-jar transfer (ADR-002 slice 3). Isolation is
+		// the default; this is the deliberate bridge when auth genuinely spans
+		// projects (shared IdP/SSO, bearer tokens).
+		copied, fromName, toName, err := backend.copyCookiesBetween(
+			args.FromProject, args.FromName, args.ToProject, args.ToName, args.Names)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{
+			"success": true,
+			"copied":  copied,
+			"count":   len(copied),
+			"from":    map[string]string{"project": args.FromProject, "session": fromName},
+			"to":      map[string]string{"project": args.ToProject, "session": toName},
+		})
+
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract, copyCookies"), nil
 	}
 }
 
