@@ -697,6 +697,22 @@ func (p *ProjectDB) closeHandlesForProjectLocked(name string) {
 	}
 }
 
+// closeProjectHandle closes any open registry write handle and/or viewer for the
+// named project so its files can be deleted (ADR-003 B3). It never touches the
+// Active handle — delete refuses the active project upstream (in-use guard).
+func (p *ProjectDB) closeProjectHandle(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sanitized := sanitizeProjectName(name)
+	p.closeHandlesForProjectLocked(sanitized)
+	if p.viewedName == sanitized && p.viewedDB != nil && p.viewedDB != p.db {
+		_ = p.viewedDB.Close()
+		p.viewedDB = nil
+		p.viewedName = ""
+		p.viewedPath = ""
+	}
+}
+
 // Close closes the current database connection.
 func (p *ProjectDB) Close() {
 	p.mu.Lock()
