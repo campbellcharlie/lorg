@@ -68,3 +68,51 @@ last_updated: 2026-06-13
 - Should `setActive(B)` *promote* an existing registry handle instead of opening
   a second handle to `B.db`? (WAL makes two handles safe; defer unless contended.)
 - Per-project `scope` + `match/replace`: same pattern — follow-up ADR-003?
+
+---
+
+# Plan — PM + write-path hardening (ADR-003)
+
+One commit per stage so any stage is independently revertible. Each stage:
+build green + targeted test before the next.
+
+## Phase A — write-path performance
+- [ ] **A1** Narrow the `LogTraffic` lock; add `closeHandlesForProject(name)`
+      primitive (shared by registry eviction + project delete). Test: N parallel
+      `LogTraffic`s across projects don't serialize / no lost rows. (rec #1)
+- [ ] **A2** Bound the write-handle registry (LRU cap + evict via the primitive). (rec #2)
+- [ ] **A3** One transaction per row in `LogTraffic` (the 3 inserts). (rec #4)
+- [ ] **A4** Bounded async logging worker (channel + pool; backpressure; error
+      counter) replacing per-request `go LogTraffic`. (rec #3)
+- [ ] **A5** Per-project active-session cache, invalidated on switch. (rec #8)
+
+## Phase B — project registry + management
+- [ ] **B1** Activate `_projects` as source of truth + metadata; list/info read
+      from it. Backfill from on-disk `.db` files on first boot. (rec #9)
+- [ ] **B2** In-use / binding detection (proxy/browser/serval bound). (rec #11)
+- [ ] **B3** Archive-first lifecycle + guarded hard-delete (confirm, refuse
+      active/in-use, teardown via A1 primitive, remove db+wal+shm). (rec #10) [destructive]
+- [ ] **B4** Project management on MCP (create/list/archive/delete/setActive). (rec #12)
+- [ ] **B5** Disk + retention accounting (size, last_active, optional auto-archive). (rec #13)
+
+## Phase C — ergonomics + structural
+- [ ] **C1** Per-connection MCP project context (sticky default). (rec #7)
+- [ ] **C2** FTS external-content over `http_messages` (kill body duplication). (rec #6) [migration]
+- [ ] **C3** Dual-write consolidation: projectDB authoritative, reduce `_data`
+      write. (rec #5) [biggest/riskiest — may split into ADR-004]
+
+## Phase D — load validation
+- [ ] **D** Load harness: serval feed + `fuzz`/`raceTest` at volume through live
+      MCP. Monitor throughput, dropped rows, goroutine + handle counts, DB errors,
+      memory. Iterate until acceptance (see ADR-003 Validation) holds.
+
+## Acceptance (load)
+- [ ] No dropped traffic rows vs requests issued.
+- [ ] Bounded goroutines + open handles under sustained load.
+- [ ] Cross-project writes not serialized by the old lock.
+- [ ] Zero DB/busy_timeout errors; stable memory.
+
+## Rollback
+- Each stage is one commit; `git revert <stage>` backs out a single stage.
+- Schema migrations (C2, possibly B1) are additive/idempotent; revert the code,
+  the migration stays applied harmlessly.
