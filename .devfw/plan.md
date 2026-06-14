@@ -77,14 +77,15 @@ One commit per stage so any stage is independently revertible. Each stage:
 build green + targeted test before the next.
 
 ## Phase A — write-path performance
-- [ ] **A1** Narrow the `LogTraffic` lock; add `closeHandlesForProject(name)`
-      primitive (shared by registry eviction + project delete). Test: N parallel
-      `LogTraffic`s across projects don't serialize / no lost rows. (rec #1)
-- [ ] **A2** Bound the write-handle registry (LRU cap + evict via the primitive). (rec #2)
-- [ ] **A3** One transaction per row in `LogTraffic` (the 3 inserts). (rec #4)
-- [ ] **A4** Bounded async logging worker (channel + pool; backpressure; error
-      counter) replacing per-request `go LogTraffic`. (rec #3)
-- [ ] **A5** Per-project active-session cache, invalidated on switch. (rec #8)
+- [x] **A1** Narrow the `LogTraffic` lock (RWMutex) + single-writer handles +
+      `closeHandlesForProjectLocked` primitive. (rec #1) — 599d977
+- [x] **A2** Bound the write-handle registry (FIFO cap, evict via primitive). (rec #2) — ce9bb5b
+- [x] **A3** One transaction per row in `LogTraffic`. (rec #4) — faac706
+- [x] **A4** Bounded async logging worker pool (backpressure, no unbounded
+      goroutines). (rec #3) — 0d1291f
+- [~] **A5** Per-project active-session cache. (rec #8) — DEFERRED, gated on Phase D
+      evidence: cache invalidation spans ~8 session-mutation sites; only worth the
+      correctness risk if the load test shows session lookups are hot.
 
 ## Phase B — project registry + management
 - [ ] **B1** Activate `_projects` as source of truth + metadata; list/info read
