@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/campbellcharlie/lorg/internal/types"
 )
@@ -111,4 +112,56 @@ func TestWriteHandleRegistryBounded(t *testing.T) {
 			t.Errorf("Eng%02d.db has %d rows, want 1 (eviction must not lose data)", i, got)
 		}
 	}
+}
+
+// TestEnqueueTrafficDrainsAll is the ADR-003 A4 proof: many rows enqueued to the
+// async worker pool all get written — no drops, backpressure not data loss. The
+// queue is a package singleton, so this test owns it (run alone in its file's
+// scope); we drain by polling the expected row count.
+func TestEnqueueTrafficDrainsAll(t *testing.T) {
+	dir := t.TempDir()
+	p := &ProjectDB{}
+	if err := p.Init(dir); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := p.SetProject("Q", dir); err != nil {
+		t.Fatalf("SetProject: %v", err)
+	}
+
+	const n = 500
+	for i := 0; i < n; i++ {
+		ud := types.UserData{
+			Host: "example.com", Port: "443", IsHTTPS: true, GeneratedBy: "proxy/http",
+			ReqJson:  types.RequestData{Method: "GET", Path: fmt.Sprintf("/q%d", i)},
+			RespJson: types.ResponseData{Status: 200},
+		}
+		p.enqueueTraffic(ud, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", "HTTP/1.1 200 OK\r\n\r\nok")
+	}
+
+	// Poll until the queue drains (workers are async).
+	deadline := 0
+	for {
+		depth, _ := trafficQueueDepth()
+		if depth == 0 {
+			// Give in-flight workers a beat to finish the current write.
+			if got := countActive(t, p); got >= n {
+				break
+			}
+		}
+		deadline++
+		if deadline > 200 {
+			t.Fatalf("queue did not drain: depth still backed up after polling")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := countActive(t, p); got != n {
+		t.Errorf("Q.db has %d rows, want %d (no drops)", got, n)
+	}
+}
+
+// countActive counts rows in the project's active handle via a fresh connection.
+func countActive(t *testing.T, p *ProjectDB) int {
+	t.Helper()
+	return countTraffic(t, filepath.Join(p.dbDir, p.name+".db"))
 }

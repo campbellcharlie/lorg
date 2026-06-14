@@ -91,6 +91,63 @@ func (c *trafficLoggingConfig) shouldLog(generatedBy string) bool {
 	return c.sources[source]
 }
 
+// ---------------------------------------------------------------------------
+// Async traffic logging queue (ADR-003 A4)
+// ---------------------------------------------------------------------------
+//
+// Capture used to spawn `go projectDB.LogTraffic(...)` per request — unbounded
+// goroutines under load. Instead, enqueueTraffic hands the row to a bounded
+// worker pool draining a buffered channel. Normal load: the buffered send
+// returns immediately (capture stays decoupled from the DB write). Sustained
+// overload: the send blocks, applying backpressure instead of dropping rows or
+// spawning unbounded goroutines. The job carries its *ProjectDB so the pool is
+// not tied to the package singleton (and is testable with a local instance).
+
+type trafficJob struct {
+	p       *ProjectDB
+	ud      types.UserData
+	rawReq  string
+	rawResp string
+}
+
+const (
+	trafficQueueBuffer  = 2048
+	trafficQueueWorkers = 8
+)
+
+var (
+	trafficQueueOnce sync.Once
+	trafficQueueCh   chan trafficJob
+)
+
+func startTrafficQueue() {
+	trafficQueueCh = make(chan trafficJob, trafficQueueBuffer)
+	for i := 0; i < trafficQueueWorkers; i++ {
+		go func() {
+			for job := range trafficQueueCh {
+				_ = job.p.LogTraffic(job.ud, job.rawReq, job.rawResp)
+			}
+		}()
+	}
+}
+
+// enqueueTraffic queues a captured row for async logging. Replaces the old
+// per-request `go LogTraffic`. Blocking send = backpressure when the pool is
+// saturated; no dropped rows, bounded goroutines.
+func (p *ProjectDB) enqueueTraffic(ud types.UserData, rawReq, rawResp string) {
+	trafficQueueOnce.Do(startTrafficQueue)
+	trafficQueueCh <- trafficJob{p: p, ud: ud, rawReq: rawReq, rawResp: rawResp}
+}
+
+// trafficQueueDepth reports the current backlog (for lorgStatus / load
+// monitoring). Returns 0 before the queue is started.
+func trafficQueueDepth() (depth, capacity int) {
+	if trafficQueueCh == nil {
+		return 0, 0
+	}
+	return len(trafficQueueCh), cap(trafficQueueCh)
+}
+
 // ProjectDB maintains an open SQLite connection for real-time traffic logging.
 // All exported methods are goroutine-safe.
 //
