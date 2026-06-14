@@ -215,7 +215,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("project",
-			mcp.WithDescription("Manage projects and settings. Lifecycle: list (with metadata), register, setActive, archive, unarchive, delete (confirm required). Settings: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"),
+			mcp.WithDescription("Manage projects and settings. Lifecycle: list (with metadata), register, setActive, archive, unarchive, delete (confirm required), autoArchive. Settings: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"),
 			mcp.WithInputSchema[ConsolidatedProjectArgs](),
 		),
 		backend.projectHandler,

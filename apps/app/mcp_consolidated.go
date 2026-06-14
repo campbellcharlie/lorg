@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -444,7 +445,7 @@ func (backend *Backend) trafficTagHandler(ctx context.Context, request mcp.CallT
 
 // ConsolidatedProjectArgs is the union argument struct for the project tool.
 type ConsolidatedProjectArgs struct {
-	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: list, register, setActive, archive, unarchive, delete, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
+	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: list, register, setActive, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
 	Name          string   `json:"name,omitempty" jsonschema_description:"Project name (setup, setName, register, setActive, archive, unarchive, delete)"`
 	DbDir         string   `json:"dbDir,omitempty" jsonschema_description:"Directory for SQLite DB files (setup, setActive)"`
 	OutputPath    string   `json:"outputPath,omitempty" jsonschema_description:"Output path for export (export)"`
@@ -456,6 +457,7 @@ type ConsolidatedProjectArgs struct {
 	// Project management (ADR-003 B4)
 	IncludeArchived bool `json:"includeArchived,omitempty" jsonschema_description:"Include archived projects in the result (list)"`
 	Confirm         bool `json:"confirm,omitempty" jsonschema_description:"Must be true to permanently delete a project and its data (delete)"`
+	Days            int  `json:"days,omitempty" jsonschema_description:"Archive projects inactive for more than this many days (autoArchive; default 30)"`
 }
 
 func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -466,12 +468,32 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 
 	switch args.Action {
 	case "list":
-		// Project registry with metadata (ADR-003 B4).
+		// Project registry with metadata (ADR-003 B4) + disk accounting (B5).
 		projects, err := backend.listProjects(projectDBDir(), args.IncludeArchived)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcpJSONResult(map[string]any{"projects": projects, "count": len(projects)})
+		var totalSize int64
+		for _, m := range projects {
+			totalSize += m.SizeBytes
+		}
+		return mcpJSONResult(map[string]any{
+			"projects":       projects,
+			"count":          len(projects),
+			"totalSizeBytes": totalSize,
+		})
+
+	case "autoArchive":
+		// Retention: archive projects inactive beyond `days` (ADR-003 B5).
+		days := args.Days
+		if days <= 0 {
+			days = 30
+		}
+		archived, err := backend.autoArchiveStale(projectDBDir(), days, time.Now())
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{"success": true, "archived": archived, "count": len(archived), "olderThanDays": days})
 
 	case "register":
 		if args.Name == "" {
@@ -543,7 +565,7 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 	case "getRedactionMode":
 		return backend.getRedactionModeHandler(ctx, request)
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: list, register, setActive, archive, unarchive, delete, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: list, register, setActive, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
 	}
 }
 

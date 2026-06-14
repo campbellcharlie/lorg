@@ -177,6 +177,37 @@ func (backend *Backend) setProjectStatus(name, status string) error {
 	return backend.DB.SaveRecord(rec)
 }
 
+// autoArchiveStale archives active projects whose last_active is older than the
+// cutoff and that are not currently in use (ADR-003 B5 retention). `now` is a
+// parameter so the policy is deterministically testable. Returns archived names.
+func (backend *Backend) autoArchiveStale(dbDir string, olderThanDays int, now time.Time) ([]string, error) {
+	if olderThanDays <= 0 {
+		return nil, fmt.Errorf("olderThanDays must be > 0")
+	}
+	cutoff := now.AddDate(0, 0, -olderThanDays)
+	list, err := backend.listProjects(dbDir, false) // active only
+	if err != nil {
+		return nil, err
+	}
+	archived := make([]string, 0)
+	for _, m := range list {
+		if m.LastActive == "" {
+			continue
+		}
+		la, perr := time.Parse(time.RFC3339, m.LastActive)
+		if perr != nil || !la.Before(cutoff) {
+			continue
+		}
+		if inUse, _ := projectInUse(m.Name); inUse {
+			continue
+		}
+		if err := backend.setProjectStatus(m.Name, projectStatusArchived); err == nil {
+			archived = append(archived, m.Name)
+		}
+	}
+	return archived, nil
+}
+
 // projectTrafficCount opens a read-only connection to a project's DB and counts
 // captured rows. Returns 0 if the DB is missing or unreadable.
 func projectTrafficCount(dbDir, name string) int {
