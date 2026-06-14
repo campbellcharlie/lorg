@@ -47,6 +47,13 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// Fall back to the connection's sticky default project (ADR-003 C1) when the
+	// call doesn't name one, so an agent can `project useProject` once and then
+	// fire a burst of sends without repeating project: on each.
+	if args.Project == "" {
+		args.Project = connectionDefaultProject(ctx)
+	}
+
 	if args.Method == "" {
 		return mcp.NewToolResultError("method is required"), nil
 	}
