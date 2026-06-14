@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/campbellcharlie/lorg/internal/lorgdb"
 )
@@ -90,5 +91,41 @@ func TestArchiveFreeProject(t *testing.T) {
 	}
 	if m.Status != projectStatusArchived {
 		t.Errorf("status = %q, want archived", m.Status)
+	}
+}
+
+// TestAutoArchiveStale is the ADR-003 B5 proof: projects inactive beyond the
+// cutoff are archived, recently-active ones are left alone.
+func TestAutoArchiveStale(t *testing.T) {
+	backend := newProjectTagTestBackend(t)
+	dir := t.TempDir()
+
+	if _, err := backend.registerProject("Fresh", filepath.Join(dir, "Fresh.db")); err != nil {
+		t.Fatalf("register Fresh: %v", err)
+	}
+	if _, err := backend.registerProject("Stale", filepath.Join(dir, "Stale.db")); err != nil {
+		t.Fatalf("register Stale: %v", err)
+	}
+	// Backdate Stale's last_active to 90 days ago.
+	rec, _ := backend.DB.FindFirstRecord("_projects", "name = ?", "Stale")
+	d := projectDataOf(rec)
+	d["lastActive"] = time.Now().AddDate(0, 0, -90).UTC().Format(time.RFC3339)
+	rec.Set("data", d)
+	if err := backend.DB.SaveRecord(rec); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	archived, err := backend.autoArchiveStale(dir, 30, time.Now())
+	if err != nil {
+		t.Fatalf("autoArchiveStale: %v", err)
+	}
+	if len(archived) != 1 || archived[0] != "Stale" {
+		t.Fatalf("archived = %v, want [Stale]", archived)
+	}
+	if m, _ := backend.getProjectMeta("Stale", dir); m.Status != projectStatusArchived {
+		t.Errorf("Stale not archived")
+	}
+	if m, _ := backend.getProjectMeta("Fresh", dir); m.Status != projectStatusActive {
+		t.Errorf("Fresh wrongly archived")
 	}
 }
