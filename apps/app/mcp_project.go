@@ -108,7 +108,12 @@ func (c *trafficLoggingConfig) shouldLog(generatedBy string) bool {
 // readDBCache below, independent of Viewed — so the AI can scope reads
 // per-call without touching the user's UI selection.
 type ProjectDB struct {
-	mu     sync.Mutex
+	// RWMutex (ADR-003 A1): LogTraffic takes the read lock for the whole insert
+	// so concurrent captures across different project handles run in parallel
+	// instead of serializing on one mutex; lifecycle ops (SetProject, Close,
+	// handle eviction, delete) take the write lock and so wait for in-flight
+	// writes — a handle can't be closed mid-insert.
+	mu     sync.RWMutex
 	db     *sql.DB
 	name   string // current project name (e.g. "MyProject")
 	dbPath string // full path to the current .db file
@@ -201,6 +206,13 @@ func (p *ProjectDB) openLocked(name string) error {
 	if err != nil {
 		return fmt.Errorf("projectDB: failed to open database %s: %w", dbFile, err)
 	}
+
+	// One writer connection per handle (ADR-003 A1): SQLite allows a single
+	// writer per DB, so capping the pool makes concurrent LogTraffic calls to the
+	// SAME project queue on the connection instead of racing into SQLITE_BUSY.
+	// Different projects are different handles/pools, so they still write in
+	// parallel. Readers use separate WAL connections (viewedDB, readDBCache).
+	db.SetMaxOpenConns(1)
 
 	// Enable WAL mode for concurrent reads during writes
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
@@ -355,8 +367,33 @@ func migrateV5DropRequestHashUnique(db *sql.DB) error {
 // It is designed to be called from a goroutine: go projectDB.LogTraffic(...)
 // If no DB is open it returns nil silently.
 func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	// Ensure an addressed (non-Active) project handle is open BEFORE we take the
+	// read lock for I/O. Opening mutates the registry map, so it needs the
+	// exclusive lock — but that is the rare path (first row for a project). The
+	// common path (Active handle, or an already-open addressed handle) skips it.
+	proj := sanitizeProjectName(userdata.Project)
+	if proj != "" {
+		p.mu.RLock()
+		_, cached := p.writeHandles[proj]
+		needOpen := p.ready && proj != p.name && !cached
+		p.mu.RUnlock()
+		if needOpen {
+			p.mu.Lock()
+			_, err := p.writeHandleForLocked(proj)
+			p.mu.Unlock()
+			if err != nil {
+				return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, err)
+			}
+		}
+	}
+
+	// Hold the READ lock for the whole insert (ADR-003 A1): many LogTraffic
+	// goroutines proceed concurrently (RLock is shared, *sql.DB is pool-safe), so
+	// captures to different project handles no longer serialize on one mutex.
+	// Lifecycle ops take the exclusive lock, so they wait for in-flight writes
+	// and cannot close a handle mid-insert.
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
 	if p.db == nil || !p.ready {
 		return nil // silently skip if no DB
@@ -367,16 +404,13 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 		return nil
 	}
 
-	// Route to the addressed project's write handle (ADR-002). Empty project,
-	// or a project equal to the Active one, uses the Active handle — preserving
-	// today's behavior for every caller that sets no project.
+	// Route to the addressed project's write handle (ADR-002). Empty project, an
+	// Active-equal project, or an evicted handle falls back to the Active handle.
 	db := p.db
-	if proj := sanitizeProjectName(userdata.Project); proj != "" && proj != p.name {
-		h, err := p.writeHandleForLocked(proj)
-		if err != nil {
-			return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, err)
+	if proj != "" && proj != p.name {
+		if h, ok := p.writeHandles[proj]; ok {
+			db = h
 		}
-		db = h
 	}
 
 	// Derive host -- strip protocol prefix
@@ -540,6 +574,8 @@ func (p *ProjectDB) writeHandleForLocked(name string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("writeHandleForLocked: open %s: %w", dbFile, err)
 	}
+	// Single writer connection per handle — see openLocked (ADR-003 A1).
+	db.SetMaxOpenConns(1)
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("writeHandleForLocked: set WAL mode: %w", err)
@@ -559,6 +595,19 @@ func (p *ProjectDB) writeHandleForLocked(name string) (*sql.DB, error) {
 	p.writeHandles[sanitized] = db
 	log.Printf("[ProjectDB] opened addressed write handle: %s", dbFile)
 	return db, nil
+}
+
+// closeHandlesForProjectLocked closes and drops any open addressed write handle
+// for the named project. Caller MUST hold p.mu exclusively (so no in-flight
+// LogTraffic — which holds the read lock — is mid-insert on the handle). Shared
+// by registry eviction (A2) and project delete (B3). No-op for the Active
+// handle, which is owned by SetProject/Close, not the registry.
+func (p *ProjectDB) closeHandlesForProjectLocked(name string) {
+	sanitized := sanitizeProjectName(name)
+	if h, ok := p.writeHandles[sanitized]; ok {
+		_ = h.Close()
+		delete(p.writeHandles, sanitized)
+	}
 }
 
 // Close closes the current database connection.
