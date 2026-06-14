@@ -66,6 +66,7 @@ type ConsolidatedSessionArgs struct {
 	Content        string            `json:"content,omitempty" jsonschema_description:"HTML content to extract CSRF tokens from (csrfExtract)"`
 	CustomPatterns []string          `json:"customPatterns,omitempty" jsonschema_description:"Custom regex patterns (csrfExtract)"`
 	SessionName    string            `json:"sessionName,omitempty" jsonschema_description:"Session to store extracted CSRF token in (csrfExtract)"`
+	Project        string            `json:"project,omitempty" jsonschema_description:"Project the session belongs to (default: the default project). Each project keeps its own cookie jar (ADR-002)."`
 }
 
 func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -99,7 +100,7 @@ func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallTool
 		// Inline: SessionUpdateCookiesArgs uses json:"cookies" ([]string), but
 		// our consolidated struct uses json:"cookieValues" for the []string
 		// and json:"cookies" for map[string]string (create). Must remap.
-		record, err := backend.resolveSession(args.Name)
+		record, err := backend.resolveSessionInProject(args.Project, args.Name)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -139,7 +140,7 @@ func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallTool
 	case "getCookies":
 		// Inline: GetCookieJarArgs uses json:"session", but our consolidated
 		// struct uses json:"name" for the session name. Must remap.
-		session, err := backend.resolveSession(args.Name)
+		session, err := backend.resolveSessionInProject(args.Project, args.Name)
 		if err != nil {
 			return mcp.NewToolResultError("no session found: create one with sessionCreate and activate with sessionSwitch"), nil
 		}
@@ -165,7 +166,7 @@ func (backend *Backend) sessionHandler(ctx context.Context, request mcp.CallTool
 			return mcp.NewToolResultError("cookieName is required for setCookie"), nil
 		}
 
-		session, err := backend.resolveSession(args.Name)
+		session, err := backend.resolveSessionInProject(args.Project, args.Name)
 		if err != nil {
 			return mcp.NewToolResultError("no session found: create one with sessionCreate and activate with sessionSwitch"), nil
 		}

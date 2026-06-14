@@ -39,59 +39,88 @@ func (m *FlexibleStringMap) UnmarshalJSON(data []byte) error {
 // Input schemas
 // ---------------------------------------------------------------------------
 
+// project on session args scopes the jar to a project (ADR-002). Empty = the
+// default project, matching pre-ADR-002 behavior.
 type SessionCreateArgs struct {
 	Name    string            `json:"name" jsonschema:"required" jsonschema_description:"Unique session name (e.g. admin, user1)"`
 	Cookies map[string]string `json:"cookies,omitempty" jsonschema_description:"Initial cookies as name:value pairs"`
 	Headers FlexibleStringMap `json:"headers,omitempty" jsonschema_description:"Persistent headers (e.g. Authorization: Bearer ...)"`
+	Project string            `json:"project,omitempty" jsonschema_description:"Project this session belongs to (default: the default project). Lets each project keep its own cookie jar."`
 }
 
 type SessionListArgs struct{}
 
 type SessionSwitchArgs struct {
-	Name string `json:"name" jsonschema:"required" jsonschema_description:"Session name to activate"`
+	Name    string `json:"name" jsonschema:"required" jsonschema_description:"Session name to activate"`
+	Project string `json:"project,omitempty" jsonschema_description:"Project the session belongs to (default: the default project)"`
 }
 
 type SessionDeleteArgs struct {
-	Name string `json:"name" jsonschema:"required" jsonschema_description:"Session name to delete"`
+	Name    string `json:"name" jsonschema:"required" jsonschema_description:"Session name to delete"`
+	Project string `json:"project,omitempty" jsonschema_description:"Project the session belongs to (default: the default project)"`
 }
 
 type SessionUpdateCookiesArgs struct {
 	Name    string   `json:"name,omitempty" jsonschema_description:"Session name (default: active session)"`
 	Cookies []string `json:"cookies" jsonschema:"required" jsonschema_description:"Set-Cookie header values or name=value pairs to merge"`
+	Project string   `json:"project,omitempty" jsonschema_description:"Project the session belongs to (default: the default project)"`
 }
 
 type SessionGetHeadersArgs struct {
-	Name string `json:"name,omitempty" jsonschema_description:"Session name (default: active session)"`
+	Name    string `json:"name,omitempty" jsonschema_description:"Session name (default: active session)"`
+	Project string `json:"project,omitempty" jsonschema_description:"Project the session belongs to (default: the default project)"`
 }
 
 type CsrfExtractArgs struct {
 	Content        string   `json:"content" jsonschema:"required" jsonschema_description:"HTTP response body to extract CSRF tokens from"`
 	CustomPatterns []string `json:"customPatterns,omitempty" jsonschema_description:"Additional regex patterns to try"`
 	SessionName    string   `json:"sessionName,omitempty" jsonschema_description:"Session to store extracted token in"`
+	Project        string   `json:"project,omitempty" jsonschema_description:"Project the target session belongs to (default: the default project)"`
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-func (backend *Backend) findActiveSession() (*lorgdb.Record, error) {
-	record, err := backend.DB.FindFirstRecord("_sessions", "active = ?", true)
+// Sessions are scoped to a project (ADR-002): the project="" rows are the
+// "default project" jar, which is where every pre-ADR-002 session lives after
+// migration. The *InProject helpers carry an explicit project; the bare
+// wrappers default to "" so existing callers (authz, cookie, template tools)
+// keep operating on the default project unchanged.
+
+func (backend *Backend) findActiveSessionInProject(project string) (*lorgdb.Record, error) {
+	record, err := backend.DB.FindFirstRecord("_sessions", "active = ? AND project = ?", true, project)
 	if err != nil {
-		return nil, fmt.Errorf("no active session found, create one with sessionCreate and activate with sessionSwitch")
+		return nil, fmt.Errorf("no active session for project %q, create one with sessionCreate and activate with sessionSwitch", project)
 	}
 	return record, nil
 }
 
-func (backend *Backend) findSessionByName(name string) (*lorgdb.Record, error) {
-	return backend.DB.FindFirstRecord("_sessions", "name = ?", name)
+func (backend *Backend) findActiveSession() (*lorgdb.Record, error) {
+	return backend.findActiveSessionInProject("")
 }
 
-// resolveSession returns a session by name, or the active session if name is empty.
-func (backend *Backend) resolveSession(name string) (*lorgdb.Record, error) {
+func (backend *Backend) findSessionByNameInProject(project, name string) (*lorgdb.Record, error) {
+	return backend.DB.FindFirstRecord("_sessions", "name = ? AND project = ?", name, project)
+}
+
+func (backend *Backend) findSessionByName(name string) (*lorgdb.Record, error) {
+	return backend.findSessionByNameInProject("", name)
+}
+
+// resolveSessionInProject returns a session by name within a project, or that
+// project's active session if name is empty.
+func (backend *Backend) resolveSessionInProject(project, name string) (*lorgdb.Record, error) {
 	if name != "" {
-		return backend.findSessionByName(name)
+		return backend.findSessionByNameInProject(project, name)
 	}
-	return backend.findActiveSession()
+	return backend.findActiveSessionInProject(project)
+}
+
+// resolveSession returns a session by name (or the active session) in the
+// default project. Thin wrapper kept for existing callers.
+func (backend *Backend) resolveSession(name string) (*lorgdb.Record, error) {
+	return backend.resolveSessionInProject("", name)
 }
 
 // ---------------------------------------------------------------------------
@@ -104,14 +133,16 @@ func (backend *Backend) sessionCreateHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Check if session with this name already exists
-	existing, _ := backend.DB.FindFirstRecord("_sessions", "name = ?", args.Name)
+	// Check if session with this name already exists IN THIS PROJECT. The same
+	// name may exist in a different project (ADR-002 per-project jars).
+	existing, _ := backend.findSessionByNameInProject(args.Project, args.Name)
 	if existing != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session with name %q already exists", args.Name)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("session with name %q already exists in project %q", args.Name, args.Project)), nil
 	}
 
 	record := lorgdb.NewRecord("_sessions")
 	record.Set("name", args.Name)
+	record.Set("project", args.Project)
 	record.Set("cookies", args.Cookies)
 	record.Set("headers", args.Headers)
 	record.Set("active", false)
@@ -140,6 +171,7 @@ func (backend *Backend) sessionListHandler(ctx context.Context, request mcp.Call
 
 		sessions = append(sessions, map[string]any{
 			"name":        rec.GetString("name"),
+			"project":     rec.GetString("project"),
 			"active":      rec.GetBool("active"),
 			"cookieCount": len(cookies),
 			"headerCount": len(headers),
@@ -158,19 +190,20 @@ func (backend *Backend) sessionSwitchHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Find the target session
-	target, err := backend.DB.FindFirstRecord("_sessions", "name = ?", args.Name)
+	// Find the target session within its project.
+	target, err := backend.findSessionByNameInProject(args.Project, args.Name)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session not found: %s", args.Name)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("session not found: %s (project %q)", args.Name, args.Project)), nil
 	}
 
-	// Deactivate all sessions
-	allRecords, err := backend.DB.FindRecords("_sessions", "1=1")
+	// Deactivate only sessions IN THE SAME PROJECT, so switching the active
+	// session in project B leaves project A's active session untouched.
+	projRecords, err := backend.DB.FindRecords("_sessions", "project = ?", args.Project)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to list sessions: %v", err)), nil
 	}
 
-	for _, rec := range allRecords {
+	for _, rec := range projRecords {
 		if rec.GetBool("active") {
 			rec.Set("active", false)
 			if err := backend.DB.SaveRecord(rec); err != nil {
@@ -188,6 +221,7 @@ func (backend *Backend) sessionSwitchHandler(ctx context.Context, request mcp.Ca
 	return mcpJSONResult(map[string]any{
 		"success":       true,
 		"activeSession": args.Name,
+		"project":       args.Project,
 	})
 }
 
@@ -197,9 +231,9 @@ func (backend *Backend) sessionDeleteHandler(ctx context.Context, request mcp.Ca
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	record, err := backend.DB.FindFirstRecord("_sessions", "name = ?", args.Name)
+	record, err := backend.findSessionByNameInProject(args.Project, args.Name)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session not found: %s", args.Name)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("session not found: %s (project %q)", args.Name, args.Project)), nil
 	}
 
 	if err := backend.DB.DeleteRecord("_sessions", record.Id); err != nil {
@@ -218,7 +252,7 @@ func (backend *Backend) sessionUpdateCookiesHandler(ctx context.Context, request
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	record, err := backend.resolveSession(args.Name)
+	record, err := backend.resolveSessionInProject(args.Project, args.Name)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -265,7 +299,7 @@ func (backend *Backend) sessionGetHeadersHandler(ctx context.Context, request mc
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	record, err := backend.resolveSession(args.Name)
+	record, err := backend.resolveSessionInProject(args.Project, args.Name)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -350,9 +384,9 @@ func (backend *Backend) csrfExtractHandler(ctx context.Context, request mcp.Call
 
 	// If tokens found and a session name is provided, store the first token in the session
 	if len(tokens) > 0 && args.SessionName != "" {
-		record, err := backend.findSessionByName(args.SessionName)
+		record, err := backend.findSessionByNameInProject(args.Project, args.SessionName)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("session not found: %s", args.SessionName)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("session not found: %s (project %q)", args.SessionName, args.Project)), nil
 		}
 		record.Set("csrf_token", tokens[0].Value)
 		record.Set("csrf_field", tokens[0].Name)
