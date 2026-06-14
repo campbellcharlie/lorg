@@ -445,7 +445,7 @@ func (backend *Backend) trafficTagHandler(ctx context.Context, request mcp.CallT
 
 // ConsolidatedProjectArgs is the union argument struct for the project tool.
 type ConsolidatedProjectArgs struct {
-	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: list, register, setActive, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
+	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: list, register, useProject, setActive, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
 	Name          string   `json:"name,omitempty" jsonschema_description:"Project name (setup, setName, register, setActive, archive, unarchive, delete)"`
 	DbDir         string   `json:"dbDir,omitempty" jsonschema_description:"Directory for SQLite DB files (setup, setActive)"`
 	OutputPath    string   `json:"outputPath,omitempty" jsonschema_description:"Output path for export (export)"`
@@ -494,6 +494,15 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcpJSONResult(map[string]any{"success": true, "archived": archived, "count": len(archived), "olderThanDays": days})
+
+	case "useProject":
+		// Sticky per-connection default project (ADR-003 C1): subsequent tool
+		// calls that omit `project` use this. Empty name clears it.
+		setConnectionDefaultProject(ctx, args.Name)
+		if args.Name == "" {
+			return mcpJSONResult(map[string]any{"success": true, "clearedDefault": true})
+		}
+		return mcpJSONResult(map[string]any{"success": true, "defaultProject": args.Name})
 
 	case "register":
 		if args.Name == "" {
@@ -565,7 +574,7 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 	case "getRedactionMode":
 		return backend.getRedactionModeHandler(ctx, request)
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: list, register, setActive, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: list, register, useProject, setActive, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
 	}
 }
 
