@@ -197,6 +197,42 @@ func projectTrafficCount(dbDir, name string) int {
 	return n
 }
 
+// projectInUseGiven is the pure core of in-use detection (ADR-003 B2): a project
+// is in use if it is the active write target or a proxy listener is bound to it.
+// proxyProjects maps listener address -> bound project name.
+func projectInUseGiven(name, activeName string, proxyProjects map[string]string) (bool, string) {
+	s := sanitizeProjectName(name)
+	if s != "" && s == sanitizeProjectName(activeName) {
+		return true, "it is the active write target — switch to another project first"
+	}
+	for addr, proj := range proxyProjects {
+		if sanitizeProjectName(proj) == s {
+			return true, fmt.Sprintf("a proxy listener is bound to it (%s)", addr)
+		}
+	}
+	return false, ""
+}
+
+// projectInUse gathers live binding state (active target + running proxies) and
+// reports whether the named project is in use, with a human reason. Destructive
+// lifecycle ops (archive/delete) refuse in-use projects.
+func projectInUse(name string) (bool, string) {
+	projectDB.mu.RLock()
+	active := projectDB.name
+	projectDB.mu.RUnlock()
+
+	proxies := make(map[string]string)
+	ProxyMgr.mu.RLock()
+	for _, inst := range ProxyMgr.instances {
+		if inst != nil {
+			proxies[inst.Proxy.listenAddr] = inst.Project
+		}
+	}
+	ProxyMgr.mu.RUnlock()
+
+	return projectInUseGiven(name, active, proxies)
+}
+
 // deregisterProject removes a project's registry row (used by hard delete).
 func (backend *Backend) deregisterProject(name string) error {
 	rec, err := backend.DB.FindFirstRecord("_projects", "name = ?", strings.TrimSpace(name))
@@ -204,4 +240,65 @@ func (backend *Backend) deregisterProject(name string) error {
 		return nil // already gone
 	}
 	return backend.DB.DeleteRecord("_projects", rec.Id)
+}
+
+// archiveProject hides a project from the active list while keeping its data
+// (ADR-003 B3). Refuses an in-use project — switch away / stop its proxy first.
+func (backend *Backend) archiveProject(name string) error {
+	if inUse, reason := projectInUse(name); inUse {
+		return fmt.Errorf("cannot archive %q: %s", name, reason)
+	}
+	return backend.setProjectStatus(name, projectStatusArchived)
+}
+
+// unarchiveProject restores an archived project to active status.
+func (backend *Backend) unarchiveProject(name string) error {
+	return backend.setProjectStatus(name, projectStatusActive)
+}
+
+// removeProjectFiles deletes a project's SQLite files (.db + WAL/SHM sidecars).
+func removeProjectFiles(dbDir, name string) error {
+	sanitized := sanitizeProjectName(name)
+	if sanitized == "" || dbDir == "" {
+		return fmt.Errorf("project name and directory required")
+	}
+	base := filepath.Join(dbDir, sanitized+".db")
+	var firstErr error
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(base + suffix); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// deleteProject permanently removes a project: its SQLite files, its sessions,
+// and its registry row (ADR-003 B3). Engagement data is evidence, so this is
+// guarded: confirm must be true, and an in-use project (active target or a bound
+// proxy) is refused — the caller must switch away / stop the proxy first.
+func (backend *Backend) deleteProject(name, dbDir string, confirm bool) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("project name required")
+	}
+	if !confirm {
+		return fmt.Errorf("delete requires confirm=true — this permanently removes %q's captured traffic and sessions", name)
+	}
+	if inUse, reason := projectInUse(name); inUse {
+		return fmt.Errorf("cannot delete %q: %s", name, reason)
+	}
+
+	// Close any open handle so the files aren't locked, then remove them.
+	projectDB.closeProjectHandle(name)
+	if err := removeProjectFiles(dbDir, name); err != nil {
+		return fmt.Errorf("delete project files: %w", err)
+	}
+
+	// Remove the project's sessions (lorgdb) and its registry row.
+	if recs, err := backend.DB.FindRecords("_sessions", "project = ?", name); err == nil {
+		for _, r := range recs {
+			_ = backend.DB.DeleteRecord("_sessions", r.Id)
+		}
+	}
+	return backend.deregisterProject(name)
 }
