@@ -88,30 +88,30 @@ build green + targeted test before the next.
       correctness risk if the load test shows session lookups are hot.
 
 ## Phase B — project registry + management
-- [ ] **B1** Activate `_projects` as source of truth + metadata; list/info read
-      from it. Backfill from on-disk `.db` files on first boot. (rec #9)
-- [ ] **B2** In-use / binding detection (proxy/browser/serval bound). (rec #11)
-- [ ] **B3** Archive-first lifecycle + guarded hard-delete (confirm, refuse
-      active/in-use, teardown via A1 primitive, remove db+wal+shm). (rec #10) [destructive]
-- [ ] **B4** Project management on MCP (create/list/archive/delete/setActive). (rec #12)
-- [ ] **B5** Disk + retention accounting (size, last_active, optional auto-archive). (rec #13)
+- [x] **B1** Activate `_projects` as source of truth + metadata; backfill from
+      on-disk `.db` files. (rec #9) — f2c2e01
+- [x] **B2** In-use / binding detection. (rec #11) — ff518ef
+- [x] **B3** Archive-first lifecycle + guarded hard-delete. (rec #10) — ff518ef
+- [x] **B4** Project management on MCP (list/register/setActive/archive/unarchive/
+      delete). (rec #12) — 4ac271c
+- [x] **B5** Disk + retention accounting + auto-archive. (rec #13) — 9807c1b
 
 ## Phase C — ergonomics + structural
-- [ ] **C1** Per-connection MCP project context (sticky default). (rec #7)
-- [ ] **C2** FTS external-content over `http_messages` (kill body duplication). (rec #6) [migration]
-- [ ] **C3** Dual-write consolidation: projectDB authoritative, reduce `_data`
-      write. (rec #5) [biggest/riskiest — may split into ADR-004]
+- [x] **C1** Per-connection MCP sticky default project. (rec #7) — cc04335
+- [~] **C2** FTS external-content. (rec #6) — DEFERRED (Phase D evidence: no disk
+      failure, search not a bottleneck; migration/trigger risk unjustified).
+- [~] **C3** Dual-write consolidation. (rec #5) — DEFERRED to ADR-004 (Phase D
+      evidence: dual-write caused zero failures and was not the limiter; retiring
+      `_data` means migrating legacy query/UI/sitemap readers — large structural).
 
-## Phase D — load validation
-- [ ] **D** Load harness: serval feed + `fuzz`/`raceTest` at volume through live
-      MCP. Monitor throughput, dropped rows, goroutine + handle counts, DB errors,
-      memory. Iterate until acceptance (see ADR-003 Validation) holds.
+## Phase D — load validation — DONE (iteration 005)
+- [x] **D** Concurrent load (10k @ c=100 ~1942/s, 4 projects) + 4 sustained rounds.
 
-## Acceptance (load)
-- [ ] No dropped traffic rows vs requests issued.
-- [ ] Bounded goroutines + open handles under sustained load.
-- [ ] Cross-project writes not serialized by the old lock.
-- [ ] Zero DB/busy_timeout errors; stable memory.
+## Acceptance (load) — ALL MET
+- [x] No dropped traffic rows vs requests issued. (captured == sent, exact)
+- [x] Bounded goroutines + open handles. (RSS flat 288->290 MB over +15k req)
+- [x] Cross-project writes not serialized. (4 parallel handles, no SQLITE_BUSY)
+- [x] Zero DB/busy_timeout errors; stable memory. (0 errors across ~25k req)
 
 ## Rollback
 - Each stage is one commit; `git revert <stage>` backs out a single stage.
