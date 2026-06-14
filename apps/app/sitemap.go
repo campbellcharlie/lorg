@@ -81,9 +81,13 @@ func (backend *Backend) handleSitemapNew(data *types.SitemapGet) error {
 				} else {
 					status = resp.StatusCode
 
-					fingerprints = backend.Wappalyzer.FingerprintWithInfo(resp.Header, respData)
-
-					fmt.Printf("Wappylyzer Fingerprints %v\n", fingerprints)
+					// Guard a nil fingerprinter (test backends, or a failed
+					// init): this runs in an async goroutine, so a nil deref
+					// here crashes the whole process rather than one request.
+					if backend.Wappalyzer != nil {
+						fingerprints = backend.Wappalyzer.FingerprintWithInfo(resp.Header, respData)
+						fmt.Printf("Wappylyzer Fingerprints %v\n", fingerprints)
+					}
 				}
 			}
 			log.Println("Checked: wappalyzer for: ", SitemapCollectionName)
