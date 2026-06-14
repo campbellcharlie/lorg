@@ -926,14 +926,13 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 
 	// Log to project SQLite DB (non-blocking) so proxy traffic appears in
 	// searchTraffic, analytics, and export alongside MCP tool traffic.
-	go func() {
-		typed := proxyUserdataToTyped(userdata, reqCtx)
-		// Capture stays bound to THIS proxy's project (ADR-002), so a browser
-		// streaming through this listener always logs to its own project even
-		// while addressed sends target another. Empty = Active, unchanged.
-		typed.Project = rp.project
-		projectDB.LogTraffic(typed, reqCtx.RawRequest, reqCtx.RawResponse)
-	}()
+	typed := proxyUserdataToTyped(userdata, reqCtx)
+	// Capture stays bound to THIS proxy's project (ADR-002), so a browser
+	// streaming through this listener always logs to its own project even while
+	// addressed sends target another. Empty = Active, unchanged. Enqueued to the
+	// async worker pool (ADR-003 A4) rather than a per-request goroutine.
+	typed.Project = rp.project
+	projectDB.enqueueTraffic(typed, reqCtx.RawRequest, reqCtx.RawResponse)
 
 	log.Printf("[RawProxy][DB][COMPLETE] Response ID=%s updated successfully in %v", userdata["id"].(string), elapsed)
 }
