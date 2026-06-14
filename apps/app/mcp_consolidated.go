@@ -444,15 +444,18 @@ func (backend *Backend) trafficTagHandler(ctx context.Context, request mcp.CallT
 
 // ConsolidatedProjectArgs is the union argument struct for the project tool.
 type ConsolidatedProjectArgs struct {
-	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
-	Name          string   `json:"name,omitempty" jsonschema_description:"Project name (setup, setName)"`
-	DbDir         string   `json:"dbDir,omitempty" jsonschema_description:"Directory for SQLite DB files (setup)"`
+	Action        string   `json:"action" jsonschema:"required" jsonschema_description:"Operation: list, register, setActive, archive, unarchive, delete, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"`
+	Name          string   `json:"name,omitempty" jsonschema_description:"Project name (setup, setName, register, setActive, archive, unarchive, delete)"`
+	DbDir         string   `json:"dbDir,omitempty" jsonschema_description:"Directory for SQLite DB files (setup, setActive)"`
 	OutputPath    string   `json:"outputPath,omitempty" jsonschema_description:"Output path for export (export)"`
 	ProjectName   string   `json:"projectName,omitempty" jsonschema_description:"Project name for export metadata (export)"`
 	HostFilter    string   `json:"hostFilter,omitempty" jsonschema_description:"Only export traffic for this host (export)"`
 	Enabled       bool     `json:"enabled,omitempty" jsonschema_description:"Enable or disable traffic capture. When false, no traffic is written to either the global store or the per-project mirror (setLogging)."`
 	Sources       []string `json:"sources,omitempty" jsonschema_description:"Which sources to gate: proxy, repeater, mcp, template, all — affects both global and per-project writes (setLogging)."`
 	RedactionMode string   `json:"redactionMode,omitempty" jsonschema_description:"Redaction mode: off, balanced, strict (setRedactionMode)"`
+	// Project management (ADR-003 B4)
+	IncludeArchived bool `json:"includeArchived,omitempty" jsonschema_description:"Include archived projects in the result (list)"`
+	Confirm         bool `json:"confirm,omitempty" jsonschema_description:"Must be true to permanently delete a project and its data (delete)"`
 }
 
 func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -462,6 +465,65 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 	}
 
 	switch args.Action {
+	case "list":
+		// Project registry with metadata (ADR-003 B4).
+		projects, err := backend.listProjects(projectDBDir(), args.IncludeArchived)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{"projects": projects, "count": len(projects)})
+
+	case "register":
+		if args.Name == "" {
+			return mcp.NewToolResultError("name is required for register"), nil
+		}
+		if _, err := backend.registerProject(args.Name, ""); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{"success": true, "registered": args.Name})
+
+	case "setActive":
+		if args.Name == "" {
+			return mcp.NewToolResultError("name is required for setActive"), nil
+		}
+		projectDB.ClearViewed()
+		if err := projectDB.SetProject(args.Name, args.DbDir); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if rec, err := backend.DB.FindRecordById("_settings", "PROJECT_NAME___"); err == nil && rec != nil {
+			rec.Set("value", args.Name)
+			_ = backend.DB.SaveRecord(rec)
+		}
+		_, _ = backend.registerProject(args.Name, "")
+		return mcpJSONResult(map[string]any{"success": true, "active": args.Name, "info": projectDB.Info()})
+
+	case "archive":
+		if args.Name == "" {
+			return mcp.NewToolResultError("name is required for archive"), nil
+		}
+		if err := backend.archiveProject(args.Name); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{"success": true, "archived": args.Name})
+
+	case "unarchive":
+		if args.Name == "" {
+			return mcp.NewToolResultError("name is required for unarchive"), nil
+		}
+		if err := backend.unarchiveProject(args.Name); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{"success": true, "unarchived": args.Name})
+
+	case "delete":
+		if args.Name == "" {
+			return mcp.NewToolResultError("name is required for delete"), nil
+		}
+		if err := backend.deleteProject(args.Name, projectDBDir(), args.Confirm); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcpJSONResult(map[string]any{"success": true, "deleted": args.Name})
+
 	case "setup":
 		// Delegate: ProjectSetupArgs uses json:"name", json:"dbDir" -- all match.
 		return backend.projectSetupHandler(ctx, request)
@@ -481,8 +543,15 @@ func (backend *Backend) projectHandler(ctx context.Context, request mcp.CallTool
 	case "getRedactionMode":
 		return backend.getRedactionModeHandler(ctx, request)
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: list, register, setActive, archive, unarchive, delete, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode"), nil
 	}
+}
+
+// projectDBDir returns the directory the project SQLite files live in.
+func projectDBDir() string {
+	projectDB.mu.RLock()
+	defer projectDB.mu.RUnlock()
+	return projectDB.dbDir
 }
 
 // ========================== 8. raceTest ==========================
