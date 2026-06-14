@@ -296,6 +296,11 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 			_ = backend.DB.SaveRecord(rec)
 		}
 
+		// Touch the project registry (ADR-003 B1): records existence + last_active.
+		if _, rerr := backend.registerProject(body.Name, ""); rerr != nil {
+			log.Printf("[ProjectSetActive] registry touch failed: %v", rerr)
+		}
+
 		log.Printf("[ProjectSetActive] Active project: %s", body.Name)
 		return c.JSON(http.StatusOK, projectDB.Info())
 	})
