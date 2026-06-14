@@ -64,3 +64,65 @@ func TestSessionsAreProjectScoped(t *testing.T) {
 		t.Errorf("found 'auth' in ProjC, but it was only created in default + ProjB")
 	}
 }
+
+func jarCookies(t *testing.T, backend *Backend, project, name string) map[string]any {
+	t.Helper()
+	rec, err := backend.findSessionByNameInProject(project, name)
+	if err != nil {
+		t.Fatalf("lookup %q/%q: %v", project, name, err)
+	}
+	m, _ := rec.Get("cookies").(map[string]any)
+	return m
+}
+
+// TestCopyCookiesBetweenJars proves Slice 3: an explicit, selective transfer
+// from one project's jar to another. Only allowlisted names move, existing
+// destination cookies are preserved, and the source jar is left untouched.
+func TestCopyCookiesBetweenJars(t *testing.T) {
+	backend := newProjectTagTestBackend(t)
+
+	// Source jar (project A) has an SSO token plus a host-specific cookie.
+	srcRec := lorgdb.NewRecord("_sessions")
+	srcRec.Set("name", "auth")
+	srcRec.Set("project", "ProjA")
+	srcRec.Set("cookies", map[string]string{"sso": "shared-token", "acme_sid": "a-only"})
+	srcRec.Set("active", true)
+	if err := backend.DB.SaveRecord(srcRec); err != nil {
+		t.Fatalf("save src: %v", err)
+	}
+	// Destination jar (project B) already has its own cookie.
+	dstRec := lorgdb.NewRecord("_sessions")
+	dstRec.Set("name", "auth")
+	dstRec.Set("project", "ProjB")
+	dstRec.Set("cookies", map[string]string{"b_sid": "b-existing"})
+	dstRec.Set("active", true)
+	if err := backend.DB.SaveRecord(dstRec); err != nil {
+		t.Fatalf("save dst: %v", err)
+	}
+
+	// Copy ONLY the shared SSO token from A's active jar to B's active jar.
+	copied, _, _, err := backend.copyCookiesBetween("ProjA", "", "ProjB", "", []string{"sso"})
+	if err != nil {
+		t.Fatalf("copyCookiesBetween: %v", err)
+	}
+	if len(copied) != 1 || copied[0] != "sso" {
+		t.Fatalf("copied = %v, want [sso]", copied)
+	}
+
+	dstJar := jarCookies(t, backend, "ProjB", "auth")
+	if dstJar["sso"] != "shared-token" {
+		t.Errorf("destination missing copied sso token: %v", dstJar)
+	}
+	if dstJar["b_sid"] != "b-existing" {
+		t.Errorf("copy clobbered destination's existing cookie: %v", dstJar)
+	}
+	if _, leaked := dstJar["acme_sid"]; leaked {
+		t.Errorf("non-allowlisted cookie acme_sid leaked into destination: %v", dstJar)
+	}
+
+	// Source jar is unchanged.
+	srcJar := jarCookies(t, backend, "ProjA", "auth")
+	if srcJar["acme_sid"] != "a-only" || srcJar["sso"] != "shared-token" {
+		t.Errorf("source jar was mutated by copy: %v", srcJar)
+	}
+}

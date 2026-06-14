@@ -41,13 +41,14 @@ last_updated: 2026-06-13
   `updateCookies`; `names` allowlist; optional `rewriteDomain`.
 
 ## Acceptance Criteria
-- [ ] A send addressed to B logs to `B.db` while the Active target stays A
-      (verified: row present in B, absent from A; Active unchanged).
-- [ ] Proxy capture bound to A keeps landing in A during a B-addressed send.
-- [ ] Empty/unspecified project preserves today's behavior (regression guard).
-- [ ] (S2) A B-addressed send injects B's active jar, not the global one.
-- [ ] (S2) Existing sessions survive migration under a default project.
-- [ ] (S3) `copyCookies` moves only allowlisted cookies; domain optionally rewritten.
+- [x] A send addressed to B logs to `B.db` while the Active target stays A
+      (verified: row present in B, absent from A; Active unchanged). — iter 002
+- [x] Proxy capture bound to A keeps landing in A during a B-addressed send. — iter 002
+- [x] Empty/unspecified project preserves today's behavior (regression guard). — iter 002/003
+- [x] (S2) A B-addressed send injects B's active jar, not the global one. — iter 003
+- [x] (S2) Existing sessions survive migration under a default project. — iter 003
+- [x] (S3) `copyCookies` moves only allowlisted cookies. (No domain rewrite —
+      lorg's jar is domain-less name->value; see iter 004.) — iter 004
 
 ## Dependencies
 - Builds on ADR-001 (`reqBody.Project`, `_data.project`, `DeriveProjectFromDBPath`).

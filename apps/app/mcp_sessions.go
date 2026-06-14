@@ -123,6 +123,54 @@ func (backend *Backend) resolveSession(name string) (*lorgdb.Record, error) {
 	return backend.resolveSessionInProject("", name)
 }
 
+// copyCookiesBetween merges selected cookies from one (project, session) jar
+// into another (ADR-002 slice 3). Empty fromName/toName resolves that project's
+// active session. An empty names slice copies every cookie in the source jar;
+// otherwise only the named cookies are copied. Returns the names actually copied
+// plus the resolved source/destination session names. lorg's jar is a flat
+// name->value map with no per-cookie domain, so this is a pure value merge — the
+// caller decides whether the cookies are meaningful against the destination's
+// target (e.g. shared IdP/SSO or bearer tokens).
+func (backend *Backend) copyCookiesBetween(fromProject, fromName, toProject, toName string, names []string) (copied []string, srcName, dstName string, err error) {
+	src, err := backend.resolveSessionInProject(fromProject, fromName)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("source session not found (project %q, name %q): %w", fromProject, fromName, err)
+	}
+	dst, err := backend.resolveSessionInProject(toProject, toName)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("destination session not found (project %q, name %q): %w", toProject, toName, err)
+	}
+	if src.Id == dst.Id {
+		return nil, "", "", fmt.Errorf("source and destination are the same session")
+	}
+
+	srcCookies, _ := src.Get("cookies").(map[string]any)
+	dstCookies, _ := dst.Get("cookies").(map[string]any)
+	if dstCookies == nil {
+		dstCookies = make(map[string]any)
+	}
+
+	allow := make(map[string]bool, len(names))
+	for _, n := range names {
+		allow[n] = true
+	}
+
+	copied = make([]string, 0, len(srcCookies))
+	for k, v := range srcCookies {
+		if len(allow) > 0 && !allow[k] {
+			continue
+		}
+		dstCookies[k] = v
+		copied = append(copied, k)
+	}
+
+	dst.Set("cookies", dstCookies)
+	if err := backend.DB.SaveRecord(dst); err != nil {
+		return nil, "", "", fmt.Errorf("failed to save destination jar: %w", err)
+	}
+	return copied, src.GetString("name"), dst.GetString("name"), nil
+}
+
 // ---------------------------------------------------------------------------
 // Tool handlers
 // ---------------------------------------------------------------------------
