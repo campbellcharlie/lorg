@@ -495,10 +495,17 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	// Insert every row — fuzz/repeater workflows want each iteration captured.
-	// Duplicate detection is still possible via request_hash + GROUP BY queries,
-	// but the dedup is no longer enforced at write time.
-	result, err := db.Exec(`INSERT INTO http_traffic
+	// Group the three inserts into ONE transaction (ADR-003 A3): one WAL sync per
+	// row instead of three. The traffic row still commits even when the message
+	// and FTS inserts are skipped (requestID == 0) or fail — they stay
+	// best-effort, exactly as the prior `_, _ =` behavior. fuzz/repeater
+	// workflows want every iteration captured; dedup is via request_hash queries.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("projectDB.LogTraffic: begin tx: %w", err)
+	}
+
+	result, err := tx.Exec(`INSERT INTO http_traffic
 		(timestamp, tool, method, host, path, query, param_count, status_code,
 		 response_length, protocol, port, url, mime_type, extension, page_title,
 		 content_type, request_hash, session_tag)
@@ -523,27 +530,27 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 		"", // session_tag
 	)
 	if err != nil {
+		_ = tx.Rollback()
 		return fmt.Errorf("projectDB.LogTraffic: traffic insert failed: %w", err)
 	}
 
-	requestID, err := result.LastInsertId()
-	if err != nil || requestID == 0 {
-		return nil
+	if requestID, idErr := result.LastInsertId(); idErr == nil && requestID != 0 {
+		// Message record (best-effort)
+		_, _ = tx.Exec(`INSERT OR IGNORE INTO http_messages
+			(request_id, request_headers, request_body, response_headers, response_body)
+			VALUES (?, ?, ?, ?, ?)`,
+			requestID, reqHeaders, []byte(reqBody), respHeaders, []byte(respBody),
+		)
+		// FTS entry (best-effort)
+		_, _ = tx.Exec(`INSERT INTO traffic_fts (rowid, url, request_headers, request_body, response_headers, response_body)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			requestID, fullURL, reqHeaders, reqBody, respHeaders, respBody,
+		)
 	}
 
-	// Insert message record
-	_, _ = db.Exec(`INSERT OR IGNORE INTO http_messages
-		(request_id, request_headers, request_body, response_headers, response_body)
-		VALUES (?, ?, ?, ?, ?)`,
-		requestID, reqHeaders, []byte(reqBody), respHeaders, []byte(respBody),
-	)
-
-	// Insert FTS entry
-	_, _ = db.Exec(`INSERT INTO traffic_fts (rowid, url, request_headers, request_body, response_headers, response_body)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		requestID, fullURL, reqHeaders, reqBody, respHeaders, respBody,
-	)
-
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("projectDB.LogTraffic: commit: %w", err)
+	}
 	return nil
 }
 
