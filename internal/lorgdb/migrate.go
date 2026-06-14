@@ -104,6 +104,29 @@ var Migrations = []Migration{
 			return err
 		},
 	},
+	{
+		Version:     6,
+		Description: "scope sessions to a project (per-project cookie jars)",
+		Up: func(db *sql.DB) error {
+			if _, err := db.Exec("ALTER TABLE _sessions ADD COLUMN project TEXT NOT NULL DEFAULT ''"); err != nil &&
+				!strings.Contains(err.Error(), "duplicate column") {
+				return err
+			}
+			// Uniqueness moves from (name) to (project, name) so the same session
+			// name can exist independently per project. Existing rows backfill to
+			// project='' (the default project) and keep their names, so the
+			// rebuilt index has no collisions.
+			for _, stmt := range []string{
+				"DROP INDEX IF EXISTS idx_sessions_name",
+				"CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_project_name ON _sessions (project, name)",
+			} {
+				if _, err := db.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // RunMigrations applies any unapplied migrations in order.

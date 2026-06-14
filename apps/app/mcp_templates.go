@@ -382,7 +382,13 @@ func substituteVariables(template string, variables map[string]string, jsonEscap
 // and custom headers into the raw HTTP request. If no active session exists,
 // the request is returned unmodified.
 func (backend *Backend) injectSessionIntoRequest(rawRequest string) (string, error) {
-	session, err := backend.findActiveSession()
+	return backend.injectSessionIntoRequestForProject("", rawRequest)
+}
+
+// injectSessionIntoRequestForProject injects the active session jar of a
+// specific project (ADR-002). Empty project = the default project's jar.
+func (backend *Backend) injectSessionIntoRequestForProject(project, rawRequest string) (string, error) {
+	session, err := backend.findActiveSessionInProject(project)
 	if err != nil {
 		// No active session -- return request as-is
 		return rawRequest, nil

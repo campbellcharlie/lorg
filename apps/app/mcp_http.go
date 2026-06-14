@@ -127,7 +127,7 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 
 	// 3. Session injection (if injectSession)
 	if args.InjectSession {
-		rawReq = backend.injectSessionAndCSRF(rawReq, args.Method, body)
+		rawReq = backend.injectSessionAndCSRF(rawReq, args.Method, body, args.Project)
 	}
 
 	// 4. CRLF normalize + default headers (UA, Accept, Connection: close)
@@ -163,7 +163,7 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 
 	// 6. Session capture (if captureSession)
 	if args.CaptureSession {
-		backend.captureSessionFromResponse(rawResponse)
+		backend.captureSessionFromResponse(rawResponse, args.Project)
 	}
 
 	// 7. Follow redirects (if followRedirects)
@@ -290,7 +290,7 @@ func (backend *Backend) sendHttpRequestHandler(ctx context.Context, request mcp.
 
 			// Capture session from each hop if requested
 			if args.CaptureSession {
-				backend.captureSessionFromResponse(currentResponse)
+				backend.captureSessionFromResponse(currentResponse, args.Project)
 			}
 		}
 
@@ -400,10 +400,11 @@ func getRequestFromProjectDB(requestID int) (*projectDBRequest, error) {
 // ---------------------------------------------------------------------------
 
 // captureSessionFromResponse parses Set-Cookie headers and CSRF tokens from
-// a raw HTTP response and stores them in the active session. If no active
-// session exists, this is a no-op.
-func (backend *Backend) captureSessionFromResponse(rawResponse string) {
-	session, err := backend.findActiveSession()
+// a raw HTTP response and stores them in the addressed project's active session
+// (ADR-002). Empty project = the default project's jar. If no active session
+// exists for that project, this is a no-op.
+func (backend *Backend) captureSessionFromResponse(rawResponse string, project string) {
+	session, err := backend.findActiveSessionInProject(project)
 	if err != nil {
 		return
 	}
@@ -472,15 +473,16 @@ func (backend *Backend) captureSessionFromResponse(rawResponse string) {
 //   - POST with form body: appended as a form field
 //   - POST with JSON body: injected into the JSON object
 //   - Always added as X-CSRF-Token header as a fallback
-func (backend *Backend) injectSessionAndCSRF(rawReq string, method string, body string) string {
-	// First, inject cookies and custom headers via the shared helper
-	injected, err := backend.injectSessionIntoRequest(rawReq)
+func (backend *Backend) injectSessionAndCSRF(rawReq string, method string, body string, project string) string {
+	// First, inject cookies and custom headers via the shared helper, scoped to
+	// the addressed project's jar (ADR-002). Empty project = default jar.
+	injected, err := backend.injectSessionIntoRequestForProject(project, rawReq)
 	if err == nil {
 		rawReq = injected
 	}
 
-	// Now inject CSRF token if the active session has one
-	session, err := backend.findActiveSession()
+	// Now inject CSRF token if the addressed project's active session has one
+	session, err := backend.findActiveSessionInProject(project)
 	if err != nil {
 		return rawReq
 	}
