@@ -126,12 +126,10 @@ Strategy: make `http_traffic` a complete superset, build a cross-project UNION
 read layer, migrate readers ONE AT A TIME (each keeps a `_data` fallback behind a
 flag), and stop the `_data` write LAST. Build stays green at every commit.
 
-- [ ] **E1** Enrich `http_traffic`: add `fingerprint`, `generated_by`,
-      `global_seq` (cross-project ordering); write them in `LogTraffic`.
-      projectDB schema migration. (foundation)
-- [ ] **E2** Cross-project read layer: `unionTraffic(query)` — enumerate project
-      DBs, open read-only (reuse readDBCache), run + UNION + sort by global key,
-      inject `project`. The replacement for `SELECT FROM _data`.
+- [x] **E1** Enrich `http_traffic` (fingerprint, generated_by, global_seq) +
+      schema v6 migration; `LogTraffic` writes them. — 476754f
+- [x] **E2** Cross-project read layer `unionTrafficRows` (merge/order/filter/limit
+      across project DBs). — 0b376fa
 - [ ] **E3** Migrate `searchTraffic` to the union layer (fallback flag). Test.
 - [ ] **E4** Migrate `query` (HTTPQL) — recompile HTTPQL against http_traffic
       schema via the union layer. Test. [largest]
