@@ -1410,12 +1410,15 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 	// -----------------------------------------------------------------
 	// Export traffic
 	// -----------------------------------------------------------------
-	var dataRecords []*lorgdb.Record
+	// Source traffic from the per-project http_traffic union (ADR-004) rather
+	// than lorgdb _data.
+	where := ""
+	var wargs []any
 	if args.HostFilter != "" {
-		dataRecords, err = backend.DB.FindRecordsSorted("_data", "host LIKE ?", "\"index\" DESC", 0, 0, "%"+args.HostFilter+"%")
-	} else {
-		dataRecords, err = backend.DB.FindRecords("_data", "1=1")
+		where = "host LIKE ?"
+		wargs = []any{"%" + args.HostFilter + "%"}
 	}
+	unionRows, err := projectDB.unionTrafficRows("", where, wargs, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch traffic data: %v", err)), nil
 	}
@@ -1457,164 +1460,44 @@ func (backend *Backend) projectExportHandler(ctx context.Context, request mcp.Ca
 	txMessage := tx.Stmt(messageStmt)
 	txFTS := tx.Stmt(ftsStmt)
 
-	for _, rec := range dataRecords {
-		id := rec.GetString("id")
-		host := rec.GetString("host")
-		portStr := rec.GetString("port")
-		isHTTPS := rec.GetBool("is_https")
-		generatedBy := rec.GetString("generated_by")
-		created := rec.GetString("created") // lorgdb timestamp string
-
-		// Parse req_json and resp_json -- lorgdb may return types.JsonRaw, string, or map
-		reqJSONRaw := rec.Get("req_json")
-		respJSONRaw := rec.Get("resp_json")
-		reqJSON := parseJSONField(reqJSONRaw)
-		respJSON := parseJSONField(respJSONRaw)
-
-		// Debug: if still nil, try GetString and parse
-		if reqJSON == nil {
-			if s := rec.GetString("req_json"); s != "" {
-				json.Unmarshal([]byte(s), &reqJSON)
-			}
-		}
-		if respJSON == nil {
-			if s := rec.GetString("resp_json"); s != "" {
-				json.Unmarshal([]byte(s), &respJSON)
-			}
-		}
-
-		method := mapStr(reqJSON, "method")
-		path := mapStr(reqJSON, "path")
-		query := mapStr(reqJSON, "query")
-		ext := mapStr(reqJSON, "ext")
-
-		status := int(mapFloat(respJSON, "status"))
-		respLength := int(mapFloat(respJSON, "length"))
-		mime := mapStr(respJSON, "mime")
-		title := mapStr(respJSON, "title")
-
-		// Derive protocol
-		protocol := "http"
-		if isHTTPS {
-			protocol = "https"
-		}
-
-		// Derive port
-		port := 80
-		if portStr != "" {
-			fmt.Sscanf(portStr, "%d", &port)
-		} else if isHTTPS {
-			port = 443
-		}
-
-		// Strip protocol prefix from host for the export
-		// lorg stores host as "https://example.com" or "http://example.com"
-		exportHost := host
-		if u, parseErr := url.Parse(host); parseErr == nil && u.Host != "" {
-			exportHost = u.Host
-		}
-
-		// Build full URL
-		fullURL := fmt.Sprintf("%s://%s", protocol, exportHost)
-		if (protocol == "https" && port != 443) || (protocol == "http" && port != 80) {
-			fullURL = fmt.Sprintf("%s:%d", fullURL, port)
-		}
-		if path != "" {
-			fullURL += path
-		}
-		if query != "" {
-			fullURL += "?" + query
-		}
-
-		// Map generated_by to tool name
-		tool := mapGeneratedByToTool(generatedBy)
-
-		// Count parameters
+	for _, r := range unionRows {
+		// http_traffic already stores the flat, derived columns — no json parsing.
 		paramCount := 0
-		if query != "" {
-			if vals, parseErr := url.ParseQuery(query); parseErr == nil {
+		if r.Query != "" {
+			if vals, parseErr := url.ParseQuery(r.Query); parseErr == nil {
 				paramCount = len(vals)
 			}
 		}
 
-		// Content-Type from resp_json headers
-		contentType := ""
-		if respHeaders := asMap(respJSON["headers"]); respHeaders != nil {
-			// Headers may be stored with various casings
-			for k, v := range respHeaders {
-				if strings.EqualFold(k, "content-type") {
-					if s, ok := v.(string); ok {
-						contentType = s
-					}
-					break
-				}
-			}
-		}
-
-		// Fetch raw request and response
-		reqRaw := ""
-		respRaw := ""
-		if reqRec, _ := backend.DB.FindRecordById("_req", id); reqRec != nil {
-			reqRaw = reqRec.GetString("raw")
-		}
-		if respRec, _ := backend.DB.FindRecordById("_resp", id); respRec != nil {
-			respRaw = respRec.GetString("raw")
-		}
-
-		// Split raw into headers + body
+		// Raw bytes from the project DB's http_messages.
+		reqRaw, respRaw, _ := projectDB.getTrafficBytes(r.Project, r.RequestID)
 		reqHeaders, reqBody := splitHTTPRaw(reqRaw)
 		respHeaders, respBody := splitHTTPRaw(respRaw)
 
-		// Generate request_hash: first 16 chars of SHA-256 of raw request
-		requestHash := ""
-		if reqRaw != "" {
+		requestHash := r.RequestHash
+		if requestHash == "" && reqRaw != "" {
 			h := sha256.Sum256([]byte(reqRaw))
 			requestHash = hex.EncodeToString(h[:])[:16]
 		}
-
-		// Use stored created timestamp, fallback to now
-		timestamp := created
+		timestamp := r.Timestamp
 		if timestamp == "" {
 			timestamp = time.Now().UTC().Format(time.RFC3339)
 		}
 
-		// Insert traffic record
 		result, err := txTraffic.Exec(
-			timestamp,   // timestamp
-			tool,        // tool
-			method,      // method
-			exportHost,  // host
-			path,        // path
-			query,       // query
-			paramCount,  // param_count
-			status,      // status_code
-			respLength,  // response_length
-			protocol,    // protocol
-			port,        // port
-			fullURL,     // url
-			mime,        // mime_type
-			ext,         // extension
-			title,       // page_title
-			contentType, // content_type
-			requestHash, // request_hash
-			"",          // session_tag
+			timestamp, r.Tool, r.Method, r.Host, r.Path, r.Query, paramCount, r.Status,
+			r.RespLength, r.Protocol, r.Port, r.URL, r.Mime, r.Ext, r.Title, r.ContentType,
+			requestHash, "",
 		)
 		if err != nil {
-			// Skip duplicates (unique constraint on request_hash)
 			continue
 		}
-
 		requestID, err := result.LastInsertId()
 		if err != nil {
 			continue
 		}
-
-		// Insert message record
 		_, _ = txMessage.Exec(requestID, reqHeaders, []byte(reqBody), respHeaders, []byte(respBody))
-
-		// Insert FTS entry
-		_, _ = txFTS.Exec(requestID, fullURL, reqHeaders, reqBody, respHeaders, respBody)
-
+		_, _ = txFTS.Exec(requestID, r.URL, reqHeaders, reqBody, respHeaders, respBody)
 		exportedTraffic++
 	}
 
