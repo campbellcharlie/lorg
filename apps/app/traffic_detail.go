@@ -84,6 +84,16 @@ func (backend *Backend) TrafficDetail(e *echo.Echo) {
 			return c.JSON(http.StatusOK, resp)
 		}
 
+		// 0. Composite id project:request_id (ADR-004) -> reconstruct from the
+		//    project DB's http_messages.
+		if rawReq, rawResp, ok := backend.rawBytesForID(id); ok {
+			if _, _, isComposite := parseRowID(id); isComposite {
+				return c.JSON(http.StatusOK, TrafficDetailResponse{
+					ID: id, Request: rawReq, Response: rawResp, Source: "raw",
+				})
+			}
+		}
+
 		// 1. Try _req / _resp collections first (proxy-generated traffic stores raw here)
 		var rawReq, rawResp string
 		var reqCreated, respCreated string

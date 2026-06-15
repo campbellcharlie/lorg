@@ -85,23 +85,11 @@ func (backend *Backend) ProjectEndpoints(e *echo.Echo) {
 		}
 		ProxyMgr.mu.RUnlock()
 
-		// Get traffic counts per project in a single query
-		if len(projects) > 0 {
-			countRows, err := backend.DB.Query(`SELECT COALESCE(project,''), COUNT(*) FROM _data WHERE project != '' GROUP BY project`)
-			if err == nil {
-				counts := make(map[string]int)
-				for countRows.Next() {
-					var name string
-					var count int
-					if countRows.Scan(&name, &count) == nil {
-						counts[name] = count
-					}
-				}
-				countRows.Close()
-				for i := range projects {
-					projects[i].Count = counts[projects[i].Name]
-				}
-			}
+		// Per-project traffic counts from each project's http_traffic DB
+		// (ADR-004 — replaces the _data GROUP BY).
+		dbDir := projectDBDir()
+		for i := range projects {
+			projects[i].Count = projectTrafficCount(dbDir, projects[i].Name)
 		}
 
 		if projects == nil {
