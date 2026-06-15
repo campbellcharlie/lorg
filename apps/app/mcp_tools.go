@@ -170,6 +170,20 @@ func (backend *Backend) getRequestResponseFromIDHandler(ctx context.Context, req
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// Composite id "project:request_id" (ADR-004) resolves from the project DB's
+	// http_messages; a legacy global id falls back to lorgdb _req/_resp.
+	if project, reqID, ok := parseRowID(args.ActiveID); ok {
+		rawReq, rawResp, err := projectDB.getTrafficBytes(project, reqID)
+		if err == nil {
+			return mcpJSONResult(map[string]any{
+				"id":       args.ActiveID,
+				"request":  rawReq,
+				"response": rawResp,
+			})
+		}
+		// fall through to the legacy path if the composite id didn't resolve
+	}
+
 	// Pad ID to 15 chars with leading underscores
 	id := utils.FormatStringID(args.ActiveID, 15)
 

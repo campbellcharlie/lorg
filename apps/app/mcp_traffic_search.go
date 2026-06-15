@@ -58,95 +58,115 @@ func (backend *Backend) searchTrafficHandler(ctx context.Context, request mcp.Ca
 		return backend.runTrafficRegexSearch(args.Host, args.Query, src, args.Limit)
 	}
 
-	// Build SQL WHERE clause with positional params
+	// Raw-content search (args.Query) still needs _req/_resp bytes — handled on
+	// the legacy path until E7 unifies byte access. Metadata-only search uses the
+	// cross-project union read layer (ADR-004 E3).
+	if args.Query != "" {
+		return backend.searchTrafficRawContent(args)
+	}
+
+	// Metadata filters map directly to http_traffic's flat columns.
 	var conditions []string
 	var queryArgs []any
-
 	if args.Host != "" {
 		conditions = append(conditions, "host LIKE ?")
 		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
 	if args.Method != "" {
-		conditions = append(conditions, "req_json LIKE ?")
-		queryArgs = append(queryArgs, "%"+args.Method+"%")
+		conditions = append(conditions, "method = ?")
+		queryArgs = append(queryArgs, args.Method)
 	}
 	if args.Path != "" {
-		conditions = append(conditions, "req_json LIKE ?")
+		conditions = append(conditions, "path LIKE ?")
 		queryArgs = append(queryArgs, "%"+args.Path+"%")
 	}
 	if args.Status != 0 {
-		conditions = append(conditions, "resp_json LIKE ?")
-		queryArgs = append(queryArgs, "%"+fmt.Sprintf("%d", args.Status)+"%")
+		conditions = append(conditions, "status_code = ?")
+		queryArgs = append(queryArgs, args.Status)
+	}
+	where := strings.Join(conditions, " AND ")
+
+	rows, err := projectDB.unionTrafficRows(args.Project, where, queryArgs, args.Limit+args.Offset)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to search traffic: %v", err)), nil
+	}
+	if args.Offset > 0 && args.Offset < len(rows) {
+		rows = rows[args.Offset:]
+	} else if args.Offset >= len(rows) {
+		rows = nil
+	}
+
+	items := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, map[string]any{
+			"id":          makeRowID(r.Project, r.RequestID),
+			"project":     r.Project,
+			"index":       r.GlobalSeq,
+			"host":        r.Host,
+			"method":      r.Method,
+			"path":        r.Path,
+			"status":      r.Status,
+			"length":      r.RespLength,
+			"generatedBy": r.GeneratedBy,
+		})
+	}
+
+	return mcpJSONResult(map[string]any{
+		"totalItems": len(items),
+		"items":      items,
+	})
+}
+
+// searchTrafficRawContent is the legacy raw-content (args.Query substring) path,
+// still reading _data + _req/_resp. Migrated to http_messages in E7.
+func (backend *Backend) searchTrafficRawContent(args SearchTrafficArgs) (*mcp.CallToolResult, error) {
+	var conditions []string
+	var queryArgs []any
+	if args.Host != "" {
+		conditions = append(conditions, "host LIKE ?")
+		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
 	if args.Project != "" {
 		conditions = append(conditions, "project = ?")
 		queryArgs = append(queryArgs, args.Project)
 	}
-
 	where := "1=1"
 	if len(conditions) > 0 {
 		where = strings.Join(conditions, " AND ")
 	}
 
-	// Fetch records. When Query is set, fetch a larger batch to filter in-memory.
-	fetchLimit := args.Limit
-	if args.Query != "" {
-		fetchLimit = args.Limit * 5
-		if fetchLimit > 1000 {
-			fetchLimit = 1000
-		}
+	fetchLimit := args.Limit * 5
+	if fetchLimit > 1000 {
+		fetchLimit = 1000
 	}
-
 	recs, err := backend.DB.FindRecordsSorted("_data", where, `"index" DESC`, fetchLimit, args.Offset, queryArgs...)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to search traffic: %v", err)), nil
 	}
 
-	records := wrapRecords(recs)
-
-	// If Query is provided, filter by raw content match in _req/_resp
-	if args.Query != "" {
-		var filtered []trafficSearchRecord
-		for _, dr := range records {
-			if len(filtered) >= args.Limit {
-				break
-			}
-			id := dr.GetString("id")
-			reqRec, _ := backend.DB.FindRecordById("_req", id)
-			respRec, _ := backend.DB.FindRecordById("_resp", id)
-
-			matched := false
-			if reqRec != nil && strings.Contains(reqRec.GetString("raw"), args.Query) {
-				matched = true
-			}
-			if !matched && respRec != nil && strings.Contains(respRec.GetString("raw"), args.Query) {
-				matched = true
-			}
-			if matched {
-				filtered = append(filtered, dr)
-			}
+	items := make([]map[string]any, 0, args.Limit)
+	for _, dr := range wrapRecords(recs) {
+		if len(items) >= args.Limit {
+			break
 		}
-		records = filtered
-	}
-
-	items := make([]map[string]any, 0, len(records))
-	for _, dr := range records {
+		id := dr.GetString("id")
+		reqRec, _ := backend.DB.FindRecordById("_req", id)
+		respRec, _ := backend.DB.FindRecordById("_resp", id)
+		matched := (reqRec != nil && strings.Contains(reqRec.GetString("raw"), args.Query)) ||
+			(respRec != nil && strings.Contains(respRec.GetString("raw"), args.Query))
+		if !matched {
+			continue
+		}
 		reqJSON := asMap(dr.Get("req_json"))
 		respJSON := asMap(dr.Get("resp_json"))
-
-		method := mapStr(reqJSON, "method")
-		path := mapStr(reqJSON, "path")
-		status := int(mapFloat(respJSON, "status"))
-		length := int(mapFloat(respJSON, "length"))
-
 		items = append(items, map[string]any{
-			"id":          dr.GetString("id"),
+			"id":          id,
 			"index":       dr.GetFloat("index"),
 			"host":        dr.GetString("host"),
-			"method":      method,
-			"path":        path,
-			"status":      status,
-			"length":      length,
+			"method":      mapStr(reqJSON, "method"),
+			"path":        mapStr(reqJSON, "path"),
+			"status":      int(mapFloat(respJSON, "status")),
+			"length":      int(mapFloat(respJSON, "length")),
 			"generatedBy": dr.GetString("generated_by"),
 		})
 	}
