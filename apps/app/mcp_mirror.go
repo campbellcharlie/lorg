@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -299,6 +300,14 @@ func (backend *Backend) loadMirrorBaseline(args MirrorArgs) (*mirrorBaseline, er
 		}, nil
 	}
 
+	// Composite id project:request_id (ADR-004) -> load from that project's DB.
+	if project, reqID, ok := parseRowID(args.RowID); ok {
+		if base := loadMirrorFromProjectByID(project, reqID); base != nil {
+			return base, nil
+		}
+		return nil, fmt.Errorf("row not found: %s", args.RowID)
+	}
+
 	// rowId path — try projectDB first if id is numeric (its rows come
 	// from http_traffic with INTEGER request_id); fall back to lorgdb's
 	// _data + _req tables for proxy-captured traffic.
@@ -355,14 +364,44 @@ func loadMirrorFromProjectDB(id string) *mirrorBaseline {
 	if projectDB == nil {
 		return nil
 	}
-	projectDB.mu.Lock()
+	projectDB.mu.RLock()
 	db := projectDB.db
 	ready := projectDB.ready
-	projectDB.mu.Unlock()
+	projectDB.mu.RUnlock()
 	if db == nil || !ready {
 		return nil
 	}
+	return mirrorBaselineFromDB(db, id)
+}
 
+// loadMirrorFromProjectByID loads a baseline for a composite id project:request_id
+// by opening that project's DB read-only (ADR-004 E7).
+func loadMirrorFromProjectByID(project string, reqID int64) *mirrorBaseline {
+	if projectDB == nil {
+		return nil
+	}
+	projectDB.mu.RLock()
+	dbDir := projectDB.dbDir
+	projectDB.mu.RUnlock()
+	files, err := listProjectDBFiles(dbDir)
+	if err != nil {
+		return nil
+	}
+	path, ok := files[sanitizeProjectName(project)]
+	if !ok {
+		return nil
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_query_only=on&_busy_timeout=3000")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	return mirrorBaselineFromDB(db, reqID)
+}
+
+// mirrorBaselineFromDB builds a mirror baseline from one project DB's
+// http_traffic + http_messages for the given request_id.
+func mirrorBaselineFromDB(db *sql.DB, id any) *mirrorBaseline {
 	var (
 		method, host, path, query string
 		protocol                  string
