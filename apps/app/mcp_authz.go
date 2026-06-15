@@ -142,63 +142,50 @@ func (backend *Backend) authzRunHandler(args AuthzTestArgs) (*mcp.CallToolResult
 	lowCookies := authzExtractCookies(lowPrivRecord)
 	lowHeaders := authzExtractHeaders(lowPrivRecord)
 
-	// Query traffic from lorgdb. The project SQLite uses a different schema
-	// (http_traffic / http_messages); the _data / _raw tables only exist in
-	// lorgdb. Querying projectDB here was a copy-paste bug.
-	var query string
-	var queryArgs []any
+	// Read traffic across all project DBs via the union layer (ADR-004 E6) and
+	// reconstruct each raw request from http_messages — replacing the lorgdb
+	// _data + _req read. id is now the composite project:request_id form.
+	where := ""
+	var wargs []any
 	if args.Host != "" {
-		query = `SELECT id, "index", host, method, path, status, length, scheme, port FROM _data WHERE host LIKE ? ORDER BY "index" DESC LIMIT ?`
-		queryArgs = []any{"%" + args.Host + "%", limit}
-	} else {
-		query = `SELECT id, "index", host, method, path, status, length, scheme, port FROM _data ORDER BY "index" DESC LIMIT ?`
-		queryArgs = []any{limit}
+		where = "host LIKE ?"
+		wargs = []any{"%" + args.Host + "%"}
 	}
-
-	rows, err := backend.DB.Query(query, queryArgs...)
+	rows, err := projectDB.unionTrafficRows("", where, wargs, limit)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query error: %v", err)), nil
 	}
 
 	type trafficEntry struct {
 		id     string
-		index  int
 		host   string
 		method string
 		path   string
 		status int
-		length int
 		scheme string
 		port   string
 	}
-
-	var entries []trafficEntry
-	for rows.Next() {
-		var e trafficEntry
-		if err := rows.Scan(&e.id, &e.index, &e.host, &e.method, &e.path, &e.status, &e.length, &e.scheme, &e.port); err != nil {
-			continue
-		}
-		entries = append(entries, e)
-	}
-	rows.Close()
-
-	// Pull raw requests from lorgdb's _req table (mirrors the storage layout
-	// the proxy capture path writes to).
 	type rawEntry struct {
 		id      string
 		request string
 	}
+	var entries []trafficEntry
 	var rawEntries []rawEntry
-	for _, e := range entries {
-		reqRec, rerr := backend.DB.FindRecordById("_req", e.id)
-		if rerr != nil || reqRec == nil {
+	for _, r := range rows {
+		raw, _, berr := projectDB.getTrafficBytes(r.Project, r.RequestID)
+		if berr != nil || raw == "" {
 			continue
 		}
-		raw := reqRec.GetString("raw")
-		if raw == "" {
-			continue
+		id := makeRowID(r.Project, r.RequestID)
+		portStr := ""
+		if r.Port != 0 {
+			portStr = fmt.Sprintf("%d", r.Port)
 		}
-		rawEntries = append(rawEntries, rawEntry{id: e.id, request: raw})
+		entries = append(entries, trafficEntry{
+			id: id, host: r.Host, method: r.Method, path: r.Path,
+			status: r.Status, scheme: r.Protocol, port: portStr,
+		})
+		rawEntries = append(rawEntries, rawEntry{id: id, request: raw})
 	}
 
 	// Run authorization tests

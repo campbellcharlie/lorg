@@ -38,11 +38,13 @@ type TrafficRow struct {
 	Mime        string
 	Fingerprint string
 	RequestHash string
+	Protocol    string
+	Port        int
 }
 
 const unionTrafficCols = `request_id, global_seq, timestamp, tool, generated_by,
 	method, host, path, query, url, status_code, response_length, mime_type,
-	fingerprint, request_hash`
+	fingerprint, request_hash, protocol, port`
 
 // listProjectDBFiles returns the project name -> .db path map for every project
 // DB under dbDir (TemporaryProject excluded — it's the unconfigured default).
@@ -100,7 +102,7 @@ func scanTrafficRows(dbFile, project, where string, args []any, limit int) ([]Tr
 		r.Project = project
 		if err := rows.Scan(&r.RequestID, &r.GlobalSeq, &r.Timestamp, &r.Tool, &r.GeneratedBy,
 			&r.Method, &r.Host, &r.Path, &r.Query, &r.URL, &r.Status, &r.RespLength,
-			&r.Mime, &r.Fingerprint, &r.RequestHash); err != nil {
+			&r.Mime, &r.Fingerprint, &r.RequestHash, &r.Protocol, &r.Port); err != nil {
 			return out, err
 		}
 		out = append(out, r)
