@@ -620,7 +620,7 @@ POST /api/repeater/send
 **Features:**
 
 - Auto-increments `index_minor` using counter system
-- Automatically saves to `_req`, `_resp`, `_data`, and `_attached` collections
+- Saves captured traffic to the per-project SQLite store (`http_traffic` / `http_messages`); the legacy `_req`/`_resp`/`_data`/`_attached` tables were retired (ADR-004)
 - Updates sitemap based on request path
 - Supports HTTP/1.1 and HTTP/2
 - Marks all data with `generated_by: "repeater"`
@@ -1307,13 +1307,13 @@ Unauthenticated requests return `403 Forbidden`.
 
 ## Data Collections
 
-The app uses the following main database collections:
+Captured traffic lives in the per-project SQLite stores (`http_traffic` /
+`http_messages`); the legacy lorgdb traffic tables (`_data`/`_req`/`_resp`/
+`_attached`) were retired (ADR-004). The lorgdb config DB still holds:
 
 - `_proxies` - Proxy instances and their configuration
-- `_data` - Request/response data records
-- `_req` - Raw request data
-- `_resp` - Raw response data
-- `_attached` - Metadata and relationships
+- `_sessions` - Per-project named sessions / cookie jars
+- `_projects` - Project registry + lifecycle metadata
 - `_intercept` - Pending intercept requests
 - `_playground` - Playground workspace items
 - `repeater_{id}` - Repeater tabs for each playground item
