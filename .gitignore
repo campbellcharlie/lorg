@@ -75,6 +75,10 @@ docs/lorg-pentester-guide.md
 # clone, not shared.
 .claude/
 
+# devfw (dev-framework) state — ADRs, plan, iterations. Local methodology
+# state, not part of the shipped code.
+.devfw/
+
 # Runtime audit logs
 audit/
 
