@@ -127,6 +127,17 @@ var Migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version:     7,
+		Description: "add project column to _websockets (ADR-004: drop the _data join for project scoping)",
+		Up: func(db *sql.DB) error {
+			if _, err := db.Exec("ALTER TABLE _websockets ADD COLUMN project TEXT NOT NULL DEFAULT ''"); err != nil &&
+				!strings.Contains(err.Error(), "duplicate column") {
+				return err
+			}
+			return nil
+		},
+	},
 }
 
 // RunMigrations applies any unapplied migrations in order.

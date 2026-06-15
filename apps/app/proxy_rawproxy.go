@@ -1175,6 +1175,7 @@ func (rp *RawProxyWrapper) saveWebSocketMessageToDB(msg *rawproxy.WebSocketMessa
 	record.Set("proxy_id", msg.RequestID)
 	record.Set("data_index", dataIndex)
 	record.Set("generated_by", generatedBy)
+	record.Set("project", rp.project) // ADR-004: project scoping without a _data join
 
 	if err := rp.backend.DB.SaveRecord(record); err != nil {
 		log.Printf("[RawProxy][DB][ERROR] Failed to save WebSocket message for %s: %v", msg.RequestID, err)
