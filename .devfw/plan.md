@@ -130,19 +130,25 @@ flag), and stop the `_data` write LAST. Build stays green at every commit.
       schema v6 migration; `LogTraffic` writes them. — 476754f
 - [x] **E2** Cross-project read layer `unionTrafficRows` (merge/order/filter/limit
       across project DBs). — 0b376fa
-- [ ] **E3** Migrate `searchTraffic` to the union layer (fallback flag). Test.
-- [ ] **E4** Migrate `query` (HTTPQL) — recompile HTTPQL against http_traffic
-      schema via the union layer. Test. [largest]
-- [ ] **E5** Migrate `clusterResponses` + `findAnomalies` (uses E1 fingerprint). Test.
-- [ ] **E6** Migrate `authz` traffic read. Test.
-- [ ] **E7** Migrate `mirror` + `getRequestResponseFromID`: reconstruct raw from
-      `http_messages` (+ edited-variant handling). Test.
-- [ ] **E8** Migrate websocket linking, project-list aggregation, proxy index
-      counter. Test.
-- [ ] **E9** Stop the `_data` write (gate off) once all readers are migrated.
-      Full regression + stress pass.
-- [ ] **E10** Drop `_data`/`_req`/`_resp`/`_attached` (and friends) via migration;
-      reclaim disk. [destructive — last]
+- [x] **E3** searchTraffic metadata path + composite-id byte resolver. — a8ebc60
+- [x] **E4** HTTPQL query via cross-project executor (unionCompiledQuery). — 4052938
+- [x] **E5** clusterResponses + findAnomalies (Go grouping over union rows). — dfb6b47
+- [x] **E6** authzTest traffic read. — a019e9e
+- [x] **E7** mirror + getRequestResponseFromID + getRawRequestResponse + diff +
+      extractor via rawBytesForID / getTrafficBytes. — 685d75c, 4ccba25...
+- [x] **E8** generateWordlist, mapEndpoints, probeAuth, traffic-detail, project-list
+      counts. — 83124fa, 4ccba25, ae0131c
+- [x] **STRESS** concurrent read/write campaign — found + fixed 3 bugs. — 1257f1d
+- [ ] **E9** Stop the `_data` write. NOT DONE — destructive: removes the _data/_req/
+      _resp writes from the proxy capture TRANSACTION (proxy_rawproxy.go) +
+      SaveRequestToBackend. Needs projectExport + websocket migrated first
+      (still read _data), then careful gated rollout + a no-_data stress pass.
+- [ ] **E10** Drop `_data`/`_req`/`_resp`/`_attached` via migration. NOT DONE —
+      irreversible; only after E9 soaks.
+
+## Remaining _data readers (block E9)
+- projectExport (mcp_project.go) — reads _data to build an export DB.
+- mcp_websocket.go — links websocket messages via _data."index".
 
 ## Phase F — serious stress campaign (after E)
 Goal: BREAK lorg, find failure modes. Concurrent capture (proxy + send + serval)
