@@ -1,7 +1,6 @@
 package app
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -218,7 +217,7 @@ func projectTrafficCount(dbDir, name string) int {
 	if _, err := os.Stat(dbFile); err != nil {
 		return 0
 	}
-	db, err := sql.Open("sqlite", "file:"+dbFile+"?mode=ro&_query_only=on")
+	db, err := openProjectRO(dbFile)
 	if err != nil {
 		return 0
 	}

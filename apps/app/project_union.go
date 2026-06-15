@@ -70,10 +70,20 @@ func listProjectDBFiles(dbDir string) (map[string]string, error) {
 	return out, nil
 }
 
+// openProjectRO opens a project DB for reading (ADR-004). It deliberately does
+// NOT use mode=ro: a true read-only connection cannot build the -shm wal-index,
+// so it cannot recover an orphaned -wal (committed frames an evicted writer left
+// behind) — making recently-committed rows invisible (the residual lost-write the
+// stress test caught). All callers issue only SELECTs, so write capability is
+// unused; busy_timeout rides out concurrent writers/checkpoints.
+func openProjectRO(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", "file:"+path+"?_busy_timeout=5000")
+}
+
 // scanTrafficRows runs the union SELECT against one project DB and tags rows with
 // the project name.
 func scanTrafficRows(dbFile, project, where string, args []any, limit int) ([]TrafficRow, error) {
-	db, err := sql.Open("sqlite", "file:"+dbFile+"?mode=ro&_query_only=on&_busy_timeout=3000")
+	db, err := openProjectRO(dbFile)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +201,7 @@ func (p *ProjectDB) getTrafficBytes(project string, requestID int64) (rawReq, ra
 		return "", "", fmt.Errorf("unknown project %q", project)
 	}
 
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_query_only=on&_busy_timeout=3000")
+	db, err := openProjectRO(path)
 	if err != nil {
 		return "", "", err
 	}

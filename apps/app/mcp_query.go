@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -294,9 +293,9 @@ func parseQuery(input string) (*astNode, error) {
 // schema (ADR-004 E4): http_traffic (alias h) has flat columns; raw bytes live
 // in http_messages (alias m) joined on request_id.
 var fieldMapping = map[string]struct {
-	expr    string // SQL expression to use in WHERE
-	needsMsg bool  // requires JOIN on http_messages (alias m)
-	isText  bool
+	expr     string // SQL expression to use in WHERE
+	needsMsg bool   // requires JOIN on http_messages (alias m)
+	isText   bool
 }{
 	"req.host":     {"h.host", false, true},
 	"req.method":   {"h.method", false, true},
@@ -547,7 +546,7 @@ func (p *ProjectDB) unionCompiledQuery(projectFilter, fullSQL string, params []a
 	}
 	var all []scored
 	for name, path := range files {
-		db, oerr := sql.Open("sqlite", "file:"+path+"?mode=ro&_query_only=on&_busy_timeout=3000")
+		db, oerr := openProjectRO(path)
 		if oerr != nil {
 			continue
 		}
