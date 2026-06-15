@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -288,33 +290,30 @@ func parseQuery(input string) (*astNode, error) {
 // SQL Compiler
 // ---------------------------------------------------------------------------
 
-// fieldMapping maps query fields to SQL expressions over lorgdb's schema.
-// _data has flat host/port columns plus req_json / resp_json blobs (we
-// use json_extract for nested fields). Raw bytes live in separate _req
-// (alias q) and _resp (alias s) tables joined on the same id.
+// fieldMapping maps query fields to SQL expressions over the per-project DB
+// schema (ADR-004 E4): http_traffic (alias h) has flat columns; raw bytes live
+// in http_messages (alias m) joined on request_id.
 var fieldMapping = map[string]struct {
-	expr      string // SQL expression to use in WHERE
-	needsReq  bool   // requires JOIN on _req table (alias q)
-	needsResp bool   // requires JOIN on _resp table (alias s)
-	isText    bool
+	expr    string // SQL expression to use in WHERE
+	needsMsg bool  // requires JOIN on http_messages (alias m)
+	isText  bool
 }{
-	"req.host":     {"d.host", false, false, true},
-	"req.method":   {"json_extract(d.req_json, '$.method')", false, false, true},
-	"req.path":     {"json_extract(d.req_json, '$.path')", false, false, true},
-	"req.body":     {"q.raw", true, false, true},
-	"req.headers":  {"q.raw", true, false, true},
-	"resp.status":  {"CAST(json_extract(d.resp_json, '$.status') AS INTEGER)", false, false, false},
-	"resp.body":    {"s.raw", false, true, true},
-	"resp.headers": {"s.raw", false, true, true},
-	"resp.length":  {"CAST(json_extract(d.resp_json, '$.length') AS INTEGER)", false, false, false},
-	"resp.mime":    {"json_extract(d.resp_json, '$.mime')", false, false, true},
+	"req.host":     {"h.host", false, true},
+	"req.method":   {"h.method", false, true},
+	"req.path":     {"h.path", false, true},
+	"req.body":     {"m.request_body", true, true},
+	"req.headers":  {"m.request_headers", true, true},
+	"resp.status":  {"h.status_code", false, false},
+	"resp.body":    {"m.response_body", true, true},
+	"resp.headers": {"m.response_headers", true, true},
+	"resp.length":  {"h.response_length", false, false},
+	"resp.mime":    {"h.mime_type", false, true},
 }
 
 type compiledQuery struct {
-	where     string
-	params    []any
-	needsReq  bool // true if we need to JOIN the _req table (alias q)
-	needsResp bool // true if we need to JOIN the _resp table (alias s)
+	where    string
+	params   []any
+	needsMsg bool // true if we need to JOIN http_messages (alias m)
 }
 
 func compileToSQL(node *astNode) (*compiledQuery, error) {
@@ -358,11 +357,8 @@ func compileNode(node *astNode, cq *compiledQuery) (string, error) {
 		}
 
 		colRef := mapping.expr
-		if mapping.needsReq {
-			cq.needsReq = true
-		}
-		if mapping.needsResp {
-			cq.needsResp = true
+		if mapping.needsMsg {
+			cq.needsMsg = true
 		}
 
 		switch node.operator {
@@ -463,26 +459,20 @@ func validFieldsList() string {
 // ---------------------------------------------------------------------------
 
 func buildFullSQL(cq *compiledQuery, limit int) string {
-	// Project the same shape as searchTraffic: id, index, host, method,
-	// path, status, length, mime, port. method/path/status/length/mime
-	// come from the JSON blobs in _data.
-	cols := `d.id, d."index", d.host, d.port,
-		json_extract(d.req_json, '$.method')   AS method,
-		json_extract(d.req_json, '$.path')     AS path,
-		CAST(json_extract(d.resp_json, '$.status') AS INTEGER) AS status,
-		CAST(json_extract(d.resp_json, '$.length') AS INTEGER) AS length,
-		json_extract(d.resp_json, '$.mime')    AS mime`
+	// Per-project DB shape: request_id + global_seq (cross-project ordering) plus
+	// the flat http_traffic columns. http_messages is joined only when the query
+	// touches body/headers fields.
+	cols := `h.request_id AS request_id, h.global_seq AS gseq, h.host AS host, h.port AS port,
+		h.method AS method, h.path AS path, h.status_code AS status,
+		h.response_length AS length, h.mime_type AS mime`
 
 	joins := ""
-	if cq.needsReq {
-		joins += " LEFT JOIN _req q ON d.id = q.id"
-	}
-	if cq.needsResp {
-		joins += " LEFT JOIN _resp s ON d.id = s.id"
+	if cq.needsMsg {
+		joins = " LEFT JOIN http_messages m ON h.request_id = m.request_id"
 	}
 
 	return fmt.Sprintf(
-		"SELECT %s FROM _data d%s WHERE %s ORDER BY d.\"index\" DESC LIMIT %d",
+		"SELECT %s FROM http_traffic h%s WHERE %s ORDER BY h.global_seq DESC LIMIT %d",
 		cols, joins, cq.where, limit,
 	)
 }
@@ -517,46 +507,112 @@ func (backend *Backend) executeTrafficQueryWithProject(query, projectTag string,
 		return nil, "", fmt.Errorf("compile error: %w", err)
 	}
 
-	if projectTag != "" {
-		cq.where = "(" + cq.where + ") AND d.project = ?"
-		cq.params = append(cq.params, projectTag)
-	}
-
 	sql := buildFullSQL(cq, limit)
 
-	// Execute against lorgdb — it owns the canonical _data / _raw tables
-	// the query DSL was designed against. The project SQLite uses a
-	// different schema (http_traffic / http_messages), so this SQL would
-	// fail there with "no such table: _data".
-	rows, err := backend.DB.Query(sql, cq.params...)
+	// Run the compiled SQL against http_traffic in each project DB and merge
+	// (ADR-004 E4). projectTag, when set, restricts to that one DB — the HTTPQL
+	// grammar doesn't model project, so the executor scopes it.
+	results, err := projectDB.unionCompiledQuery(projectTag, sql, cq.params, limit)
 	if err != nil {
 		return nil, sql, fmt.Errorf("query error: %w", err)
 	}
-	defer rows.Close()
+	return results, sql, nil
+}
 
-	columns, err := rows.Columns()
+// unionCompiledQuery runs a per-project-DB SELECT (built by buildFullSQL, so it
+// selects request_id + gseq + the flat columns) against every project DB, tags
+// each row with its project + composite id, merges, orders by gseq DESC, and
+// trims to limit (ADR-004 E4).
+func (p *ProjectDB) unionCompiledQuery(projectFilter, fullSQL string, params []any, limit int) ([]map[string]any, error) {
+	p.mu.RLock()
+	dbDir := p.dbDir
+	p.mu.RUnlock()
+
+	files, err := listProjectDBFiles(dbDir)
 	if err != nil {
-		return nil, sql, fmt.Errorf("columns error: %w", err)
+		return nil, err
+	}
+	if projectFilter != "" {
+		pf := sanitizeProjectName(projectFilter)
+		if path, ok := files[pf]; ok {
+			files = map[string]string{pf: path}
+		} else {
+			return nil, nil
+		}
 	}
 
-	var results []map[string]any
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rows.Scan(valuePtrs...); err != nil {
+	type scored struct {
+		gseq int64
+		row  map[string]any
+	}
+	var all []scored
+	for name, path := range files {
+		db, oerr := sql.Open("sqlite", "file:"+path+"?mode=ro&_query_only=on&_busy_timeout=3000")
+		if oerr != nil {
 			continue
 		}
-		row := make(map[string]any)
-		for i, col := range columns {
-			row[col] = values[i]
+		rows, qerr := db.Query(fullSQL, params...)
+		if qerr != nil {
+			db.Close()
+			continue // a project DB missing the v6 columns is skipped, not fatal
 		}
-		results = append(results, row)
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if rows.Scan(ptrs...) != nil {
+				continue
+			}
+			row := make(map[string]any)
+			var gseq, reqID int64
+			for i, c := range cols {
+				switch c {
+				case "gseq":
+					gseq = toInt64(vals[i])
+				case "request_id":
+					reqID = toInt64(vals[i])
+				default:
+					row[c] = vals[i]
+				}
+			}
+			row["project"] = name
+			row["id"] = makeRowID(name, reqID)
+			row["index"] = gseq
+			all = append(all, scored{gseq: gseq, row: row})
+		}
+		rows.Close()
+		db.Close()
 	}
 
-	return results, sql, nil
+	sort.Slice(all, func(i, j int) bool { return all[i].gseq > all[j].gseq })
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	out := make([]map[string]any, len(all))
+	for i, s := range all {
+		out[i] = s.row
+	}
+	return out, nil
+}
+
+// toInt64 coerces a scanned SQLite numeric (int64 or []byte) to int64.
+func toInt64(v any) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case []byte:
+		n, _ := strconv.ParseInt(string(x), 10, 64)
+		return n
+	case string:
+		n, _ := strconv.ParseInt(x, 10, 64)
+		return n
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -602,11 +658,10 @@ func (backend *Backend) queryHandler(ctx context.Context, request mcp.CallToolRe
 		paramsJSON, _ := json.Marshal(cq.params)
 
 		return mcpJSONResult(map[string]any{
-			"query":     args.Query,
-			"sql":       sql,
-			"params":    string(paramsJSON),
-			"needsReq":  cq.needsReq,
-			"needsResp": cq.needsResp,
+			"query":    args.Query,
+			"sql":      sql,
+			"params":   string(paramsJSON),
+			"needsMsg": cq.needsMsg,
 		})
 
 	default:
