@@ -807,25 +807,28 @@ func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData m
 		return err
 	}
 
-	err := rp.backend.DB.RunInTransaction(func(tx *lorgdb.LorgTx) error {
-		if err := tx.SaveRecord(attachedRecord); err != nil {
-			return handleAttachRecordError(err)
+	// Legacy _data/_req/_attached write (ADR-004 E9). The captured row is also
+	// enqueued to the per-project http_traffic store, which the migrated readers
+	// serve; when the gate is off this lorgdb write is skipped entirely.
+	if legacyDataEnabled() {
+		err := rp.backend.DB.RunInTransaction(func(tx *lorgdb.LorgTx) error {
+			if err := tx.SaveRecord(attachedRecord); err != nil {
+				return handleAttachRecordError(err)
+			}
+			if err := tx.SaveRecord(reqRecord); err != nil {
+				return handleReqRecordError(err)
+			}
+			if err := tx.SaveRecord(dataRecord); err != nil {
+				return handleDataRecordError(err)
+			}
+			return nil
+		})
+		if err != nil {
+			log.Printf("[RawProxy][DB][ERROR] Failed to save _data record ID=%s Index=%d: %v",
+				userdata["id"].(string), int(userdata["index"].(float64)), err)
+			rp.stats.RequestsFailed.Add(1)
+			return
 		}
-		if err := tx.SaveRecord(reqRecord); err != nil {
-			return handleReqRecordError(err)
-		}
-		if err := tx.SaveRecord(dataRecord); err != nil {
-			return handleDataRecordError(err)
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Printf("[RawProxy][DB][ERROR] Failed to save _data record ID=%s Index=%d: %v",
-			userdata["id"].(string), int(userdata["index"].(float64)), err)
-		rp.stats.RequestsFailed.Add(1)
-		return
-	} else {
 		dataRecord.MarkAsNotNew()
 	}
 
@@ -834,19 +837,16 @@ func (rp *RawProxyWrapper) saveRequestToDB(reqCtx *RequestContext, requestData m
 	// Track success
 	rp.stats.RequestsSaved.Add(1)
 
-	// Increment counters (atomic operations)
-	// Total requests counter for _data (load_on_startup - recalculated from DB)
-	rp.backend.CounterManager.IncrementWithStartup("_data", "_data", "", true)
-
-	// Per-proxy counter (immediate sync for exact counts)
-	if generatedBy, ok := userdata["generated_by"].(string); ok {
-		rp.backend.CounterManager.Increment(generatedBy, "_data", "")
-	}
-
-	// Per-host counter (immediate sync for exact counts)
-	if host, ok := userdata["host"].(string); ok {
-		sitemapCollectionName := utils.ParseDatabaseName(host)
-		rp.backend.CounterManager.Increment("host:"+sitemapCollectionName, "_data", "")
+	// Increment _data counters only when the legacy write is on.
+	if legacyDataEnabled() {
+		rp.backend.CounterManager.IncrementWithStartup("_data", "_data", "", true)
+		if generatedBy, ok := userdata["generated_by"].(string); ok {
+			rp.backend.CounterManager.Increment(generatedBy, "_data", "")
+		}
+		if host, ok := userdata["host"].(string); ok {
+			sitemapCollectionName := utils.ParseDatabaseName(host)
+			rp.backend.CounterManager.Increment("host:"+sitemapCollectionName, "_data", "")
+		}
 	}
 
 	log.Printf("[RawProxy][DB][COMPLETE] Request ID=%s saved successfully in %v", userdata["id"].(string), elapsed)
@@ -867,26 +867,19 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 	log.Printf("[RawProxy][DB][RESPONSE] Updating ID=%s Status=%d Mime=%s Title=%s Size=%d bytes",
 		userdata["id"].(string), responseData["status"].(int), responseData["mime"].(string), responseData["title"].(string), len(rawResponse))
 
-	// Create _resp record with raw response data
-	respRecord := lorgdb.NewRecord("_resp")
-	respRecord.Load(responseData)
-	respRecord.Set("id", userdata["id"].(string))
-	respRecord.Set("raw", rawResponse)
-
-	if err := rp.backend.DB.SaveRecord(respRecord); err != nil {
-		log.Printf("[RawProxy][DB][ERROR] ============================================")
-		log.Printf("[RawProxy][DB][ERROR] FAILED TO SAVE _resp RECORD!")
-		log.Printf("[RawProxy][DB][ERROR] ID: %s", userdata["id"].(string))
-		log.Printf("[RawProxy][DB][ERROR] Error: %v", err)
-		log.Printf("[RawProxy][DB][ERROR] Error Type: %T", err)
-		log.Printf("[RawProxy][DB][ERROR] Raw response size: %d bytes", len(rawResponse))
-		log.Printf("[RawProxy][DB][ERROR] Status: %d", responseData["status"].(int))
-		log.Printf("[RawProxy][DB][ERROR] ============================================")
-		rp.stats.ResponsesFailed.Add(1)
-		return
+	// Legacy _resp write (ADR-004 E9) — skipped when the gate is off; the
+	// response is captured into http_traffic/http_messages below regardless.
+	if legacyDataEnabled() {
+		respRecord := lorgdb.NewRecord("_resp")
+		respRecord.Load(responseData)
+		respRecord.Set("id", userdata["id"].(string))
+		respRecord.Set("raw", rawResponse)
+		if err := rp.backend.DB.SaveRecord(respRecord); err != nil {
+			log.Printf("[RawProxy][DB][ERROR] FAILED TO SAVE _resp RECORD ID=%s: %v", userdata["id"].(string), err)
+			rp.stats.ResponsesFailed.Add(1)
+			return
+		}
 	}
-	log.Printf("[RawProxy][DB][SUCCESS] Saved _resp record ID=%s (raw size: %d bytes)",
-		userdata["id"].(string), len(rawResponse))
 
 	// Normalize MIME type
 	originalMime := responseData["mime"].(string)
@@ -899,24 +892,20 @@ func (rp *RawProxyWrapper) saveResponseToDB(reqCtx *RequestContext, responseData
 		log.Printf("[RawProxy][DB][INFO] Normalized MIME: %s -> %s", originalMime, responseData["mime"].(string))
 	}
 
-	dataRecord.Set("resp", userdata["resp"].(string))
-	dataRecord.Set("http", userdata["http"].(string))
-	dataRecord.Set("has_resp", userdata["has_resp"].(bool))
-	dataRecord.Set("resp_json", responseData)
-
-	// Compute response fingerprint for clustering / anomaly tools.
-	// Best-effort: any failure here must not block the save.
-	if status, ok := responseData["status"].(int); ok {
-		mime, _ := responseData["mime"].(string)
-		_, body := splitHTTPRaw(rawResponse)
-		fp := ComputeFingerprint(status, mime, []byte(body))
-		dataRecord.Set("fingerprint", fp)
-	}
-
-	if err := rp.backend.DB.SaveRecord(dataRecord); err != nil {
-		log.Printf("[RawProxy][DB][ERROR] Failed to update _data record ID=%s: %v", userdata["id"].(string), err)
-	} else {
-		log.Printf("[RawProxy][DB][SUCCESS] Updated _data record ID=%s with response metadata", userdata["id"].(string))
+	// Legacy _data response-update (ADR-004 E9) — skipped when the gate is off.
+	if legacyDataEnabled() {
+		dataRecord.Set("resp", userdata["resp"].(string))
+		dataRecord.Set("http", userdata["http"].(string))
+		dataRecord.Set("has_resp", userdata["has_resp"].(bool))
+		dataRecord.Set("resp_json", responseData)
+		if status, ok := responseData["status"].(int); ok {
+			mime, _ := responseData["mime"].(string)
+			_, body := splitHTTPRaw(rawResponse)
+			dataRecord.Set("fingerprint", ComputeFingerprint(status, mime, []byte(body)))
+		}
+		if err := rp.backend.DB.SaveRecord(dataRecord); err != nil {
+			log.Printf("[RawProxy][DB][ERROR] Failed to update _data record ID=%s: %v", userdata["id"].(string), err)
+		}
 	}
 
 	elapsed := time.Since(startTime)

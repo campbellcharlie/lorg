@@ -237,99 +237,51 @@ func (backend *Backend) hostPrintRowsInDetailsHandler(ctx context.Context, reque
 	}
 
 	host := trimHost(args.Host)
-	siteDB := utils.ParseDatabaseName(host)
 
-	// Verify the table exists
-	exists, err := backend.DB.TableExists(siteDB)
-	if err != nil || !exists {
-		return mcp.NewToolResultError(fmt.Sprintf("host not found: %s", host)), nil
-	}
-
+	// Read rows for this host across project DBs via the union layer (ADR-004) —
+	// no per-host _data collection. (The old raw-SQL `filter` passthrough is
+	// dropped: it was an injection hazard and is superseded by structured tools.)
 	perPage := 50
 	offset := 0
 	if int(args.Page) > 1 {
 		offset = (int(args.Page) - 1) * perPage
 	}
-
-	var records []*lorgdb.Record
-	if args.Filter == "" {
-		records, err = backend.DB.FindRecordsSorted(siteDB, "1=1", "rowid DESC", perPage, offset)
-	} else {
-		// NOTE: args.Filter is now expected to be a valid SQL WHERE clause
-		records, err = backend.DB.FindRecordsSorted(siteDB, args.Filter, "created DESC", perPage, offset)
-	}
+	urows, err := projectDB.unionTrafficRows(args.Project, "host LIKE ?", []any{"%" + host + "%"}, perPage+offset)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch records: %v", err)), nil
 	}
+	if offset < len(urows) {
+		urows = urows[offset:]
+	} else {
+		urows = nil
+	}
+	if len(urows) > perPage {
+		urows = urows[:perPage]
+	}
 
 	concise := bool(args.Concise)
-
-	// Manually resolve the "data" relation: each site record has a "data" field
-	// containing a _data record ID.
-	rows := make([]map[string]any, 0, len(records))
-	for _, record := range records {
-		dataID := record.GetString("data")
-		if dataID == "" {
-			continue
-		}
-		dataRecord, err := backend.DB.FindRecordById("_data", dataID)
-		if err != nil || dataRecord == nil {
-			continue
-		}
-		// Project filter — drop rows whose _data record was captured under
-		// a different project tag than the agent asked for.
-		if args.Project != "" && dataRecord.GetString("project") != args.Project {
-			continue
-		}
-
-		reqJSON := dataRecord.Get("req_json")
-		respJSON := dataRecord.Get("resp_json")
-
+	rows := make([]map[string]any, 0, len(urows))
+	for _, r := range urows {
+		id := makeRowID(r.Project, r.RequestID)
 		if concise {
-			// Cheap summary: just enough to scan and decide what to drill into.
-			req, _ := reqJSON.(map[string]any)
-			resp, _ := respJSON.(map[string]any)
 			rows = append(rows, map[string]any{
-				"id":     dataRecord.GetString("id"),
-				"index":  dataRecord.GetFloat("index"),
-				"method": mapStr(req, "method"),
-				"path":   mapStr(req, "path"),
-				"status": int(mapFloat(resp, "status")),
-				"length": int(mapFloat(resp, "length")),
+				"id": id, "index": r.GlobalSeq, "method": r.Method,
+				"path": r.Path, "status": r.Status, "length": r.RespLength,
 			})
 			continue
 		}
-
-		// Full mode — strip header noise but keep the rest.
-		if req, ok := reqJSON.(map[string]any); ok {
-			delete(req, "headers")
-		}
-		if resp, ok := respJSON.(map[string]any); ok {
-			delete(resp, "headers")
-		}
 		rows = append(rows, map[string]any{
-			"id":           dataRecord.GetString("id"),
-			"index":        dataRecord.GetFloat("index"),
-			"index_minor":  dataRecord.GetFloat("index_minor"),
-			"host":         dataRecord.GetString("host"),
-			"port":         dataRecord.GetString("port"),
-			"generated_by": dataRecord.GetString("generated_by"),
-			"has_params":   dataRecord.GetBool("has_params"),
-			"has_resp":     dataRecord.GetBool("has_resp"),
-			"http":         dataRecord.GetString("http"),
-			"req":          reqJSON,
-			"resp":         respJSON,
+			"id": id, "index": r.GlobalSeq, "host": r.Host, "port": r.Port,
+			"generated_by": r.GeneratedBy, "has_params": r.Query != "",
+			"has_resp": r.Status != 0, "http": r.Protocol,
+			"req":  map[string]any{"method": r.Method, "path": r.Path, "query": r.Query},
+			"resp": map[string]any{"status": r.Status, "mime": r.Mime, "length": r.RespLength},
 		})
 	}
 
-	result := map[string]any{
-		"host":      host,
-		"totalRows": len(rows),
-		"rows":      rows,
-		"concise":   concise,
-	}
-
-	return mcpJSONResult(result)
+	return mcpJSONResult(map[string]any{
+		"host": host, "totalRows": len(rows), "rows": rows, "concise": concise,
+	})
 }
 
 func (backend *Backend) listHostsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
