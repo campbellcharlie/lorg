@@ -142,8 +142,14 @@ func TestUnionReadWriteStress(t *testing.T) {
 	// SAFE under load: no data races, no read errors, no crash/deadlock, and
 	// near-lossless (>=99%). Realistic workloads stay within the cap and lose
 	// nothing.
+	// Exact under normal timing — zero loss even under forced eviction churn
+	// (24 projects vs a 16 cap). -race perturbs SQLite's WAL timing, so allow a
+	// tiny epsilon there.
 	want := writers * writesPerWriter
-	min := want - want/100 // tolerate <=1% under forced eviction churn
+	min := want
+	if raceEnabled {
+		min = want - want/100
+	}
 	if total < min {
 		t.Errorf("captured %d rows, want >= %d (excessive loss under eviction churn)", total, min)
 	}

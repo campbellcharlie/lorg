@@ -279,10 +279,13 @@ func (p *ProjectDB) openLocked(name string) error {
 	// parallel. Readers use separate WAL connections (viewedDB, readDBCache).
 	db.SetMaxOpenConns(1)
 
-	// Enable WAL mode for concurrent reads during writes
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return fmt.Errorf("projectDB: failed to set WAL mode: %w", err)
+	// WAL is persistent; only set it on a new DB (see writeHandleForLocked) so
+	// reopen doesn't race WAL-recoverable readers into SQLITE_BUSY.
+	if isNew {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			db.Close()
+			return fmt.Errorf("projectDB: failed to set WAL mode: %w", err)
+		}
 	}
 
 	// Reasonable busy timeout for concurrent goroutine access
@@ -584,38 +587,44 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 	// addressed write to the active handle (the bug the stress test caught:
 	// eviction churn dropped a row). Bounded retries guard against pathological
 	// churn (returns an error rather than silently losing the row).
-	for attempt := 0; attempt < 16; attempt++ {
-		p.mu.RLock()
-		if p.db == nil || !p.ready {
-			p.mu.RUnlock()
-			return nil
-		}
-		if !trafficLogging.shouldLog(userdata.GeneratedBy) {
-			p.mu.RUnlock()
-			return nil
-		}
-		var db *sql.DB
-		if proj == "" || proj == p.name {
-			db = p.db
-		} else if h, ok := p.writeHandles[proj]; ok {
-			db = h
-		}
-		if db != nil {
-			err := doInsert(db)
-			p.mu.RUnlock()
-			return err
-		}
+	// Fast path: the target handle is already open — insert under the READ lock
+	// so concurrent captures to different handles run in parallel (ADR-003 A1).
+	p.mu.RLock()
+	if p.db == nil || !p.ready {
 		p.mu.RUnlock()
-
-		// Addressed handle not open (first write, or evicted) — open it, retry.
-		p.mu.Lock()
-		_, oerr := p.writeHandleForLocked(proj)
-		p.mu.Unlock()
-		if oerr != nil {
-			return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, oerr)
-		}
+		return nil
 	}
-	return fmt.Errorf("projectDB.LogTraffic: handle for project %q evicted repeatedly under churn", proj)
+	if !trafficLogging.shouldLog(userdata.GeneratedBy) {
+		p.mu.RUnlock()
+		return nil
+	}
+	var db *sql.DB
+	if proj == "" || proj == p.name {
+		db = p.db
+	} else if h, ok := p.writeHandles[proj]; ok {
+		db = h
+	}
+	if db != nil {
+		err := doInsert(db)
+		p.mu.RUnlock()
+		return err
+	}
+	p.mu.RUnlock()
+
+	// Slow path: the addressed handle isn't open. Open it AND insert under the
+	// SAME exclusive lock, so eviction can't drop the handle between open and
+	// insert (the lost-write under churn the stress test caught). This serializes
+	// only the first write to a project (rare); subsequent ones take the fast path.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.db == nil || !p.ready {
+		return nil
+	}
+	h, err := p.writeHandleForLocked(proj)
+	if err != nil {
+		return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, err)
+	}
+	return doInsert(h)
 }
 
 // writeHandleForLocked returns an open read/write *sql.DB for the named project,
@@ -655,9 +664,15 @@ func (p *ProjectDB) writeHandleForLocked(name string) (*sql.DB, error) {
 	}
 	// Single writer connection per handle — see openLocked (ADR-003 A1).
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("writeHandleForLocked: set WAL mode: %w", err)
+	// journal_mode=WAL is PERSISTENT in the DB header, so only set it on a
+	// freshly-created DB. Re-running it on reopen takes a write lock that races
+	// concurrent WAL-recoverable readers -> SQLITE_BUSY (the stress test caught
+	// this). An existing project DB is already WAL.
+	if isNew {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("writeHandleForLocked: set WAL mode: %w", err)
+		}
 	}
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
 		db.Close()

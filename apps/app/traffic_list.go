@@ -3,7 +3,6 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -40,12 +39,13 @@ func (backend *Backend) TrafficList(e *echo.Echo) {
 		if err := requireLocalhost(c); err != nil {
 			return err
 		}
-		// Prefer the active projectDB if it has data — this is what the
-		// user just clicked in the dropdown.
+		// Serve from the active project's http_traffic (ADR-004: _data retired).
 		if served, ok := tryServeProjectDBTraffic(c); ok {
 			return served
 		}
-		return serveLegacyTraffic(c, backend)
+		// No active/ready project → empty list.
+		perPage, page, _, _ := parseTrafficParams(c)
+		return c.JSON(http.StatusOK, emptyTrafficResponse(page, perPage))
 	})
 }
 
@@ -68,9 +68,7 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM http_traffic").Scan(&rowCount); err != nil {
 		return nil, false
 	}
-	if rowCount == 0 {
-		return nil, false
-	}
+	_ = rowCount // serve even an empty active project (no _data fallback) — ADR-004
 
 	perPage, page, hostFilter, before := parseTrafficParams(c)
 	offset := (page - 1) * perPage
@@ -163,90 +161,6 @@ func tryServeProjectDBTraffic(c echo.Context) (error, bool) {
 	return c.JSON(http.StatusOK, trafficResponse(items, page, perPage, totalItems)), true
 }
 
-// serveLegacyTraffic queries the legacy lorgdb _data collection.
-func serveLegacyTraffic(c echo.Context, backend *Backend) error {
-	perPage, page, hostFilter, before := parseTrafficParams(c)
-	projectFilter := c.QueryParam("project")
-	offset := (page - 1) * perPage
-
-	// Build WHERE clause with positional params
-	var conditions []string
-	var args []any
-	if hostFilter != "" {
-		conditions = append(conditions, `host LIKE ?`)
-		args = append(args, "%"+hostFilter+"%")
-	}
-	if projectFilter != "" {
-		conditions = append(conditions, `project = ?`)
-		args = append(args, projectFilter)
-	}
-
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = " WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	var totalItems int
-	countArgs := append([]any{}, args...)
-	if err := backend.DB.QueryRow(`SELECT COUNT(*) FROM _data`+whereClause, countArgs...).Scan(&totalItems); err != nil {
-		log.Printf("[TrafficList] Count error: %v", err)
-		totalItems = 0
-	}
-
-	// Row query adds optional keyset ("index" < before); the count above stays
-	// on the full host/project-scoped set so totalItems is stable.
-	rowConditions := append([]string{}, conditions...)
-	rowArgs := append([]any{}, args...)
-	if before > 0 {
-		rowConditions = append(rowConditions, `"index" < ?`)
-		rowArgs = append(rowArgs, before)
-		offset = 0
-	}
-	rowWhere := ""
-	if len(rowConditions) > 0 {
-		rowWhere = " WHERE " + strings.Join(rowConditions, " AND ")
-	}
-
-	selectQuery := `SELECT id, "index", COALESCE(project,'') as project, host, port, is_https, has_resp, generated_by, req_json, resp_json, created
-		FROM _data` + rowWhere + ` ORDER BY "index" DESC LIMIT ? OFFSET ?`
-
-	selectArgs := append(append([]any{}, rowArgs...), perPage, offset)
-
-	var items []TrafficListItem
-	rows, err := backend.DB.Query(selectQuery, selectArgs...)
-	if err != nil {
-		log.Printf("[TrafficList] Query error: %v", err)
-		return c.JSON(http.StatusOK, emptyTrafficResponse(page, perPage))
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var item TrafficListItem
-		var reqJSON, respJSON *string
-		if err := rows.Scan(
-			&item.ID, &item.Index, &item.Project, &item.Host, &item.Port,
-			&item.IsHTTPS, &item.HasResp, &item.GeneratedBy,
-			&reqJSON, &respJSON, &item.Created,
-		); err != nil {
-			log.Printf("[TrafficList] Scan error: %v", err)
-			continue
-		}
-		if reqJSON != nil {
-			item.ReqJSON = json.RawMessage(*reqJSON)
-		} else {
-			item.ReqJSON = json.RawMessage("null")
-		}
-		if respJSON != nil {
-			item.RespJSON = json.RawMessage(*respJSON)
-		} else {
-			item.RespJSON = json.RawMessage("null")
-		}
-		items = append(items, item)
-	}
-
-	return c.JSON(http.StatusOK, trafficResponse(items, page, perPage, totalItems))
-}
-
 func parseTrafficParams(c echo.Context) (perPage, page int, hostFilter string, before int64) {
 	perPage = 500
 	if v := c.QueryParam("perPage"); v != "" {
@@ -329,15 +243,3 @@ func trafficResponse(items []TrafficListItem, page, perPage, totalItems int) map
 	}
 }
 
-// ensureProjectColumn adds the "project" TEXT column to a table if it doesn't
-// already exist. This upgrades existing databases that were created before
-// project tagging was added.
-func ensureProjectColumn(backend *Backend, tableName string) {
-	// ALTER TABLE ADD COLUMN is idempotent in practice: if the column already
-	// exists, SQLite returns a "duplicate column" error which we ignore.
-	if _, err := backend.DB.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN project TEXT DEFAULT ''`, tableName)); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column") {
-			log.Printf("[EnsureProjectColumn] ALTER TABLE %s error: %v", tableName, err)
-		}
-	}
-}
