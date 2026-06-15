@@ -344,7 +344,7 @@ func initProjectSchema(db *sql.DB, isNew bool) error {
 //	v4: original burp-mcp-enhanced schema with `request_hash TEXT UNIQUE`
 //	v5: drops the UNIQUE so identical replayed requests aren't silently
 //	    deduped (a fuzz/repeater workflow needs every iteration recorded).
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // migrateProjectSchema brings an existing project DB up to currentSchemaVersion.
 // Each step is idempotent so running twice is a no-op.
@@ -363,6 +363,34 @@ func migrateProjectSchema(db *sql.DB) error {
 			return fmt.Errorf("v5 version stamp: %w", err)
 		}
 		log.Printf("[ProjectDB] migrated schema → v5 (dropped request_hash UNIQUE)")
+	}
+
+	if version < 6 {
+		// ADR-004 E1: make http_traffic a superset of _data so projectDB can
+		// serve the readers currently tied to lorgdb's global table. Adds the
+		// _data-only columns the union read layer needs.
+		alters := []string{
+			"ALTER TABLE http_traffic ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE http_traffic ADD COLUMN generated_by TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE http_traffic ADD COLUMN global_seq INTEGER NOT NULL DEFAULT 0",
+		}
+		for _, stmt := range alters {
+			if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("v6 migration: %w", err)
+			}
+		}
+		for _, stmt := range []string{
+			"CREATE INDEX IF NOT EXISTS idx_ht_fingerprint ON http_traffic(fingerprint)",
+			"CREATE INDEX IF NOT EXISTS idx_ht_global_seq ON http_traffic(global_seq)",
+		} {
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("v6 index: %w", err)
+			}
+		}
+		if _, err := db.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (6, ?)", time.Now().UnixMilli()); err != nil {
+			return fmt.Errorf("v6 version stamp: %w", err)
+		}
+		log.Printf("[ProjectDB] migrated schema → v6 (http_traffic superset: fingerprint, generated_by, global_seq)")
 	}
 
 	return nil
@@ -552,6 +580,14 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
+	// ADR-004 E1: make http_traffic a superset of _data. fingerprint feeds the
+	// clustering/anomaly tools (computed exactly like the _data path); generated_by
+	// is the raw source label; global_seq is a cross-project ordering key
+	// (UnixNano — monotonic enough to sort a UNION across project DBs).
+	fingerprint := ComputeFingerprint(status, mime, []byte(respBody))
+	generatedBy := userdata.GeneratedBy
+	globalSeq := time.Now().UnixNano()
+
 	// Group the three inserts into ONE transaction (ADR-003 A3): one WAL sync per
 	// row instead of three. The traffic row still commits even when the message
 	// and FTS inserts are skipped (requestID == 0) or fail — they stay
@@ -565,8 +601,8 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 	result, err := tx.Exec(`INSERT INTO http_traffic
 		(timestamp, tool, method, host, path, query, param_count, status_code,
 		 response_length, protocol, port, url, mime_type, extension, page_title,
-		 content_type, request_hash, session_tag)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 content_type, request_hash, session_tag, fingerprint, generated_by, global_seq)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		timestamp,
 		tool,
 		method,
@@ -585,6 +621,9 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 		contentType,
 		requestHash,
 		"", // session_tag
+		fingerprint,
+		generatedBy,
+		globalSeq,
 	)
 	if err != nil {
 		_ = tx.Rollback()
@@ -1243,8 +1282,13 @@ var burpMCPSchema = []string{
     content_type  TEXT,
     request_hash  TEXT,
     session_tag   TEXT,
-    notes         TEXT
+    notes         TEXT,
+    fingerprint   TEXT    NOT NULL DEFAULT '',
+    generated_by  TEXT    NOT NULL DEFAULT '',
+    global_seq    INTEGER NOT NULL DEFAULT 0
 )`,
+	`CREATE INDEX idx_ht_fingerprint ON http_traffic(fingerprint)`,
+	`CREATE INDEX idx_ht_global_seq ON http_traffic(global_seq)`,
 	`CREATE TABLE http_messages (
     request_id       INTEGER PRIMARY KEY,
     request_headers  TEXT,
