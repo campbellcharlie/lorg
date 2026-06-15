@@ -73,7 +73,7 @@ func (backend *Backend) wsListMessagesHandler(args WebSocketArgs) (*mcp.CallTool
 		// through the upgrade request stored in _data (joined via
 		// data_index). Filter messages whose upgrade request was captured
 		// under this project.
-		conditions = append(conditions, `data_index IN (SELECT "index" FROM _data WHERE project = ?)`)
+		conditions = append(conditions, "project = ?")
 		queryArgs = append(queryArgs, args.Project)
 	}
 
@@ -144,7 +144,7 @@ func (backend *Backend) wsSearchHandler(args WebSocketArgs) (*mcp.CallToolResult
 		queryArgs = append(queryArgs, args.Direction)
 	}
 	if args.Project != "" {
-		conditions = append(conditions, `data_index IN (SELECT "index" FROM _data WHERE project = ?)`)
+		conditions = append(conditions, "project = ?")
 		queryArgs = append(queryArgs, args.Project)
 	}
 
@@ -188,28 +188,25 @@ func (backend *Backend) wsGetConnectionHandler(args WebSocketArgs) (*mcp.CallToo
 		return mcp.NewToolResultError("requestId is required for getConnection"), nil
 	}
 
-	// Find the HTTP upgrade request in _data
-	r, err := backend.DB.FindRecordById("_data", args.RequestID)
-	if err != nil || r == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("connection %s not found in traffic data", args.RequestID)), nil
+	// Derive the connection from its websocket messages (ADR-004: no _data join).
+	wsRecords, _ := backend.DB.FindRecords("_websockets", "proxy_id = ?", args.RequestID)
+	if len(wsRecords) == 0 {
+		return mcp.NewToolResultError(fmt.Sprintf("connection %s not found", args.RequestID)), nil
 	}
 
-	// Get raw request/response
+	// Raw upgrade request/response: legacy _raw, else the composite-id resolver.
 	var rawReq, rawResp string
-	rawRecord, rawErr := backend.DB.FindRecordById("_raw", args.RequestID)
-	if rawErr == nil && rawRecord != nil {
+	if rawRecord, rawErr := backend.DB.FindRecordById("_raw", args.RequestID); rawErr == nil && rawRecord != nil {
 		rawReq = rawRecord.GetString("request")
 		rawResp = rawRecord.GetString("response")
+	} else if rr, rp, ok := backend.rawBytesForID(args.RequestID); ok {
+		rawReq, rawResp = rr, rp
 	}
-
-	// Count messages for this connection
-	wsRecords, _ := backend.DB.FindRecords("_websockets", "proxy_id = ?", args.RequestID)
 
 	return mcpJSONResult(map[string]any{
 		"requestId":    args.RequestID,
-		"host":         r.GetString("host"),
-		"path":         r.GetString("path"),
-		"status":       r.GetInt("status"),
+		"host":         wsRecords[0].GetString("host"),
+		"path":         wsRecords[0].GetString("path"),
 		"rawRequest":   rawReq,
 		"rawResponse":  rawResp,
 		"messageCount": len(wsRecords),
@@ -226,7 +223,7 @@ func (backend *Backend) wsListConnectionsHandler(args WebSocketArgs) (*mcp.CallT
 	whereClause := ""
 	queryParams := []any{}
 	if args.Project != "" {
-		whereClause = ` WHERE data_index IN (SELECT "index" FROM _data WHERE project = ?)`
+		whereClause = " WHERE project = ?"
 		queryParams = append(queryParams, args.Project)
 	}
 	queryParams = append(queryParams, limit)

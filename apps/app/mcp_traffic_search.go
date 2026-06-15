@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -126,48 +125,36 @@ func (backend *Backend) searchTrafficRawContent(args SearchTrafficArgs) (*mcp.Ca
 		conditions = append(conditions, "host LIKE ?")
 		queryArgs = append(queryArgs, "%"+args.Host+"%")
 	}
-	if args.Project != "" {
-		conditions = append(conditions, "project = ?")
-		queryArgs = append(queryArgs, args.Project)
-	}
-	where := "1=1"
-	if len(conditions) > 0 {
-		where = strings.Join(conditions, " AND ")
-	}
+	where := strings.Join(conditions, " AND ")
 
 	fetchLimit := args.Limit * 5
 	if fetchLimit > 1000 {
 		fetchLimit = 1000
 	}
-	recs, err := backend.DB.FindRecordsSorted("_data", where, `"index" DESC`, fetchLimit, args.Offset, queryArgs...)
+	urows, err := projectDB.unionTrafficRows(args.Project, where, queryArgs, fetchLimit)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to search traffic: %v", err)), nil
 	}
 
 	items := make([]map[string]any, 0, args.Limit)
-	for _, dr := range wrapRecords(recs) {
+	for _, r := range urows {
 		if len(items) >= args.Limit {
 			break
 		}
-		id := dr.GetString("id")
-		reqRec, _ := backend.DB.FindRecordById("_req", id)
-		respRec, _ := backend.DB.FindRecordById("_resp", id)
-		matched := (reqRec != nil && strings.Contains(reqRec.GetString("raw"), args.Query)) ||
-			(respRec != nil && strings.Contains(respRec.GetString("raw"), args.Query))
-		if !matched {
+		reqRaw, respRaw, _ := projectDB.getTrafficBytes(r.Project, r.RequestID)
+		if !strings.Contains(reqRaw, args.Query) && !strings.Contains(respRaw, args.Query) {
 			continue
 		}
-		reqJSON := asMap(dr.Get("req_json"))
-		respJSON := asMap(dr.Get("resp_json"))
 		items = append(items, map[string]any{
-			"id":          id,
-			"index":       dr.GetFloat("index"),
-			"host":        dr.GetString("host"),
-			"method":      mapStr(reqJSON, "method"),
-			"path":        mapStr(reqJSON, "path"),
-			"status":      int(mapFloat(respJSON, "status")),
-			"length":      int(mapFloat(respJSON, "length")),
-			"generatedBy": dr.GetString("generated_by"),
+			"id":          makeRowID(r.Project, r.RequestID),
+			"project":     r.Project,
+			"index":       r.GlobalSeq,
+			"host":        r.Host,
+			"method":      r.Method,
+			"path":        r.Path,
+			"status":      r.Status,
+			"length":      r.RespLength,
+			"generatedBy": r.GeneratedBy,
 		})
 	}
 
@@ -204,44 +191,32 @@ func (backend *Backend) runTrafficRegexSearch(host, pattern, source string, limi
 		fetchLimit = 2000
 	}
 
-	dataRecords, err := backend.DB.FindRecordsSorted("_data", where, `"index" DESC`, fetchLimit, 0, queryArgs...)
+	urows, err := projectDB.unionTrafficRows("", where, queryArgs, fetchLimit)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to fetch data records: %v", err)), nil
 	}
 
 	items := make([]map[string]any, 0, limit)
-	for _, rec := range dataRecords {
+	for _, r := range urows {
 		if len(items) >= limit {
 			break
 		}
-		id := rec.GetString("id")
-		hostVal := rec.GetString("host")
+		reqRaw, respRaw, _ := projectDB.getTrafficBytes(r.Project, r.RequestID)
 		matchContext := ""
-
 		if source == "request" || source == "both" {
-			reqRec, _ := backend.DB.FindRecordById("_req", id)
-			if reqRec != nil {
-				raw := reqRec.GetString("raw")
-				loc := re.FindStringIndex(raw)
-				if loc != nil {
-					matchContext = extractRegexMatchContext(raw, loc[0], 200)
-				}
+			if loc := re.FindStringIndex(reqRaw); loc != nil {
+				matchContext = extractRegexMatchContext(reqRaw, loc[0], 200)
 			}
 		}
 		if matchContext == "" && (source == "response" || source == "both") {
-			respRec, _ := backend.DB.FindRecordById("_resp", id)
-			if respRec != nil {
-				raw := respRec.GetString("raw")
-				loc := re.FindStringIndex(raw)
-				if loc != nil {
-					matchContext = extractRegexMatchContext(raw, loc[0], 200)
-				}
+			if loc := re.FindStringIndex(respRaw); loc != nil {
+				matchContext = extractRegexMatchContext(respRaw, loc[0], 200)
 			}
 		}
 		if matchContext != "" {
 			items = append(items, map[string]any{
-				"id":           id,
-				"host":         hostVal,
+				"id":           makeRowID(r.Project, r.RequestID),
+				"host":         r.Host,
 				"matchContext": matchContext,
 			})
 		}
@@ -257,28 +232,6 @@ func (backend *Backend) runTrafficRegexSearch(host, pattern, source string, limi
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// trafficSearchRecord wraps a lorgdb.Record for use in search handlers.
-type trafficSearchRecord struct {
-	inner interface {
-		GetString(key string) string
-		GetFloat(key string) float64
-		Get(key string) any
-	}
-}
-
-func (t trafficSearchRecord) GetString(key string) string { return t.inner.GetString(key) }
-func (t trafficSearchRecord) GetFloat(key string) float64 { return t.inner.GetFloat(key) }
-func (t trafficSearchRecord) Get(key string) any          { return t.inner.Get(key) }
-
-// wrapRecords converts a slice of *lorgdb.Record into []trafficSearchRecord.
-func wrapRecords(recs []*lorgdb.Record) []trafficSearchRecord {
-	out := make([]trafficSearchRecord, len(recs))
-	for i, r := range recs {
-		out[i] = trafficSearchRecord{r}
-	}
-	return out
-}
 
 // extractRegexMatchContext returns up to maxLen characters of context around the match position.
 func extractRegexMatchContext(raw string, matchStart int, maxLen int) string {
