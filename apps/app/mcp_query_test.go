@@ -133,8 +133,7 @@ func TestCompileToSQL(t *testing.T) {
 		name           string
 		input          string
 		wantSubstr     string // substring expected in WHERE clause
-		wantNeedsReq   bool
-		wantNeedsResp  bool
+		wantNeedsMsg   bool
 		wantParamCount int
 		wantErr        bool
 	}{
@@ -147,14 +146,14 @@ func TestCompileToSQL(t *testing.T) {
 		{
 			name:           "status equals numeric",
 			input:          `resp.status.eq:200`,
-			wantSubstr:     "json_extract(d.resp_json, '$.status')",
+			wantSubstr:     "h.status_code = ?",
 			wantParamCount: 1,
 		},
 		{
 			name:           "body search needs req join",
 			input:          `req.body.cont:"password"`,
-			wantSubstr:     "q.raw LIKE",
-			wantNeedsReq:   true,
+			wantSubstr:     "m.request_body LIKE",
+			wantNeedsMsg:   true,
 			wantParamCount: 1,
 		},
 		{
@@ -206,8 +205,8 @@ func TestCompileToSQL(t *testing.T) {
 		{
 			name:           "resp.body needs resp join",
 			input:          `resp.body.cont:"token"`,
-			wantSubstr:     "s.raw LIKE",
-			wantNeedsResp:  true,
+			wantSubstr:     "m.response_body LIKE",
+			wantNeedsMsg:   true,
 			wantParamCount: 1,
 		},
 	}
@@ -236,11 +235,8 @@ func TestCompileToSQL(t *testing.T) {
 			if tt.wantSubstr != "" && !strings.Contains(cq.where, tt.wantSubstr) {
 				t.Errorf("WHERE clause %q does not contain %q", cq.where, tt.wantSubstr)
 			}
-			if cq.needsReq != tt.wantNeedsReq {
-				t.Errorf("needsReq = %v, want %v", cq.needsReq, tt.wantNeedsReq)
-			}
-			if cq.needsResp != tt.wantNeedsResp {
-				t.Errorf("needsResp = %v, want %v", cq.needsResp, tt.wantNeedsResp)
+			if cq.needsMsg != tt.wantNeedsMsg {
+				t.Errorf("needsMsg = %v, want %v", cq.needsMsg, tt.wantNeedsMsg)
 			}
 			if tt.wantParamCount > 0 && len(cq.params) != tt.wantParamCount {
 				t.Errorf("got %d params, want %d", len(cq.params), tt.wantParamCount)
@@ -272,30 +268,23 @@ func TestCompileToSQLParams(t *testing.T) {
 }
 
 func TestBuildFullSQL(t *testing.T) {
-	// Without joins
-	cq := &compiledQuery{where: "d.host LIKE ? COLLATE NOCASE"}
+	// Without joins — reads http_traffic only.
+	cq := &compiledQuery{where: "h.host LIKE ? COLLATE NOCASE"}
 	sql := buildFullSQL(cq, 50)
-	if !strings.Contains(sql, "FROM _data d") {
-		t.Error("expected FROM _data d in SQL")
+	if !strings.Contains(sql, "FROM http_traffic h") {
+		t.Errorf("expected FROM http_traffic h, got: %s", sql)
 	}
-	if strings.Contains(sql, "LEFT JOIN _req") || strings.Contains(sql, "LEFT JOIN _resp") {
-		t.Error("did not expect any JOIN when needsReq/needsResp are false")
+	if strings.Contains(sql, "LEFT JOIN http_messages") {
+		t.Error("did not expect a JOIN when needsMsg is false")
 	}
 	if !strings.Contains(sql, "LIMIT 50") {
 		t.Error("expected LIMIT 50 in SQL")
 	}
 
-	// With req join
-	cq2 := &compiledQuery{where: "q.raw LIKE ? COLLATE NOCASE", needsReq: true}
+	// With body/headers — joins http_messages.
+	cq2 := &compiledQuery{where: "m.request_body LIKE ? COLLATE NOCASE", needsMsg: true}
 	sql2 := buildFullSQL(cq2, 100)
-	if !strings.Contains(sql2, "LEFT JOIN _req q") {
-		t.Errorf("expected LEFT JOIN _req q in SQL, got: %s", sql2)
-	}
-
-	// With resp join
-	cq3 := &compiledQuery{where: "s.raw LIKE ? COLLATE NOCASE", needsResp: true}
-	sql3 := buildFullSQL(cq3, 100)
-	if !strings.Contains(sql3, "LEFT JOIN _resp s") {
-		t.Errorf("expected LEFT JOIN _resp s in SQL, got: %s", sql3)
+	if !strings.Contains(sql2, "LEFT JOIN http_messages m ON h.request_id = m.request_id") {
+		t.Errorf("expected http_messages join, got: %s", sql2)
 	}
 }
