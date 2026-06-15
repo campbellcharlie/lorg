@@ -391,7 +391,7 @@ func loadMirrorFromProjectByID(project string, reqID int64) *mirrorBaseline {
 	if !ok {
 		return nil
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_query_only=on&_busy_timeout=3000")
+	db, err := openProjectRO(path)
 	if err != nil {
 		return nil
 	}

@@ -421,9 +421,10 @@ func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (
 	}
 
 	go func() {
-		err = backend.handleSitemapNew(&s_data)
-		if err != nil {
-			log.Printf("[SaveRequestToBackend] Error handling sitemap new for user ID: %s, err: %v", userdata.ID, err)
+		// Use a local err: this goroutine outlives the function, so writing the
+		// outer err would race with the caller's read/return (caught under -race).
+		if serr := backend.handleSitemapNew(&s_data); serr != nil {
+			log.Printf("[SaveRequestToBackend] Error handling sitemap new for user ID: %s, err: %v", userdata.ID, serr)
 		}
 	}()
 

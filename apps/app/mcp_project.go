@@ -460,51 +460,7 @@ func migrateV5DropRequestHashUnique(db *sql.DB) error {
 // It is designed to be called from a goroutine: go projectDB.LogTraffic(...)
 // If no DB is open it returns nil silently.
 func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) error {
-	// Ensure an addressed (non-Active) project handle is open BEFORE we take the
-	// read lock for I/O. Opening mutates the registry map, so it needs the
-	// exclusive lock — but that is the rare path (first row for a project). The
-	// common path (Active handle, or an already-open addressed handle) skips it.
 	proj := sanitizeProjectName(userdata.Project)
-	if proj != "" {
-		p.mu.RLock()
-		_, cached := p.writeHandles[proj]
-		needOpen := p.ready && proj != p.name && !cached
-		p.mu.RUnlock()
-		if needOpen {
-			p.mu.Lock()
-			_, err := p.writeHandleForLocked(proj)
-			p.mu.Unlock()
-			if err != nil {
-				return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, err)
-			}
-		}
-	}
-
-	// Hold the READ lock for the whole insert (ADR-003 A1): many LogTraffic
-	// goroutines proceed concurrently (RLock is shared, *sql.DB is pool-safe), so
-	// captures to different project handles no longer serialize on one mutex.
-	// Lifecycle ops take the exclusive lock, so they wait for in-flight writes
-	// and cannot close a handle mid-insert.
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	if p.db == nil || !p.ready {
-		return nil // silently skip if no DB
-	}
-
-	// Check if logging is enabled for this traffic source
-	if !trafficLogging.shouldLog(userdata.GeneratedBy) {
-		return nil
-	}
-
-	// Route to the addressed project's write handle (ADR-002). Empty project, an
-	// Active-equal project, or an evicted handle falls back to the Active handle.
-	db := p.db
-	if proj != "" && proj != p.name {
-		if h, ok := p.writeHandles[proj]; ok {
-			db = h
-		}
-	}
 
 	// Derive host -- strip protocol prefix
 	host := userdata.Host
@@ -588,66 +544,78 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 	generatedBy := userdata.GeneratedBy
 	globalSeq := time.Now().UnixNano()
 
-	// Group the three inserts into ONE transaction (ADR-003 A3): one WAL sync per
-	// row instead of three. The traffic row still commits even when the message
-	// and FTS inserts are skipped (requestID == 0) or fail — they stay
-	// best-effort, exactly as the prior `_, _ =` behavior. fuzz/repeater
-	// workflows want every iteration captured; dedup is via request_hash queries.
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("projectDB.LogTraffic: begin tx: %w", err)
-	}
-
-	result, err := tx.Exec(`INSERT INTO http_traffic
-		(timestamp, tool, method, host, path, query, param_count, status_code,
-		 response_length, protocol, port, url, mime_type, extension, page_title,
-		 content_type, request_hash, session_tag, fingerprint, generated_by, global_seq)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		timestamp,
-		tool,
-		method,
-		host,
-		path,
-		query,
-		paramCount,
-		status,
-		respLength,
-		protocol,
-		port,
-		fullURL,
-		mime,
-		ext,
-		title,
-		contentType,
-		requestHash,
-		"", // session_tag
-		fingerprint,
-		generatedBy,
-		globalSeq,
-	)
-	if err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("projectDB.LogTraffic: traffic insert failed: %w", err)
-	}
-
-	if requestID, idErr := result.LastInsertId(); idErr == nil && requestID != 0 {
-		// Message record (best-effort)
-		_, _ = tx.Exec(`INSERT OR IGNORE INTO http_messages
-			(request_id, request_headers, request_body, response_headers, response_body)
-			VALUES (?, ?, ?, ?, ?)`,
-			requestID, reqHeaders, []byte(reqBody), respHeaders, []byte(respBody),
+	// doInsert writes the row (three inserts in one tx — ADR-003 A3) to a handle.
+	doInsert := func(db *sql.DB) error {
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("projectDB.LogTraffic: begin tx: %w", err)
+		}
+		result, err := tx.Exec(`INSERT INTO http_traffic
+			(timestamp, tool, method, host, path, query, param_count, status_code,
+			 response_length, protocol, port, url, mime_type, extension, page_title,
+			 content_type, request_hash, session_tag, fingerprint, generated_by, global_seq)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			timestamp, tool, method, host, path, query, paramCount, status,
+			respLength, protocol, port, fullURL, mime, ext, title, contentType,
+			requestHash, "", fingerprint, generatedBy, globalSeq,
 		)
-		// FTS entry (best-effort)
-		_, _ = tx.Exec(`INSERT INTO traffic_fts (rowid, url, request_headers, request_body, response_headers, response_body)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-			requestID, fullURL, reqHeaders, reqBody, respHeaders, respBody,
-		)
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("projectDB.LogTraffic: traffic insert failed: %w", err)
+		}
+		if requestID, idErr := result.LastInsertId(); idErr == nil && requestID != 0 {
+			_, _ = tx.Exec(`INSERT OR IGNORE INTO http_messages
+				(request_id, request_headers, request_body, response_headers, response_body)
+				VALUES (?, ?, ?, ?, ?)`,
+				requestID, reqHeaders, []byte(reqBody), respHeaders, []byte(respBody))
+			_, _ = tx.Exec(`INSERT INTO traffic_fts (rowid, url, request_headers, request_body, response_headers, response_body)
+				VALUES (?, ?, ?, ?, ?, ?)`,
+				requestID, fullURL, reqHeaders, reqBody, respHeaders, respBody)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("projectDB.LogTraffic: commit: %w", err)
+		}
+		return nil
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("projectDB.LogTraffic: commit: %w", err)
+	// Resolve the target handle and insert under ONE read lock so the handle
+	// can't be evicted mid-insert (ADR-003 A1). For an addressed project whose
+	// handle was evicted between calls, OPEN it and retry — never misroute an
+	// addressed write to the active handle (the bug the stress test caught:
+	// eviction churn dropped a row). Bounded retries guard against pathological
+	// churn (returns an error rather than silently losing the row).
+	for attempt := 0; attempt < 16; attempt++ {
+		p.mu.RLock()
+		if p.db == nil || !p.ready {
+			p.mu.RUnlock()
+			return nil
+		}
+		if !trafficLogging.shouldLog(userdata.GeneratedBy) {
+			p.mu.RUnlock()
+			return nil
+		}
+		var db *sql.DB
+		if proj == "" || proj == p.name {
+			db = p.db
+		} else if h, ok := p.writeHandles[proj]; ok {
+			db = h
+		}
+		if db != nil {
+			err := doInsert(db)
+			p.mu.RUnlock()
+			return err
+		}
+		p.mu.RUnlock()
+
+		// Addressed handle not open (first write, or evicted) — open it, retry.
+		p.mu.Lock()
+		_, oerr := p.writeHandleForLocked(proj)
+		p.mu.Unlock()
+		if oerr != nil {
+			return fmt.Errorf("projectDB.LogTraffic: resolve project %q: %w", proj, oerr)
+		}
 	}
-	return nil
+	return fmt.Errorf("projectDB.LogTraffic: handle for project %q evicted repeatedly under churn", proj)
 }
 
 // writeHandleForLocked returns an open read/write *sql.DB for the named project,
@@ -725,7 +693,7 @@ func (p *ProjectDB) writeHandleForLocked(name string) (*sql.DB, error) {
 func (p *ProjectDB) closeHandlesForProjectLocked(name string) {
 	sanitized := sanitizeProjectName(name)
 	if h, ok := p.writeHandles[sanitized]; ok {
-		_ = h.Close()
+		checkpointAndClose(h)
 		delete(p.writeHandles, sanitized)
 	}
 	for i, n := range p.writeHandleOrder {
@@ -766,16 +734,27 @@ func (p *ProjectDB) Close() {
 
 	// Release any addressed write handles opened by writeHandleForLocked.
 	for _, h := range p.writeHandles {
-		_ = h.Close()
+		checkpointAndClose(h)
 	}
 	p.writeHandles = nil
 	p.writeHandleOrder = nil
 
 	if p.db != nil {
-		_ = p.db.Close()
+		checkpointAndClose(p.db)
 		p.db = nil
 	}
 	p.ready = false
+}
+
+// checkpointAndClose flushes a handle's committed WAL frames into the main DB
+// before closing it (ADR-004). TRUNCATE reliably moves committed frames into the
+// main DB so a later reader sees them even if the -wal is later orphaned — this
+// fixed the lost-write the stress test caught (PASSIVE left too many frames
+// behind under churn). Combined with openProjectRO (WAL-recoverable), realistic
+// workloads capture exactly; only -race timing leaves a rare residual.
+func checkpointAndClose(h *sql.DB) {
+	_, _ = h.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	_ = h.Close()
 }
 
 // SetViewed opens a separate read-only handle on a different project DB so
