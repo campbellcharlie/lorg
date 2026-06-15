@@ -6,13 +6,13 @@
 
 ## Screenshots
 
-**Traffic viewer + Repeater** — live capture table with the request/response repeater below. Reads union across every project DB while writes stay addressed to the active project.
+**Traffic viewer** — live capture table with the selected request and response shown below. Reads union across every project DB while writes stay addressed to the active project.
 
-![Traffic viewer and repeater](screenshots/traffic-repeater.png)
+![Traffic viewer](screenshots/traffic-viewer.png)
 
-**Repeater** — edit and re-fire any captured request with full syntax highlighting, template placeholders, and CSRF auto-injection on send.
+**Request / response viewer** — inspect any captured request and its response with full syntax highlighting.
 
-![Repeater request editor](screenshots/repeater-editor.png)
+![Request and response viewer](screenshots/request-response-viewer.png)
 
 **Settings** — 12 built-in themes, editor preferences, scope rules, and request templates. The banner shows per-project addressing in action: one project open read-only while sends land in the active project.
 
