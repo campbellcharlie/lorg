@@ -65,8 +65,8 @@ lorg-test-bin
 screenshots/
 !/screenshots/
 /screenshots/*
-!/screenshots/traffic-repeater.png
-!/screenshots/repeater-editor.png
+!/screenshots/traffic-viewer.png
+!/screenshots/request-response-viewer.png
 !/screenshots/settings-themes.png
 
 # Pentest engagement data
