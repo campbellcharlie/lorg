@@ -2,8 +2,8 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -68,60 +68,15 @@ func (backend *Backend) clusterResponsesHandler(ctx context.Context, request mcp
 		limit = 50
 	}
 
-	if backend.DB == nil {
-		return mcp.NewToolResultError("backend database not initialized"), nil
-	}
-
-	where, whereArgs := buildClusterWhereWithProject(args.Host, args.Method, args.Path, args.Project, true)
-
-	// Group by fingerprint, return cluster summaries with up to 5 sample IDs
-	// and 3 example "method path" strings each.
-	q := `
-		SELECT
-			fingerprint,
-			COUNT(*)                                    AS cnt,
-			COALESCE(json_extract(resp_json,'$.status'), 0) AS status,
-			COALESCE(json_extract(resp_json,'$.mime'),  '') AS mime,
-			GROUP_CONCAT(id, '|')                       AS ids,
-			GROUP_CONCAT(
-				COALESCE(json_extract(req_json,'$.method'),'') || ' ' ||
-				COALESCE(json_extract(req_json,'$.path'),''),
-				'|'
-			)                                           AS examples
-		FROM _data
-		` + where + `
-		  AND fingerprint != ''
-		  AND has_resp = TRUE
-		GROUP BY fingerprint
-		ORDER BY cnt DESC
-		LIMIT ?`
-
-	whereArgs = append(whereArgs, limit)
-
-	rows, err := backend.DB.Query(q, whereArgs...)
+	// Group across the cross-project union of http_traffic by fingerprint
+	// (ADR-004 E5). fingerprint is now a real http_traffic column (E1).
+	where, whereArgs := clusterWhereHT(args.Host, args.Method, args.Path)
+	rows, err := projectDB.unionTrafficRows(args.Project, where, whereArgs, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
-	defer rows.Close()
 
-	clusters := make([]clusterRow, 0, limit)
-	totalRows := 0
-	for rows.Next() {
-		var c clusterRow
-		var ids, examples sql.NullString
-		var lengthBkt int
-		if err := rows.Scan(&c.Fingerprint, &c.Count, &c.Status, &c.Mime, &ids, &examples); err != nil {
-			continue
-		}
-		c.LengthBkt = lengthBkt // populated from fingerprint string below
-		if i := strings.Index(c.Fingerprint, "-l"); i >= 0 {
-			fmt.Sscanf(c.Fingerprint[i+2:], "%d", &c.LengthBkt)
-		}
-		c.SampleIDs = topNSplit(ids.String, "|", 5)
-		c.Examples = topNSplit(examples.String, "|", 3)
-		clusters = append(clusters, c)
-		totalRows += c.Count
-	}
+	clusters, totalRows := clusterByFingerprint(rows, limit)
 
 	return mcpJSONResult(map[string]any{
 		"clusters":       clusters,
@@ -149,68 +104,19 @@ func (backend *Backend) findAnomaliesHandler(ctx context.Context, request mcp.Ca
 		limit = 25
 	}
 
-	if backend.DB == nil {
-		return mcp.NewToolResultError("backend database not initialized"), nil
-	}
-
-	where, whereArgs := buildClusterWhereWithProject(args.Host, args.Method, args.Path, args.Project, true)
-
-	// Step 1: find the modal fingerprint for this scope.
-	modalQ := `
-		SELECT fingerprint, COUNT(*) AS cnt
-		FROM _data
-		` + where + `
-		  AND fingerprint != ''
-		  AND has_resp = TRUE
-		GROUP BY fingerprint
-		ORDER BY cnt DESC
-		LIMIT 1`
-
-	var modalFP string
-	var modalCount int
-	if err := backend.DB.QueryRow(modalQ, whereArgs...).Scan(&modalFP, &modalCount); err != nil {
-		if err == sql.ErrNoRows {
-			return mcpJSONResult(map[string]any{
-				"modal":     nil,
-				"anomalies": []anomalyRow{},
-				"note":      "no fingerprinted responses found for this scope",
-			})
-		}
+	where, whereArgs := clusterWhereHT(args.Host, args.Method, args.Path)
+	rows, err := projectDB.unionTrafficRows(args.Project, where, whereArgs, 0)
+	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("modal query failed: %v", err)), nil
 	}
 
-	// Step 2: list responses whose fingerprint differs from the modal one.
-	anomalyQ := `
-		SELECT
-			id,
-			COALESCE(json_extract(req_json,'$.method'),'') AS method,
-			COALESCE(json_extract(req_json,'$.path'),'')   AS path,
-			fingerprint,
-			COALESCE(json_extract(resp_json,'$.status'),0) AS status,
-			COALESCE(json_extract(resp_json,'$.mime'), '') AS mime
-		FROM _data
-		` + where + `
-		  AND fingerprint != ''
-		  AND fingerprint != ?
-		  AND has_resp = TRUE
-		ORDER BY "index" DESC
-		LIMIT ?`
-
-	allArgs := append(append([]any{}, whereArgs...), modalFP, limit)
-
-	rows, err := backend.DB.Query(anomalyQ, allArgs...)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("anomaly query failed: %v", err)), nil
-	}
-	defer rows.Close()
-
-	anomalies := make([]anomalyRow, 0, limit)
-	for rows.Next() {
-		var a anomalyRow
-		if err := rows.Scan(&a.ID, &a.Method, &a.Path, &a.Fingerprint, &a.Status, &a.Mime); err != nil {
-			continue
-		}
-		anomalies = append(anomalies, a)
+	modalFP, modalCount, anomalies := anomaliesFromRows(rows, limit)
+	if modalCount == 0 {
+		return mcpJSONResult(map[string]any{
+			"modal":     nil,
+			"anomalies": []anomalyRow{},
+			"note":      "no fingerprinted responses found for this scope",
+		})
 	}
 
 	return mcpJSONResult(map[string]any{
@@ -228,55 +134,111 @@ func (backend *Backend) findAnomaliesHandler(ctx context.Context, request mcp.Ca
 	})
 }
 
-// buildClusterWhere assembles a WHERE clause from optional filters. requireOne
-// guarantees at least one condition (defaulting to "1=1") so the caller can
-// always concatenate "AND ..." after it.
-func buildClusterWhere(host, method, path string, requireOne bool) (string, []any) {
-	return buildClusterWhereWithProject(host, method, path, "", requireOne)
-}
-
-// buildClusterWhereWithProject is the project-aware variant. project=""
-// behaves identically to buildClusterWhere; otherwise an `AND project = ?`
-// clause is appended.
-func buildClusterWhereWithProject(host, method, path, project string, requireOne bool) (string, []any) {
+// clusterWhereHT builds a WHERE clause over http_traffic's flat columns for the
+// union read layer (ADR-004 E5). Project scoping is handled by unionTrafficRows.
+func clusterWhereHT(host, method, path string) (string, []any) {
 	var conds []string
 	var args []any
-
 	if h := strings.TrimSpace(host); h != "" {
 		conds = append(conds, "host LIKE ?")
 		args = append(args, "%"+h+"%")
 	}
 	if m := strings.TrimSpace(method); m != "" {
-		conds = append(conds, "json_extract(req_json,'$.method') = ?")
+		conds = append(conds, "method = ?")
 		args = append(args, strings.ToUpper(m))
 	}
 	if p := strings.TrimSpace(path); p != "" {
-		conds = append(conds, "json_extract(req_json,'$.path') LIKE ?")
+		conds = append(conds, "path LIKE ?")
 		args = append(args, "%"+p+"%")
 	}
-	if pj := strings.TrimSpace(project); pj != "" {
-		conds = append(conds, "project = ?")
-		args = append(args, pj)
-	}
+	conds = append(conds, "fingerprint != ''")
+	return strings.Join(conds, " AND "), args
+}
 
-	if len(conds) == 0 {
-		if requireOne {
-			return "WHERE 1=1", args
+// clusterByFingerprint groups union rows by fingerprint into cluster summaries
+// (sorted by count desc, capped at limit) and returns the total grouped rows.
+// Pure function over the union output — testable without a DB.
+func clusterByFingerprint(rows []TrafficRow, limit int) ([]clusterRow, int) {
+	type agg struct {
+		count    int
+		status   int
+		mime     string
+		ids      []string
+		examples []string
+	}
+	byFP := make(map[string]*agg)
+	order := make([]string, 0)
+	total := 0
+	for _, r := range rows {
+		if r.Fingerprint == "" {
+			continue
 		}
-		return "", args
+		a := byFP[r.Fingerprint]
+		if a == nil {
+			a = &agg{status: r.Status, mime: r.Mime}
+			byFP[r.Fingerprint] = a
+			order = append(order, r.Fingerprint)
+		}
+		a.count++
+		total++
+		if len(a.ids) < 5 {
+			a.ids = append(a.ids, makeRowID(r.Project, r.RequestID))
+		}
+		if len(a.examples) < 3 {
+			a.examples = append(a.examples, strings.TrimSpace(r.Method+" "+r.Path))
+		}
 	}
-	return "WHERE " + strings.Join(conds, " AND "), args
+	clusters := make([]clusterRow, 0, len(order))
+	for _, fp := range order {
+		a := byFP[fp]
+		c := clusterRow{Fingerprint: fp, Count: a.count, Status: a.status, Mime: a.mime, SampleIDs: a.ids, Examples: a.examples}
+		if i := strings.Index(fp, "-l"); i >= 0 {
+			fmt.Sscanf(fp[i+2:], "%d", &c.LengthBkt)
+		}
+		clusters = append(clusters, c)
+	}
+	sort.Slice(clusters, func(i, j int) bool { return clusters[i].Count > clusters[j].Count })
+	if len(clusters) > limit {
+		clusters = clusters[:limit]
+	}
+	return clusters, total
 }
 
-// topNSplit splits s by sep and returns the first n parts. Empty input
-// returns nil so JSON serializes as null/[] rather than [""].
-func topNSplit(s, sep string, n int) []string {
-	if s == "" {
-		return nil
+// anomaliesFromRows finds the modal fingerprint and returns rows that deviate
+// from it (capped at limit). modalCount==0 means no fingerprinted rows. Pure
+// function over the union output. Rows are assumed already global_seq DESC.
+func anomaliesFromRows(rows []TrafficRow, limit int) (modalFP string, modalCount int, anomalies []anomalyRow) {
+	counts := make(map[string]int)
+	for _, r := range rows {
+		if r.Fingerprint != "" {
+			counts[r.Fingerprint]++
+		}
 	}
-	parts := strings.Split(s, sep)
-	if len(parts) > n {
-		parts = parts[:n]
+	if len(counts) == 0 {
+		return "", 0, []anomalyRow{}
 	}
-	return parts
+	for fp, c := range counts {
+		if c > modalCount {
+			modalFP, modalCount = fp, c
+		}
+	}
+	anomalies = make([]anomalyRow, 0, limit)
+	for _, r := range rows {
+		if len(anomalies) >= limit {
+			break
+		}
+		if r.Fingerprint == "" || r.Fingerprint == modalFP {
+			continue
+		}
+		anomalies = append(anomalies, anomalyRow{
+			ID:          makeRowID(r.Project, r.RequestID),
+			Method:      r.Method,
+			Path:        r.Path,
+			Fingerprint: r.Fingerprint,
+			Status:      r.Status,
+			Mime:        r.Mime,
+		})
+	}
+	return modalFP, modalCount, anomalies
 }
+
