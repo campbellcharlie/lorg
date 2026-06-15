@@ -294,18 +294,6 @@ func extractRegexMatchContext(raw string, matchStart int, maxLen int) string {
 	return raw[start:end]
 }
 
-// parseReqJSONString unmarshals a JSON string from a raw SQL result into a map.
-func parseReqJSONString(raw string) map[string]any {
-	if raw == "" {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return nil
-	}
-	return m
-}
-
 // asMap safely type-asserts a value to map[string]any.
 func asMap(v any) map[string]any {
 	if v == nil {
@@ -367,59 +355,31 @@ func (backend *Backend) generateWordlistHandler(ctx context.Context, request mcp
 		return mcp.NewToolResultError("source must be 'paths', 'parameters', or 'both'"), nil
 	}
 
-	var conditions []string
-	var queryArgs []any
+	// Read path/query directly from http_traffic across all project DBs
+	// (ADR-004 E8) — no more req_json parsing.
+	where := ""
+	var wargs []any
 	if args.HostFilter != "" {
-		conditions = append(conditions, "host LIKE ?")
-		queryArgs = append(queryArgs, "%"+args.HostFilter+"%")
+		where = "host LIKE ?"
+		wargs = []any{"%" + args.HostFilter + "%"}
 	}
-	if args.Project != "" {
-		conditions = append(conditions, "project = ?")
-		queryArgs = append(queryArgs, args.Project)
-	}
-	sql := `SELECT req_json FROM _data ORDER BY "index" DESC`
-	if len(conditions) > 0 {
-		sql = `SELECT req_json FROM _data WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY "index" DESC`
-	}
-
-	rows, err := backend.DB.Query(sql, queryArgs...)
+	rows, err := projectDB.unionTrafficRows(args.Project, where, wargs, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to query traffic: %v", err)), nil
 	}
-	defer rows.Close()
 
 	unique := make(map[string]bool)
-
-	for rows.Next() {
-		var reqJSON string
-		if err := rows.Scan(&reqJSON); err != nil {
-			continue
-		}
-		parsed := parseReqJSONString(reqJSON)
-		if parsed == nil {
-			continue
-		}
-
-		// Extract path segments
+	for _, r := range rows {
 		if args.Source == "paths" || args.Source == "both" {
-			pathStr := mapStr(parsed, "path")
-			if pathStr != "" {
-				segments := strings.Split(pathStr, "/")
-				for _, seg := range segments {
-					seg = strings.TrimSpace(seg)
-					if seg != "" {
-						unique[seg] = true
-					}
+			for _, seg := range strings.Split(r.Path, "/") {
+				if seg = strings.TrimSpace(seg); seg != "" {
+					unique[seg] = true
 				}
 			}
 		}
-
-		// Extract parameter names
 		if args.Source == "parameters" || args.Source == "both" {
-			queryStr := mapStr(parsed, "query")
-			if queryStr != "" {
-				values, err := url.ParseQuery(queryStr)
-				if err == nil {
+			if r.Query != "" {
+				if values, perr := url.ParseQuery(r.Query); perr == nil {
 					for name := range values {
 						if name != "" {
 							unique[name] = true
