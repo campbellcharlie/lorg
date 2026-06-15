@@ -59,8 +59,15 @@ lorg-test-bin
 # Build artifacts
 *.md5
 
-# Screenshots / demo assets
+# Screenshots / demo assets — every screenshots/ dir (incl. nested runtime
+# output like lrx/browser/screenshots/) stays ignored; only the curated
+# README assets at the repo root are un-ignored, explicitly.
 screenshots/
+!/screenshots/
+/screenshots/*
+!/screenshots/traffic-repeater.png
+!/screenshots/repeater-editor.png
+!/screenshots/settings-themes.png
 
 # Pentest engagement data
 Projects/

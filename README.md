@@ -4,6 +4,20 @@
 
 *lorg* (Gaelic: track, trace, trail) is a security testing toolkit that combines an intercepting HTTP/HTTPS proxy with a comprehensive MCP (Model Context Protocol) server. Designed to be driven by AI agents like Claude Code, it provides everything needed for web application security assessments without requiring a Burp Suite license.
 
+## Screenshots
+
+**Traffic viewer + Repeater** — live capture table with the request/response repeater below. Reads union across every project DB while writes stay addressed to the active project.
+
+![Traffic viewer and repeater](screenshots/traffic-repeater.png)
+
+**Repeater** — edit and re-fire any captured request with full syntax highlighting, template placeholders, and CSRF auto-injection on send.
+
+![Repeater request editor](screenshots/repeater-editor.png)
+
+**Settings** — 12 built-in themes, editor preferences, scope rules, and request templates. The banner shows per-project addressing in action: one project open read-only while sends land in the active project.
+
+![Settings, themes, and scope rules](screenshots/settings-themes.png)
+
 ## Features
 
 - **Intercepting Proxy** — HTTP/1.1, HTTP/2, WebSocket with TLS fingerprint mimicry (uTLS)
