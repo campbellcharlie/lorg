@@ -146,3 +146,68 @@ func (p *ProjectDB) unionTrafficRows(projectFilter, where string, args []any, li
 	}
 	return all, nil
 }
+
+// Composite row identity (ADR-004). _data used a single global string id;
+// http_traffic rows are identified per-project by (project, request_id). The
+// composite id "project:request_id" lets union-sourced readers hand clients an id
+// that getRequestResponseFromID / mirror can resolve back to the right project DB.
+
+// makeRowID builds the composite id for a union row.
+func makeRowID(project string, requestID int64) string {
+	return fmt.Sprintf("%s:%d", project, requestID)
+}
+
+// parseRowID splits a composite id back into (project, request_id). ok=false when
+// the string isn't a composite id (e.g. a legacy _data id), so callers can fall
+// back. Splits on the LAST colon so project names with colons still parse.
+func parseRowID(id string) (project string, requestID int64, ok bool) {
+	i := strings.LastIndex(id, ":")
+	if i < 0 {
+		return "", 0, false
+	}
+	var n int64
+	if _, err := fmt.Sscanf(id[i+1:], "%d", &n); err != nil {
+		return "", 0, false
+	}
+	return id[:i], n, true
+}
+
+// getTrafficBytes reconstructs the raw request/response for one row from a
+// project DB's http_messages (ADR-004 E7 foundation). Reconstruction mirrors
+// splitHTTPRaw's split point so the bytes round-trip.
+func (p *ProjectDB) getTrafficBytes(project string, requestID int64) (rawReq, rawResp string, err error) {
+	p.mu.RLock()
+	dbDir := p.dbDir
+	p.mu.RUnlock()
+
+	files, err := listProjectDBFiles(dbDir)
+	if err != nil {
+		return "", "", err
+	}
+	path, ok := files[sanitizeProjectName(project)]
+	if !ok {
+		return "", "", fmt.Errorf("unknown project %q", project)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_query_only=on&_busy_timeout=3000")
+	if err != nil {
+		return "", "", err
+	}
+	defer db.Close()
+
+	var reqH, reqB, respH, respB string
+	row := db.QueryRow(`SELECT request_headers, request_body, response_headers, response_body
+		FROM http_messages WHERE request_id = ?`, requestID)
+	if err := row.Scan(&reqH, &reqB, &respH, &respB); err != nil {
+		return "", "", err
+	}
+	return rejoinRaw(reqH, reqB), rejoinRaw(respH, respB), nil
+}
+
+// rejoinRaw reconstructs a raw HTTP message from its split header/body halves.
+func rejoinRaw(headers, body string) string {
+	if headers == "" && body == "" {
+		return ""
+	}
+	return headers + "\r\n\r\n" + body
+}

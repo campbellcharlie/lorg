@@ -87,3 +87,59 @@ func TestUnionTrafficRows(t *testing.T) {
 		t.Errorf("limit not honored: got %d, want 2", len(gets))
 	}
 }
+
+// TestCompositeIDByteRoundTrip is the ADR-004 E3 proof: a union row's composite
+// id resolves back to the exact raw request/response via http_messages, so
+// getRequestResponseFromID / mirror work without _data.
+func TestCompositeIDByteRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	p := &ProjectDB{}
+	if err := p.Init(dir); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := p.SetProject("Eng", dir); err != nil {
+		t.Fatalf("SetProject: %v", err)
+	}
+	rawReq := "POST /login HTTP/1.1\r\nHost: x.com\r\nContent-Length: 9\r\n\r\nuser=root"
+	rawResp := "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>ok</html>"
+	ud := types.UserData{
+		Host: "x.com", Port: "443", IsHTTPS: true, GeneratedBy: "ai/mcp/http",
+		ReqJson:  types.RequestData{Method: "POST", Path: "/login"},
+		RespJson: types.ResponseData{Status: 200, Mime: "text/html"},
+	}
+	if err := p.LogTraffic(ud, rawReq, rawResp); err != nil {
+		t.Fatalf("LogTraffic: %v", err)
+	}
+
+	rows, err := p.unionTrafficRows("Eng", "", nil, 0)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("union: err=%v rows=%d", err, len(rows))
+	}
+	rid := rows[0].RequestID
+
+	// Composite id round-trips through parseRowID.
+	id := makeRowID("Eng", rid)
+	proj, n, ok := parseRowID(id)
+	if !ok || proj != "Eng" || n != rid {
+		t.Fatalf("parseRowID(%q) = %q,%d,%v", id, proj, n, ok)
+	}
+	// Legacy / malformed ids are not mistaken for composite ids.
+	if _, _, ok := parseRowID("abcdef123"); ok {
+		t.Errorf("legacy id parsed as composite")
+	}
+	if _, _, ok := parseRowID("Eng:notanumber"); ok {
+		t.Errorf("non-numeric suffix parsed as composite")
+	}
+
+	// Bytes reconstruct EXACTLY.
+	gotReq, gotResp, err := p.getTrafficBytes("Eng", rid)
+	if err != nil {
+		t.Fatalf("getTrafficBytes: %v", err)
+	}
+	if gotReq != rawReq {
+		t.Errorf("request mismatch:\n got %q\nwant %q", gotReq, rawReq)
+	}
+	if gotResp != rawResp {
+		t.Errorf("response mismatch:\n got %q\nwant %q", gotResp, rawResp)
+	}
+}
