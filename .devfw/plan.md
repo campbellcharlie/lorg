@@ -143,18 +143,17 @@ flag), and stop the `_data` write LAST. Build stays green at every commit.
       _data/_req/_resp write is behind it; gate OFF ⇒ capture lives only in
       http_traffic, served by every migrated reader. Validated by
       TestLegacyDataWriteGate. — b0fea47
-- [ ] **E9 (full)** Gate the PROXY capture path's _data write too, then flip the
-      default OFF. Blocked on the sitemap subsystem below.
-- [ ] **E10** Drop `_data`/`_req`/`_resp`/`_attached` via migration. Irreversible,
-      OPTIONAL disk-reclaim — only after default-OFF soaks. Not auto-run.
+- [x] **E9 (full)** host-rows + traffic-list migrated; PROXY capture _data write
+      gated; default flipped OFF. + durability fixes (open+insert under one lock;
+      journal_mode=WAL only on new DB) → stress EXACT under churn. — 917345d
+- [x] **E10** Migration 8 drops `_data/_req/_resp/_req_edited/_resp_edited/_attached/
+      _raw`. proxy index counter tolerates the missing table. — 384329f
 
-## Remaining _data readers (block default-OFF)
-The sitemap / host-rows / traffic-list-UI subsystem still reads _data via per-host
-collections keyed to _data ids:
-- `host` tool `rows` action (mcp_tools.go) — per-host collection → _data.
-- traffic_list.go (UI) — http_traffic-preferred with a _data fallback.
-- proxy.go index counter (write-side) + the proxy capture _data write.
-- Intentional legacy fallbacks (mirror/extractor/traffic_detail) — harmless.
+## ADR-004 COMPLETE
+Every traffic reader is on the per-project http_traffic union; the legacy _data
+write is off by default and the tables are dropped. Full suite + 40s stress green
+under -race. Only residual _data reference: the proxy index counter, which now
+tolerates the dropped table.
 
 ## Done (read side): every agent-facing traffic reader is on the union layer
 searchTraffic (metadata+raw+regex), query (HTTPQL), clusterResponses, findAnomalies,
