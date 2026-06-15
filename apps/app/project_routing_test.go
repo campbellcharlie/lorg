@@ -102,3 +102,47 @@ func TestLogTrafficEmptyProjectUnchanged(t *testing.T) {
 		t.Errorf("Solo.db has %d rows, want 2", got)
 	}
 }
+
+// TestLogTrafficSupersetColumns is the ADR-004 E1 proof: LogTraffic populates the
+// new http_traffic superset columns (fingerprint, generated_by, global_seq) so
+// projectDB can serve the readers currently tied to _data.
+func TestLogTrafficSupersetColumns(t *testing.T) {
+	dir := t.TempDir()
+	p := &ProjectDB{}
+	if err := p.Init(dir); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := p.SetProject("Sup", dir); err != nil {
+		t.Fatalf("SetProject: %v", err)
+	}
+	ud := types.UserData{
+		Host: "example.com", Port: "443", IsHTTPS: true, GeneratedBy: "proxy/http",
+		ReqJson:  types.RequestData{Method: "GET", Path: "/s"},
+		RespJson: types.ResponseData{Status: 200, Mime: "text/html"},
+	}
+	if err := p.LogTraffic(ud, "GET /s HTTP/1.1\r\nHost: example.com\r\n\r\n",
+		"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>hi</html>"); err != nil {
+		t.Fatalf("LogTraffic: %v", err)
+	}
+	p.Close()
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, "Sup.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	var fp, gb string
+	var seq int64
+	if err := db.QueryRow("SELECT fingerprint, generated_by, global_seq FROM http_traffic LIMIT 1").Scan(&fp, &gb, &seq); err != nil {
+		t.Fatalf("scan superset cols: %v", err)
+	}
+	if fp == "" {
+		t.Errorf("fingerprint empty — clustering tools depend on it")
+	}
+	if gb != "proxy/http" {
+		t.Errorf("generated_by = %q, want proxy/http", gb)
+	}
+	if seq == 0 {
+		t.Errorf("global_seq not set — cross-project ordering depends on it")
+	}
+}
