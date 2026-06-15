@@ -1,10 +1,18 @@
 ---
 artifact: decision
-version: 1
-status: proposed
+version: 2
+status: accepted
 owners: [campbellcharlie]
 last_updated: 2026-06-14
+decision: "Option 1 — full _data retirement (chosen by owner over the recommended Option 2)"
 ---
+
+> **DECISION (2026-06-14):** Owner chose **Option 1 — full `_data` retirement**,
+> accepting the larger scope/risk over the recommended bounded Option 2. Executed
+> incrementally (one reader at a time, each with a `_data` fallback) so the build
+> and every tool stay working at every commit; the `_data` write is removed LAST,
+> only after all readers are migrated and a stress campaign passes. Stage plan in
+> `plan.md` (Phase E).
 
 # ADR-004 Traffic store consolidation (the C3 deferral from ADR-003)
 

@@ -117,3 +117,37 @@ build green + targeted test before the next.
 - Each stage is one commit; `git revert <stage>` backs out a single stage.
 - Schema migrations (C2, possibly B1) are additive/idempotent; revert the code,
   the migration stays applied harmlessly.
+
+---
+
+# Plan — Full _data retirement (ADR-004, Option 1) — Phase E
+
+Strategy: make `http_traffic` a complete superset, build a cross-project UNION
+read layer, migrate readers ONE AT A TIME (each keeps a `_data` fallback behind a
+flag), and stop the `_data` write LAST. Build stays green at every commit.
+
+- [ ] **E1** Enrich `http_traffic`: add `fingerprint`, `generated_by`,
+      `global_seq` (cross-project ordering); write them in `LogTraffic`.
+      projectDB schema migration. (foundation)
+- [ ] **E2** Cross-project read layer: `unionTraffic(query)` — enumerate project
+      DBs, open read-only (reuse readDBCache), run + UNION + sort by global key,
+      inject `project`. The replacement for `SELECT FROM _data`.
+- [ ] **E3** Migrate `searchTraffic` to the union layer (fallback flag). Test.
+- [ ] **E4** Migrate `query` (HTTPQL) — recompile HTTPQL against http_traffic
+      schema via the union layer. Test. [largest]
+- [ ] **E5** Migrate `clusterResponses` + `findAnomalies` (uses E1 fingerprint). Test.
+- [ ] **E6** Migrate `authz` traffic read. Test.
+- [ ] **E7** Migrate `mirror` + `getRequestResponseFromID`: reconstruct raw from
+      `http_messages` (+ edited-variant handling). Test.
+- [ ] **E8** Migrate websocket linking, project-list aggregation, proxy index
+      counter. Test.
+- [ ] **E9** Stop the `_data` write (gate off) once all readers are migrated.
+      Full regression + stress pass.
+- [ ] **E10** Drop `_data`/`_req`/`_resp`/`_attached` (and friends) via migration;
+      reclaim disk. [destructive — last]
+
+## Phase F — serious stress campaign (after E)
+Goal: BREAK lorg, find failure modes. Concurrent capture (proxy + send + serval)
++ cross-project union reads under load + delete/archive under load + session
+churn + huge bodies + many projects (registry eviction) + sustained soak. Record
+every failure; iterate to fix.
