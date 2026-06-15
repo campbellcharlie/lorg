@@ -62,18 +62,17 @@ func (pm *ProxyManager) GetNextProxyID() string {
 	return utils.FormatNumericID(float64(idx), 15)
 }
 
-// initializeIndexFromDB queries the database to get the current max index
+// initializeIndexFromDB seeds the global index from the legacy _data table.
+// After ADR-004 _data may be dropped/retired; a missing table just means there's
+// no legacy index to resume from, so seed 0 rather than failing startup.
 func (pm *ProxyManager) initializeIndexFromDB(backend *Backend) error {
 	var count int
-	err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(REPLACE(id,'_','') AS INTEGER)), 0) FROM _data").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to query max row id: %w", err)
+	if err := backend.DB.QueryRow("SELECT COALESCE(MAX(CAST(REPLACE(id,'_','') AS INTEGER)), 0) FROM _data").Scan(&count); err != nil {
+		log.Printf("[ProxyManager] No legacy _data index (retired?): seeding 0 (%v)", err)
+		count = 0
 	}
-
 	pm.index.Store(uint64(count))
-
 	log.Printf("[ProxyManager] Global index initialized to %d (next will be %d)", count, count+1)
-
 	return nil
 }
 

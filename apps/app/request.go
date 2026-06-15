@@ -308,17 +308,17 @@ func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (
 		userdata.GeneratedBy = reqBody.GeneratedBy
 	}
 
-	// Save _attached record
-	log.Printf("[SaveRequestToBackend] Saving _attached record")
-	record := lorgdb.NewRecord("_attached")
-	record.Set("id", userdata.ID)
-	record.Set("labels", []string{})
-	record.Set("note", reqBody.Note)
-
-	err = backend.DB.SaveRecord(record)
-	if err != nil {
-		log.Printf("[SaveRequestToBackend] Error saving _attached record: %v", err)
-		return types.UserData{}, err
+	// Save _attached record (legacy _data subsystem — gated, ADR-004 E9).
+	if legacyDataEnabled() {
+		log.Printf("[SaveRequestToBackend] Saving _attached record")
+		record := lorgdb.NewRecord("_attached")
+		record.Set("id", userdata.ID)
+		record.Set("labels", []string{})
+		record.Set("note", reqBody.Note)
+		if err = backend.DB.SaveRecord(record); err != nil {
+			log.Printf("[SaveRequestToBackend] Error saving _attached record: %v", err)
+			return types.UserData{}, err
+		}
 	}
 
 	// Legacy _data / _req / _resp write (ADR-004 E9). When the gate is off, the

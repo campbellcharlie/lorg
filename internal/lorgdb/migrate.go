@@ -138,6 +138,21 @@ var Migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version:     8,
+		Description: "ADR-004 E10: drop the retired legacy traffic tables (_data/_req/_resp/...)",
+		Up: func(db *sql.DB) error {
+			// Traffic now lives in the per-project http_traffic / http_messages
+			// stores; the legacy global tables are no longer written or read.
+			// IF EXISTS keeps this idempotent and safe on partial schemas.
+			for _, t := range []string{"_data", "_req", "_resp", "_req_edited", "_resp_edited", "_attached", "_raw"} {
+				if _, err := db.Exec("DROP TABLE IF EXISTS " + t); err != nil {
+					return fmt.Errorf("drop %s: %w", t, err)
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // RunMigrations applies any unapplied migrations in order.
