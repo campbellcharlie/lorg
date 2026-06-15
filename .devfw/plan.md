@@ -139,16 +139,29 @@ flag), and stop the `_data` write LAST. Build stays green at every commit.
 - [x] **E8** generateWordlist, mapEndpoints, probeAuth, traffic-detail, project-list
       counts. — 83124fa, 4ccba25, ae0131c
 - [x] **STRESS** concurrent read/write campaign — found + fixed 3 bugs. — 1257f1d
-- [ ] **E9** Stop the `_data` write. NOT DONE — destructive: removes the _data/_req/
-      _resp writes from the proxy capture TRANSACTION (proxy_rawproxy.go) +
-      SaveRequestToBackend. Needs projectExport + websocket migrated first
-      (still read _data), then careful gated rollout + a no-_data stress pass.
-- [ ] **E10** Drop `_data`/`_req`/`_resp`/`_attached` via migration. NOT DONE —
-      irreversible; only after E9 soaks.
+- [x] **E9 (mechanism)** `legacyDataWrites` gate (default ON). SaveRequestToBackend's
+      _data/_req/_resp write is behind it; gate OFF ⇒ capture lives only in
+      http_traffic, served by every migrated reader. Validated by
+      TestLegacyDataWriteGate. — b0fea47
+- [ ] **E9 (full)** Gate the PROXY capture path's _data write too, then flip the
+      default OFF. Blocked on the sitemap subsystem below.
+- [ ] **E10** Drop `_data`/`_req`/`_resp`/`_attached` via migration. Irreversible,
+      OPTIONAL disk-reclaim — only after default-OFF soaks. Not auto-run.
 
-## Remaining _data readers (block E9)
-- projectExport (mcp_project.go) — reads _data to build an export DB.
-- mcp_websocket.go — links websocket messages via _data."index".
+## Remaining _data readers (block default-OFF)
+The sitemap / host-rows / traffic-list-UI subsystem still reads _data via per-host
+collections keyed to _data ids:
+- `host` tool `rows` action (mcp_tools.go) — per-host collection → _data.
+- traffic_list.go (UI) — http_traffic-preferred with a _data fallback.
+- proxy.go index counter (write-side) + the proxy capture _data write.
+- Intentional legacy fallbacks (mirror/extractor/traffic_detail) — harmless.
+
+## Done (read side): every agent-facing traffic reader is on the union layer
+searchTraffic (metadata+raw+regex), query (HTTPQL), clusterResponses, findAnomalies,
+authzTest, mirror, getRequestResponseFromID, getRawRequestResponse, diffResponses,
+extractor, generateWordlist, mapEndpoints, probeAuth, projectExport, websocket,
+traffic-detail. + composite-id byte resolution + a -race stress campaign that found
+and fixed 3 bugs.
 
 ## Phase F — serious stress campaign (after E)
 Goal: BREAK lorg, find failure modes. Concurrent capture (proxy + send + serval)
