@@ -321,88 +321,93 @@ func (backend *Backend) SaveRequestToBackend(reqBody types.AddRequestBodyType) (
 		return types.UserData{}, err
 	}
 
-	// Save _req record
-	log.Printf("[SaveRequestToBackend] Saving _req record")
-	reqRecord := lorgdb.NewRecord("_req")
-	reqRecord.Set("id", userdata.ID)
-	reqRecord.Set("method", userdata.ReqJson.Method)
-	reqRecord.Set("url", userdata.ReqJson.Url)
-	reqRecord.Set("path", userdata.ReqJson.Path)
-	reqRecord.Set("query", userdata.ReqJson.Query)
-	reqRecord.Set("fragment", userdata.ReqJson.Fragment)
-	reqRecord.Set("ext", userdata.ReqJson.Ext)
-	reqRecord.Set("has_cookies", userdata.ReqJson.HasCookies)
-	reqRecord.Set("length", userdata.ReqJson.Length)
-	reqRecord.Set("headers", userdata.ReqJson.Headers)
-	reqRecord.Set("raw", reqBody.Request)
+	// Legacy _data / _req / _resp write (ADR-004 E9). When the gate is off, the
+	// captured row lives only in the per-project http_traffic store (enqueued
+	// below), which every agent-facing read tool now serves.
+	if legacyDataEnabled() {
+		// Save _req record
+		log.Printf("[SaveRequestToBackend] Saving _req record")
+		reqRecord := lorgdb.NewRecord("_req")
+		reqRecord.Set("id", userdata.ID)
+		reqRecord.Set("method", userdata.ReqJson.Method)
+		reqRecord.Set("url", userdata.ReqJson.Url)
+		reqRecord.Set("path", userdata.ReqJson.Path)
+		reqRecord.Set("query", userdata.ReqJson.Query)
+		reqRecord.Set("fragment", userdata.ReqJson.Fragment)
+		reqRecord.Set("ext", userdata.ReqJson.Ext)
+		reqRecord.Set("has_cookies", userdata.ReqJson.HasCookies)
+		reqRecord.Set("length", userdata.ReqJson.Length)
+		reqRecord.Set("headers", userdata.ReqJson.Headers)
+		reqRecord.Set("raw", reqBody.Request)
 
-	err = backend.DB.SaveRecord(reqRecord)
-	if err != nil {
-		log.Printf("[SaveRequestToBackend] Error saving _req record: %v", err)
-		return types.UserData{}, err
-	}
-
-	// If response exists, save it to _resp collection
-	if reqBody.Response != "" {
-		log.Printf("[SaveRequestToBackend] Saving _resp record")
-		respRecord := lorgdb.NewRecord("_resp")
-		respRecord.Set("id", userdata.ID)
-		respRecord.Set("title", userdata.RespJson.Title)
-		respRecord.Set("mime", userdata.RespJson.Mime)
-		respRecord.Set("status", userdata.RespJson.Status)
-		respRecord.Set("length", userdata.RespJson.Length)
-		respRecord.Set("has_cookies", userdata.RespJson.HasCookies)
-		respRecord.Set("headers", userdata.RespJson.Headers)
-		respRecord.Set("raw", reqBody.Response)
-
-		err = backend.DB.SaveRecord(respRecord)
+		err = backend.DB.SaveRecord(reqRecord)
 		if err != nil {
-			log.Printf("[SaveRequestToBackend] Error saving _resp record: %v", err)
+			log.Printf("[SaveRequestToBackend] Error saving _req record: %v", err)
 			return types.UserData{}, err
 		}
-	}
 
-	// Save _data record
-	log.Printf("[SaveRequestToBackend] Saving _data record")
-	dataRecord := lorgdb.NewRecord("_data")
-	log.Printf("[SaveRequestToBackend] Loading userdata into _data record")
+		// If response exists, save it to _resp collection
+		if reqBody.Response != "" {
+			log.Printf("[SaveRequestToBackend] Saving _resp record")
+			respRecord := lorgdb.NewRecord("_resp")
+			respRecord.Set("id", userdata.ID)
+			respRecord.Set("title", userdata.RespJson.Title)
+			respRecord.Set("mime", userdata.RespJson.Mime)
+			respRecord.Set("status", userdata.RespJson.Status)
+			respRecord.Set("length", userdata.RespJson.Length)
+			respRecord.Set("has_cookies", userdata.RespJson.HasCookies)
+			respRecord.Set("headers", userdata.RespJson.Headers)
+			respRecord.Set("raw", reqBody.Response)
 
-	b, err := json.Marshal(userdata)
-	if err != nil {
-		log.Printf("[SaveRequestToBackend] Error marshaling userdata: %v", err)
-		return types.UserData{}, err
-	}
+			err = backend.DB.SaveRecord(respRecord)
+			if err != nil {
+				log.Printf("[SaveRequestToBackend] Error saving _resp record: %v", err)
+				return types.UserData{}, err
+			}
+		}
 
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		log.Printf("[SaveRequestToBackend] Error unmarshaling userdata: %v", err)
-		return types.UserData{}, err
-	}
+		// Save _data record
+		log.Printf("[SaveRequestToBackend] Saving _data record")
+		dataRecord := lorgdb.NewRecord("_data")
+		log.Printf("[SaveRequestToBackend] Loading userdata into _data record")
 
-	dataRecord.Load(m)
+		b, err := json.Marshal(userdata)
+		if err != nil {
+			log.Printf("[SaveRequestToBackend] Error marshaling userdata: %v", err)
+			return types.UserData{}, err
+		}
 
-	// Tag the project so project-scoped reads (query project:<id>) return this
-	// row. UserData carries no project, so set it explicitly after Load —
-	// mirroring the proxy's _data tag in proxy_rawproxy.go. Empty is the
-	// untagged default and leaves prior callers (REST add, repeater) unchanged.
-	dataRecord.Set("project", reqBody.Project)
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			log.Printf("[SaveRequestToBackend] Error unmarshaling userdata: %v", err)
+			return types.UserData{}, err
+		}
 
-	// Compute response fingerprint for clustering / anomaly tools — same
-	// scheme used by the proxy raw path so MCP-tool traffic and repeater
-	// traffic cluster together with proxy traffic.
-	if reqBody.Response != "" && userdata.RespJson.Status != 0 {
-		_, body := splitHTTPRaw(reqBody.Response)
-		fp := ComputeFingerprint(userdata.RespJson.Status, userdata.RespJson.Mime, []byte(body))
-		dataRecord.Set("fingerprint", fp)
-	}
+		dataRecord.Load(m)
 
-	err = backend.DB.SaveRecord(dataRecord)
-	if err != nil {
-		log.Printf("[SaveRequestToBackend] Error saving _data record: %v", err)
-		return types.UserData{}, err
-	}
+		// Tag the project so project-scoped reads (query project:<id>) return this
+		// row. UserData carries no project, so set it explicitly after Load —
+		// mirroring the proxy's _data tag in proxy_rawproxy.go. Empty is the
+		// untagged default and leaves prior callers (REST add, repeater) unchanged.
+		dataRecord.Set("project", reqBody.Project)
 
-	log.Printf("[SaveRequestToBackend] Successfully processed request for user ID: %s", userdata.ID)
+		// Compute response fingerprint for clustering / anomaly tools — same
+		// scheme used by the proxy raw path so MCP-tool traffic and repeater
+		// traffic cluster together with proxy traffic.
+		if reqBody.Response != "" && userdata.RespJson.Status != 0 {
+			_, body := splitHTTPRaw(reqBody.Response)
+			fp := ComputeFingerprint(userdata.RespJson.Status, userdata.RespJson.Mime, []byte(body))
+			dataRecord.Set("fingerprint", fp)
+		}
+
+		err = backend.DB.SaveRecord(dataRecord)
+		if err != nil {
+			log.Printf("[SaveRequestToBackend] Error saving _data record: %v", err)
+			return types.UserData{}, err
+		}
+
+		log.Printf("[SaveRequestToBackend] Successfully processed request for user ID: %s", userdata.ID)
+	} // end legacyDataEnabled()
 
 	// Handle sitemap
 	typ := "folder"
