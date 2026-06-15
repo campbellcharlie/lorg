@@ -77,31 +77,13 @@ func (backend *Backend) mapEndpointsHandler(ctx context.Context, request mcp.Cal
 		return mcp.NewToolResultError("backend database not initialized"), nil
 	}
 
-	hostPattern := "%" + strings.TrimSpace(args.Host) + "%"
-	whereProject := ""
-	queryParams := []any{hostPattern}
-	if args.Project != "" {
-		whereProject = " AND project = ?"
-		queryParams = append(queryParams, args.Project)
-	}
-
-	q := `
-		SELECT
-			COALESCE(json_extract(req_json,'$.method'),'') AS method,
-			COALESCE(json_extract(req_json,'$.path'),  '') AS path,
-			COALESCE(json_extract(resp_json,'$.status'),0) AS status,
-			fingerprint,
-			has_params
-		FROM _data
-		WHERE host LIKE ?` + whereProject + `
-		  AND has_resp = TRUE
-		ORDER BY "index" DESC`
-
-	rows, err := backend.DB.Query(q, queryParams...)
+	// Read across all project DBs via the union layer (ADR-004 E8); has_resp is
+	// approximated by status != 0, has_params by a non-empty query string.
+	urows, err := projectDB.unionTrafficRows(args.Project, "host LIKE ?",
+		[]any{"%" + strings.TrimSpace(args.Host) + "%"}, 0)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
-	defer rows.Close()
 
 	type aggKey struct{ method, template string }
 	type agg struct {
@@ -113,11 +95,11 @@ func (backend *Backend) mapEndpointsHandler(ctx context.Context, request mcp.Cal
 	}
 	buckets := make(map[aggKey]*agg)
 
-	for rows.Next() {
-		var method, path, fp string
-		var status int
-		var hasParams bool
-		if err := rows.Scan(&method, &path, &status, &fp, &hasParams); err != nil {
+	for _, r := range urows {
+		method, path, fp := r.Method, r.Path, r.Fingerprint
+		status := r.Status
+		hasParams := r.Query != ""
+		if status == 0 { // has_resp filter
 			continue
 		}
 		if method == "" || path == "" {
@@ -203,59 +185,39 @@ func (backend *Backend) probeAuthHandler(ctx context.Context, request mcp.CallTo
 		return mcp.NewToolResultError("backend database not initialized"), nil
 	}
 
-	hostPattern := "%" + strings.TrimSpace(args.Host) + "%"
-	whereProject := ""
-	authParams := []any{hostPattern}
-	if args.Project != "" {
-		whereProject = " AND d.project = ?"
-		authParams = append(authParams, args.Project)
-	}
-
-	// 1. Find requests that carried an auth-bearing credential. _data.req
-	//    holds a cross-reference ID, not the raw bytes, so we JOIN _req
-	//    to read the actual HTTP for header inspection.
-	authQ := `
-		SELECT d.id,
-		       COALESCE(json_extract(d.req_json,'$.method'),'') AS method,
-		       COALESCE(json_extract(d.req_json,'$.path'),  '') AS path,
-		       COALESCE(json_extract(d.resp_json,'$.status'),0) AS status,
-		       COALESCE(q.raw, '')                              AS raw
-		FROM _data d
-		LEFT JOIN _req q ON d.id = q.id
-		WHERE d.host LIKE ?` + whereProject + `
-		  AND d.has_resp = TRUE
-		ORDER BY d."index" DESC
-		LIMIT 2000`
-
-	rows, err := backend.DB.Query(authQ, authParams...)
+	// Read across all project DBs via the union layer (ADR-004 E8), capped.
+	urows, err := projectDB.unionTrafficRows(args.Project, "host LIKE ?",
+		[]any{"%" + strings.TrimSpace(args.Host) + "%"}, 2000)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("auth scan failed: %v", err)), nil
 	}
-	defer rows.Close()
 
+	// 1. Requests that carried an auth-bearing credential — reconstruct each raw
+	//    request from http_messages and inspect its headers.
 	type endpointKey struct{ method, path string }
 	authByEndpoint := map[endpointKey]authEndpoint{}
-
-	for rows.Next() {
-		var id, method, path, raw string
-		var status int
-		if err := rows.Scan(&id, &method, &path, &status, &raw); err != nil {
+	for _, r := range urows {
+		if r.Status == 0 { // has_resp filter
 			continue
 		}
-		mech := detectAuthMechanism(raw)
-		if mech == "" {
-			continue
-		}
-		key := endpointKey{method: strings.ToUpper(method), path: path}
+		key := endpointKey{method: strings.ToUpper(r.Method), path: r.Path}
 		if _, seen := authByEndpoint[key]; seen {
+			continue
+		}
+		rawReq, _, berr := projectDB.getTrafficBytes(r.Project, r.RequestID)
+		if berr != nil {
+			continue
+		}
+		mech := detectAuthMechanism(rawReq)
+		if mech == "" {
 			continue
 		}
 		authByEndpoint[key] = authEndpoint{
 			Method:        key.method,
 			Path:          key.path,
 			AuthMechanism: mech,
-			LastStatus:    status,
-			SampleID:      id,
+			LastStatus:    r.Status,
+			SampleID:      makeRowID(r.Project, r.RequestID),
 		}
 	}
 
@@ -270,36 +232,24 @@ func (backend *Backend) probeAuthHandler(ctx context.Context, request mcp.CallTo
 		return authList[i].Method < authList[j].Method
 	})
 
-	// 2. Find denial responses (401 / 403) — these mark known auth boundaries
-	//    even when our request capture didn't include the credential.
-	denialQ := `
-		SELECT
-			COALESCE(json_extract(resp_json,'$.status'),0) AS status,
-			COALESCE(json_extract(req_json,'$.method'),'') AS method,
-			COALESCE(json_extract(req_json,'$.path'),  '') AS path,
-			COUNT(*) AS cnt
-		FROM _data
-		WHERE host LIKE ?` + whereProject + `
-		  AND has_resp = TRUE
-		  AND json_extract(resp_json,'$.status') IN (401, 403)
-		GROUP BY status, method, path
-		ORDER BY cnt DESC
-		LIMIT ?`
-
-	denialParams := append(append([]any{}, authParams...), limit)
-	drows, err := backend.DB.Query(denialQ, denialParams...)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("denial scan failed: %v", err)), nil
+	// 2. Denial responses (401 / 403) from the same rows — known auth boundaries.
+	type dkey struct {
+		status       int
+		method, path string
 	}
-	defer drows.Close()
-
-	denials := make([]denialBucket, 0)
-	for drows.Next() {
-		var d denialBucket
-		if err := drows.Scan(&d.Status, &d.Method, &d.Path, &d.Count); err != nil {
-			continue
+	dcounts := map[dkey]int{}
+	for _, r := range urows {
+		if r.Status == 401 || r.Status == 403 {
+			dcounts[dkey{r.Status, r.Method, r.Path}]++
 		}
-		denials = append(denials, d)
+	}
+	denials := make([]denialBucket, 0, len(dcounts))
+	for k, cnt := range dcounts {
+		denials = append(denials, denialBucket{Status: k.status, Method: k.method, Path: k.path, Count: cnt})
+	}
+	sort.Slice(denials, func(i, j int) bool { return denials[i].Count > denials[j].Count })
+	if len(denials) > limit {
+		denials = denials[:limit]
 	}
 
 	// 3. Probe candidates: endpoints that DID succeed with auth — sending
