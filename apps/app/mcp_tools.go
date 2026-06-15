@@ -164,47 +164,42 @@ func (backend *Backend) versionHandler(ctx context.Context, request mcp.CallTool
 	return mcpJSONResult(result)
 }
 
+// rawBytesForID resolves the raw request/response for a row id (ADR-004 E7).
+// Composite ids (project:request_id) read from the project DB's http_messages;
+// legacy ids fall back to lorgdb _req/_resp. ok is false only when neither
+// resolves — so byte readers work the same whether the id came from a migrated
+// (union) reader or a legacy one.
+func (backend *Backend) rawBytesForID(id string) (rawReq, rawResp string, ok bool) {
+	if project, reqID, isComposite := parseRowID(id); isComposite {
+		if req, resp, err := projectDB.getTrafficBytes(project, reqID); err == nil {
+			return req, resp, req != "" || resp != ""
+		}
+	}
+	padded := utils.FormatStringID(id, 15)
+	if r, _ := backend.DB.FindRecordById("_req", padded); r != nil {
+		rawReq = r.GetString("raw")
+	}
+	if r, _ := backend.DB.FindRecordById("_resp", padded); r != nil {
+		rawResp = r.GetString("raw")
+	}
+	return rawReq, rawResp, rawReq != "" || rawResp != ""
+}
+
 func (backend *Backend) getRequestResponseFromIDHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var args GetRequestResponseArgs
 	if err := request.BindArguments(&args); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Composite id "project:request_id" (ADR-004) resolves from the project DB's
-	// http_messages; a legacy global id falls back to lorgdb _req/_resp.
-	if project, reqID, ok := parseRowID(args.ActiveID); ok {
-		rawReq, rawResp, err := projectDB.getTrafficBytes(project, reqID)
-		if err == nil {
-			return mcpJSONResult(map[string]any{
-				"id":       args.ActiveID,
-				"request":  rawReq,
-				"response": rawResp,
-			})
-		}
-		// fall through to the legacy path if the composite id didn't resolve
+	rawReq, rawResp, ok := backend.rawBytesForID(args.ActiveID)
+	if !ok {
+		return mcp.NewToolResultError(fmt.Sprintf("no record found for ID: %s", args.ActiveID)), nil
 	}
-
-	// Pad ID to 15 chars with leading underscores
-	id := utils.FormatStringID(args.ActiveID, 15)
-
-	reqRecord, _ := backend.DB.FindRecordById("_req", id)
-	respRecord, _ := backend.DB.FindRecordById("_resp", id)
-
-	if reqRecord == nil && respRecord == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("no record found for ID: %s", id)), nil
-	}
-
-	result := map[string]any{"id": id}
-
-	if reqRecord != nil {
-		result["request"] = reqRecord.GetString("raw")
-	}
-
-	if respRecord != nil {
-		result["response"] = respRecord.GetString("raw")
-	}
-
-	return mcpJSONResult(result)
+	return mcpJSONResult(map[string]any{
+		"id":       args.ActiveID,
+		"request":  rawReq,
+		"response": rawResp,
+	})
 }
 
 func (backend *Backend) hostPrintSitemapHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -806,22 +801,17 @@ func (backend *Backend) interceptGetRawHandler(ctx context.Context, request mcp.
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	result := map[string]any{"id": args.ID}
-
-	reqRecord, _ := backend.DB.FindRecordById("_req", args.ID)
-	if reqRecord != nil {
-		result["raw_request"] = reqRecord.GetString("raw")
-	}
-
-	respRecord, _ := backend.DB.FindRecordById("_resp", args.ID)
-	if respRecord != nil {
-		result["raw_response"] = respRecord.GetString("raw")
-	}
-
-	if reqRecord == nil && respRecord == nil {
+	rawReq, rawResp, ok := backend.rawBytesForID(args.ID)
+	if !ok {
 		return mcp.NewToolResultError(fmt.Sprintf("no request/response found for ID: %s", args.ID)), nil
 	}
-
+	result := map[string]any{"id": args.ID}
+	if rawReq != "" {
+		result["raw_request"] = rawReq
+	}
+	if rawResp != "" {
+		result["raw_response"] = rawResp
+	}
 	return mcpJSONResult(result)
 }
 
