@@ -22,6 +22,21 @@ npm run dev
 
 But please refrain from creating PRs for new features without first discussing the implementation details.
 
+### Versioning
+
+lorg uses **CalVer**: `YYYY.M.D`, where the number is the **release date** (e.g.
+`2026.6.14`). There is no SemVer major/minor — the version is purely "when was
+this cut."
+
+When a change ships a functional difference (new/changed behavior, a release,
+or a migration), bump the version in **both** places in the same commit:
+
+- `VERSION` — the canonical string (prefixed `v`, e.g. `v2026.6.14`).
+- `lrx/version/version.go` — the five constants (`CURRENT_*` and `RELEASED_*`).
+
+Keep the two in sync; a mismatch is a bug. Pure docs/typo commits don't need a
+bump. Set the date to the day the change is cut, not the day work started.
+
 ### AI Contributions
 
 Use of AI is recommended but make sure you know what code actually does.

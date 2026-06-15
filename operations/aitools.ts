@@ -28,7 +28,7 @@ export const toolsData: Record<string,
         description: 'Check if the lorg is active',
         parameters: z.object({}),
         inputExample: {},
-        outputExample: { active: true, version: '2026.3.9' },
+        outputExample: { active: true, version: '2026.6.14' },
     },
 
     // === Project / state ===

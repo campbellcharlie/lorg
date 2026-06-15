@@ -1,7 +1,14 @@
 # ADR-001: Per-Project SQLite + Shared LorgDB Split
 
 ## Status
-Accepted
+Accepted — **partially superseded by ADR-004 (full `_data` retirement)**.
+
+> Update (2026-06): traffic no longer lives in the per-project `_data` table.
+> All captured traffic moved to per-project `http_traffic` / `http_messages`, and
+> the legacy lorgdb `_data`/`_req`/`_resp` traffic tables were dropped. Sessions /
+> cookie jars are now **per-project** (not shared in LorgDB). The two-store split
+> below still holds in spirit (per-project traffic vs shared config), but the
+> table names and the "sessions are shared" detail are outdated.
 
 ## Context
 

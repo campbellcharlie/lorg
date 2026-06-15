@@ -9,9 +9,9 @@
 - **Intercepting Proxy** — HTTP/1.1, HTTP/2, WebSocket with TLS fingerprint mimicry (uTLS)
 - **MCP Tooling** — request sending, session management, JWT attacks, race conditions, GraphQL testing, scope enforcement, response analysis, and more (`/mcp/health` lists the live surface)
 - **Browser Integration** — CamoFox (anti-fingerprint Firefox) driven by `browser` / `browserInteract` / `browserExec` / `browserSec` for XSS verification, CSP bypass, and DOM-sink testing
-- **Per-Project SQLite DB** — all traffic logged in real-time to burp-mcp-enhanced compatible databases
+- **Per-Project SQLite DB** — all traffic logged in real-time to one SQLite DB per project (`http_traffic` / `http_messages`, burp-mcp-enhanced schema). Each project is a self-contained engagement; the agent can address any project per call without disturbing the UI's view
 - **Minimal Web UI** — traffic viewer, repeater, syntax highlighting, multiple color themes, resizable panes
-- **Session Management** — multiple named sessions with cookie jars, CSRF auto-capture/injection
+- **Per-Project Session Management** — each project keeps its own named sessions / cookie jars (CSRF auto-capture/injection), with explicit cross-project cookie copy
 - **No License Required** — fully open source, runs headless or with UI
 
 ## Quick Start
@@ -55,7 +55,7 @@ Add to your `.mcp.json`:
 | **Browser** | `browser`, `browserInteract`, `browserExec`, `browserSec` | CamoFox tabs, page interaction, JS exec, security/admin (auth + XSS + config) |
 | **Intercept** | `intercept` | toggle, list, getRaw, forward, drop |
 | **Hosts** | `host` | list, info, sitemap, rows, getNote, setNote, modifyLabels, modifyNotes |
-| **Session** | `session` | create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract |
+| **Session** | `session` | create, list, switch, delete, getHeaders, updateCookies, getCookies, setCookie, csrfExtract, copyCookies — per-project cookie jars (each project has its own); `copyCookies` moves selected cookies between project jars |
 | **JWT** | `jwt` | decode, forge, noneAttack, keyConfusion, bruteforce |
 | **Scope** | `scope` | load (YAML), check, checkMultiple, getRules, addRule, removeRule, reset |
 | **Templates** | `template` | register, send, sendBatch, sendSequence, list, delete |
@@ -65,7 +65,7 @@ Add to your `.mcp.json`:
 | **Response Analysis** | `responseAnalysis` | analyzeResponse/Variations/Keywords, extractRegex/JsonPath/Between, diffResponses/ById/Structural/Json |
 | **GraphQL** | `graphql` | introspect (with bypass techniques), buildQuery, suggestPayloads |
 | **OpenAPI** | `openapi` | import, listEndpoints, generateRequests |
-| **Project** | `project` | setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode |
+| **Project** | `project` | list, register, setActive, useProject, archive, unarchive, delete, autoArchive, setup, info, setName, export, setLogging, setRedactionMode, getRedactionMode — full project lifecycle; `useProject` sets a sticky per-connection default so addressed sends don't repeat `project:` |
 | **Proxy** | `proxyList`, `proxyStart`, `proxyStop`, `matchReplace` | Lifecycle + match/replace rules |
 | **Encoding** | `encode` | urlEncode, urlDecode, b64Encode, b64Decode, random |
 | **Wire / Streams** | `protobuf`, `websocket`, `sseClient`, `ja4`, `oob` | Protobuf decoding, WebSocket inspection, SSE client, JA4 fingerprints, OOB callback server |
@@ -78,10 +78,15 @@ Claude Code --> lorg MCP (port 8090) --> CamoFox (port 9377) --> Firefox
                        |
                        |-- lorg proxy (port 9090) <-- all HTTP traffic
                        |
-                       |-- lorgdb (SQLite) <-- per-tab traffic DB
-                       |
-                       '-- Project SQLite DB <-- burp-mcp-enhanced compatible
+                       '-- Per-Project SQLite DBs <-- one file per project
+                              (http_traffic + http_messages, burp-mcp-enhanced schema)
 ```
+
+All captured traffic lives in the per-project SQLite stores — each project (engagement)
+is one portable, independently-archivable file. Sends can be addressed to any project
+per call; reads (search / query / cluster / mirror / authz) union across project DBs.
+The lorgdb config DB still holds proxies, scope, match/replace, templates, and project
+metadata (the legacy global `_data`/`_req`/`_resp` traffic tables were retired).
 
 ## UI Themes
 
