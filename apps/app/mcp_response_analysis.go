@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/campbellcharlie/lorg/internal/utils"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -671,33 +670,22 @@ func (backend *Backend) compareTrafficByIdHandler(ctx context.Context, request m
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Pad IDs to 15 chars with leading underscores (same as getRequestResponseFromIDHandler)
-	id1 := utils.FormatStringID(args.ID1, 15)
-	id2 := utils.FormatStringID(args.ID2, 15)
-
-	// Fetch raw responses
-	respRec1, _ := backend.DB.FindRecordById("_resp", id1)
-	respRec2, _ := backend.DB.FindRecordById("_resp", id2)
-
-	if respRec1 == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("no response found for ID1: %s", id1)), nil
+	// Resolve raw bytes for both ids (composite project:request_id or legacy),
+	// ADR-004 E7.
+	req1Raw, rawResp1, ok1 := backend.rawBytesForID(args.ID1)
+	req2Raw, rawResp2, ok2 := backend.rawBytesForID(args.ID2)
+	if !ok1 || rawResp1 == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("no response found for ID1: %s", args.ID1)), nil
 	}
-	if respRec2 == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("no response found for ID2: %s", id2)), nil
+	if !ok2 || rawResp2 == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("no response found for ID2: %s", args.ID2)), nil
 	}
-
-	rawResp1 := respRec1.GetString("raw")
-	rawResp2 := respRec2.GetString("raw")
-
-	// Fetch raw requests for context
-	reqRec1, _ := backend.DB.FindRecordById("_req", id1)
-	reqRec2, _ := backend.DB.FindRecordById("_req", id2)
 
 	// Extract method and path from request lines for context
 	req1Method, req1Path := "", ""
 	req2Method, req2Path := "", ""
-	if reqRec1 != nil {
-		raw := reqRec1.GetString("raw")
+	if req1Raw != "" {
+		raw := req1Raw
 		if firstLine := strings.SplitN(raw, "\r\n", 2); len(firstLine) > 0 {
 			fields := strings.Fields(firstLine[0])
 			if len(fields) >= 2 {
@@ -706,8 +694,8 @@ func (backend *Backend) compareTrafficByIdHandler(ctx context.Context, request m
 			}
 		}
 	}
-	if reqRec2 != nil {
-		raw := reqRec2.GetString("raw")
+	if req2Raw != "" {
+		raw := req2Raw
 		if firstLine := strings.SplitN(raw, "\r\n", 2); len(firstLine) > 0 {
 			fields := strings.Fields(firstLine[0])
 			if len(fields) >= 2 {
