@@ -80,11 +80,21 @@ func (backend *Backend) ExtractData(host string, fields []string, outputFile str
 func extractFieldsFromRecord(backend *Backend, recordId string, fields []string) []string {
 	extracted := make([]string, 0)
 
-	// Fetch related records using the same ID (they share the same ID)
-	reqRecord, _ := backend.DB.FindRecordById("_req", recordId)
-	respRecord, _ := backend.DB.FindRecordById("_resp", recordId)
-	reqEditedRecord, _ := backend.DB.FindRecordById("_req_edited", recordId)
-	respEditedRecord, _ := backend.DB.FindRecordById("_resp_edited", recordId)
+	// Composite id project:request_id (ADR-004): synthesize req/resp records from
+	// http_messages. Edited variants don't exist per-project, so they stay nil.
+	var reqRecord, respRecord, reqEditedRecord, respEditedRecord *lorgdb.Record
+	if project, reqID, ok := parseRowID(recordId); ok {
+		rawReq, rawResp, _ := projectDB.getTrafficBytes(project, reqID)
+		reqRecord = lorgdb.NewRecord("_req")
+		reqRecord.Set("raw", rawReq)
+		respRecord = lorgdb.NewRecord("_resp")
+		respRecord.Set("raw", rawResp)
+	} else {
+		reqRecord, _ = backend.DB.FindRecordById("_req", recordId)
+		respRecord, _ = backend.DB.FindRecordById("_resp", recordId)
+		reqEditedRecord, _ = backend.DB.FindRecordById("_req_edited", recordId)
+		respEditedRecord, _ = backend.DB.FindRecordById("_resp_edited", recordId)
+	}
 
 	// Extract each requested field
 	for _, field := range fields {
