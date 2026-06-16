@@ -195,7 +195,9 @@ type ProjectDB struct {
 // maxWriteHandles caps the number of open addressed (non-Active) write handles.
 // A pentest agent juggles a handful of projects; this is a backstop against
 // unbounded growth, not a hot-path tuning knob. Eviction is FIFO (oldest-opened).
-const maxWriteHandles = 16
+// Raised to 32 (ADR-005) to accommodate many concurrent Serval push profiles,
+// each of which drains to its own project, without thrashing handle eviction.
+const maxWriteHandles = 32
 
 // Init opens the default TemporaryProject.db in dbDir.
 // If dbDir is empty, it defaults to the user's home directory.
