@@ -75,3 +75,38 @@ func validatePathContainment(basePath, userPath string) (string, error) {
 
 	return target, nil
 }
+
+// isSafeIdentifier reports whether s is a safe SQL identifier (table/column),
+// so it can be interpolated where bind parameters are not possible.
+func isSafeIdentifier(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i, r := range s {
+		ok := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (i > 0 && r >= '0' && r <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// isSafeOrderClause validates a comma-separated ORDER BY list: each term must be
+// a safe identifier with an optional ASC/DESC direction.
+func isSafeOrderClause(s string) bool {
+	for _, part := range strings.Split(s, ",") {
+		f := strings.Fields(strings.TrimSpace(part))
+		if len(f) == 0 || len(f) > 2 {
+			return false
+		}
+		if !isSafeIdentifier(f[0]) {
+			return false
+		}
+		if len(f) == 2 {
+			if d := strings.ToUpper(f[1]); d != "ASC" && d != "DESC" {
+				return false
+			}
+		}
+	}
+	return true
+}

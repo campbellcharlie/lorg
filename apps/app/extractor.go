@@ -23,6 +23,12 @@ func (backend *Backend) ExtractData(host string, fields []string, outputFile str
 
 	db := utils.ParseDatabaseName(host)
 
+	// SECURITY: outputFile is attacker-controlled; block path traversal so writes
+	// stay within the project folder (path.Join collapses ../ otherwise).
+	if cleanPath := filepath.Clean(outputFile); cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid outputFile: path traversal blocked")
+	}
+
 	log.Println("db: ", db)
 	log.Println("host: ", host)
 	log.Println("fields: ", fields)

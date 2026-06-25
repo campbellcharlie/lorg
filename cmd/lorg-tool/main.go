@@ -66,6 +66,8 @@ func main() {
 	go backend.CommandManager()
 
 	e := echo.New()
+	// SECURITY: real socket peer, not spoofable X-Forwarded-For (loopback gate).
+	e.IPExtractor = echo.ExtractIPDirect()
 
 	// Simple request logging middleware
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {

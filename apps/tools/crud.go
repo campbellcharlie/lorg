@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/labstack/echo/v4"
@@ -20,11 +21,19 @@ func (backend *Tools) registerCollectionCRUD(e *echo.Echo) {
 		filter := c.QueryParam("filter")
 		sort := c.QueryParam("sort")
 
+		// SECURITY: validate identifiers and reject raw filter (arbitrary WHERE) -> SQLi.
+		if !isSafeIdentifier(table) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid collection name")
+		}
+		if filter != "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "filter parameter is not supported")
+		}
+		if sort != "" && !isSafeOrderClause(sort) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid sort parameter")
+		}
+
 		where := "1=1"
 		var args []any
-		if filter != "" {
-			where = filter
-		}
 
 		var records []*lorgdb.Record
 		var err error
@@ -136,4 +145,37 @@ func (backend *Tools) registerCollectionCRUD(e *echo.Echo) {
 		}
 		return c.NoContent(http.StatusNoContent)
 	})
+}
+
+// isSafeIdentifier reports whether s is a safe SQL identifier.
+func isSafeIdentifier(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i, r := range s {
+		ok := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (i > 0 && r >= '0' && r <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// isSafeOrderClause validates a comma-separated ORDER BY list.
+func isSafeOrderClause(s string) bool {
+	for _, part := range strings.Split(s, ",") {
+		f := strings.Fields(strings.TrimSpace(part))
+		if len(f) == 0 || len(f) > 2 {
+			return false
+		}
+		if !isSafeIdentifier(f[0]) {
+			return false
+		}
+		if len(f) == 2 {
+			if d := strings.ToUpper(f[1]); d != "ASC" && d != "DESC" {
+				return false
+			}
+		}
+	}
+	return true
 }
