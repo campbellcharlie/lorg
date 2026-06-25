@@ -604,6 +604,9 @@ func parseStatusLine(responseBytes []byte) (int, string) {
 	return 0, firstLine
 }
 
+// maxDecompressedSize caps decompression output to bound decompression bombs (DoS).
+const maxDecompressedSize = 100 << 20 // 100 MiB
+
 // decompressBodyByEncoding decompresses the body based on Content-Encoding header
 func decompressBodyByEncoding(bodyBytes []byte, contentEncoding string) ([]byte, error) {
 	if len(bodyBytes) == 0 {
@@ -631,7 +634,7 @@ func decompressBodyByEncoding(bodyBytes []byte, contentEncoding string) ([]byte,
 		defer zlibReader.Close()
 		reader = zlibReader
 	case "zstd":
-		zstdReader, err := zstd.NewReader(bytes.NewReader(bodyBytes))
+		zstdReader, err := zstd.NewReader(bytes.NewReader(bodyBytes), zstd.WithDecoderMaxMemory(maxDecompressedSize))
 		if err != nil {
 			return bodyBytes, err
 		}
@@ -642,9 +645,13 @@ func decompressBodyByEncoding(bodyBytes []byte, contentEncoding string) ([]byte,
 		return bodyBytes, nil
 	}
 
-	decompressed, err := io.ReadAll(reader)
+	limited := io.LimitReader(reader, int64(maxDecompressedSize)+1)
+	decompressed, err := io.ReadAll(limited)
 	if err != nil {
 		return bodyBytes, err
+	}
+	if int64(len(decompressed)) > int64(maxDecompressedSize) {
+		return bodyBytes, fmt.Errorf("decompressed body exceeds %d byte cap", maxDecompressedSize)
 	}
 
 	return decompressed, nil

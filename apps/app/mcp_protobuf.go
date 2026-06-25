@@ -34,7 +34,16 @@ type protoField struct {
 	Value       any    `json:"value"`
 }
 
+const maxProtobufDepth = 64
+
 func decodeProtobuf(data []byte) ([]protoField, error) {
+	return decodeProtobufDepth(data, 0)
+}
+
+func decodeProtobufDepth(data []byte, depth int) ([]protoField, error) {
+	if depth > maxProtobufDepth {
+		return nil, fmt.Errorf("protobuf nesting exceeds max depth %d", maxProtobufDepth)
+	}
 	var fields []protoField
 	offset := 0
 
@@ -92,7 +101,7 @@ func decodeProtobuf(data []byte) ([]protoField, error) {
 			offset += int(length)
 
 			// Try to decode as nested message
-			nested, err := decodeProtobuf(payload)
+			nested, err := decodeProtobufDepth(payload, depth+1)
 			if err == nil && len(nested) > 0 && isLikelyMessage(nested) {
 				field.TypeName = "message"
 				field.Value = nested

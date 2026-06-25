@@ -118,11 +118,20 @@ func (backend *Backend) registerCollectionCRUD(e *echo.Echo) {
 		filter := c.QueryParam("filter")
 		sort := c.QueryParam("sort")
 
+		// SECURITY: these were string-interpolated into SQL. Validate identifiers and
+		// reject raw filter (arbitrary WHERE) to prevent SQL injection.
+		if !isSafeIdentifier(table) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid collection name")
+		}
+		if filter != "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "filter parameter is not supported")
+		}
+		if sort != "" && !isSafeOrderClause(sort) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid sort parameter")
+		}
+
 		where := "1=1"
 		var args []any
-		if filter != "" {
-			where = filter
-		}
 
 		var records []*lorgdb.Record
 		var err error

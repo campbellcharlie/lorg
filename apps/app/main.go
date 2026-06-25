@@ -41,6 +41,9 @@ func (backend *Backend) Serve() {
 
 	e := echo.New()
 	e.HideBanner = true
+	// SECURITY: derive client IP from the real socket peer, not spoofable
+	// X-Forwarded-For / X-Real-IP headers, so loopback-only auth gates hold.
+	e.IPExtractor = echo.ExtractIPDirect()
 
 	// Consistent JSON error shape: {"error": "message"}
 	setupErrorHandler(e)
