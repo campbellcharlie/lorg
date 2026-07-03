@@ -113,4 +113,3 @@ metadata (the legacy global `_data`/`_req`/`_resp` traffic tables were retired).
 
 ## Based On
 
-Originally forked from [grroxy](https://github.com/glitchedgitz/grroxy) by glitchedgitz.

@@ -1,8 +1,8 @@
-# Grroxy App API Documentation
+# lorg App API Documentation
 
 ## Overview
 
-This is the main Grroxy application API that provides comprehensive HTTP proxy, security testing, and request manipulation capabilities. All endpoints require authentication (admin or authenticated user) unless otherwise specified.
+This is the main lorg application API that provides comprehensive HTTP proxy, security testing, and request manipulation capabilities. All endpoints require authentication (admin or authenticated user) unless otherwise specified.
 
 **Base URL**: `http://{host}:{port}/api`
 
@@ -32,7 +32,7 @@ This is the main Grroxy application API that provides comprehensive HTTP proxy, 
 
 ## INFO
 
-Returns information about the running Grroxy App instance and important paths.
+Returns information about the running lorg App instance and important paths.
 
 ### Get Info
 
@@ -1329,4 +1329,4 @@ Captured traffic lives in the per-project SQLite stores (`http_traffic` /
 
 ## Version
 
-This documentation is for Grroxy App API v1.0
+This documentation is for lorg App API v1.0

@@ -537,7 +537,7 @@ log.Println("✅ Test completed successfully")
 
 **Fuzzer Updates:**
 
-- `grx/fuzzer/fuzzer.go` - Added atomic counters for progress tracking
+- `lrx/fuzzer/fuzzer.go` - Added atomic counters for progress tracking
 
 ---
 
