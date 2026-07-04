@@ -111,6 +111,10 @@ func (rt *UTLSRoundTripper) getClientHelloID() utls.ClientHelloID {
 
 // dialUTLS creates a uTLS connection with the specified ALPN protocols
 func (rt *UTLSRoundTripper) dialUTLS(ctx context.Context, network, addr string, alpnProtos []string) (*utls.UConn, error) {
+	if err := AuthorizeOutboundDial(ctx, "https", addr, "transport"); err != nil {
+		return nil, err
+	}
+
 	// Extract hostname for SNI
 	serverName := rt.serverName
 	if serverName == "" {
@@ -157,17 +161,15 @@ func (rt *UTLSRoundTripper) dialUTLS(ctx context.Context, network, addr string, 
 		return nil, fmt.Errorf("uTLS handshake failed for %s: %w", serverName, err)
 	}
 
-	// Cache JA4 fingerprint from the negotiated TLS parameters.
-	// utls.ConnectionState is its own type; convert relevant fields.
 	connState := utlsConn.ConnectionState()
-	fp := ComputeJA4(serverName, TLSStateSnapshot{
+	fp := ComputeTLSStateHash(serverName, TLSStateSnapshot{
 		Version:            connState.Version,
 		CipherSuite:        connState.CipherSuite,
 		NegotiatedProtocol: connState.NegotiatedProtocol,
 		ServerName:         connState.ServerName,
 		PeerCertificates:   connState.PeerCertificates,
 	})
-	CacheJA4(serverName, fp)
+	CacheTLSStateHash(serverName, fp)
 
 	return utlsConn, nil
 }

@@ -188,6 +188,10 @@ func MitmHTTPS(clientConn net.Conn, connectReq *http.Request, requestID string, 
 		MaxVersion:               tls.VersionTLS13,
 		PreferServerCipherSuites: true,
 	}
+	tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		CacheClientJA4(host, ComputeClientHelloJA4(host, hello))
+		return tlsConfig, nil
+	}
 
 	log.Printf("[MITM] requestID=%s Starting TLS server for %s (advertising h2, http/1.1)", requestID, host)
 

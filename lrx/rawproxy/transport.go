@@ -1,6 +1,7 @@
 package rawproxy
 
 import (
+	"context"
 	"crypto/tls"
 	"io"
 	"net"
@@ -18,10 +19,15 @@ var sharedHTTPTransport = &http.Transport{
 	IdleConnTimeout:       90 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 	ResponseHeaderTimeout: 30 * time.Second,
-	DialContext: (&net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}).DialContext,
+	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if err := AuthorizeOutboundDial(ctx, "http", addr, "transport"); err != nil {
+			return nil, err
+		}
+		return (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext(ctx, network, addr)
+	},
 }
 
 // GetTransportForHost returns an appropriate transport for the given scheme and host
@@ -73,8 +79,21 @@ func GetTransportForHostWithConfig(scheme, host string, config *Config) http.Rou
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
+	baseDialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	if customDialer != nil {
-		t.DialContext = customDialer.DialContext
+		t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if err := AuthorizeOutboundDial(ctx, "http", addr, "transport"); err != nil {
+				return nil, err
+			}
+			return customDialer.DialContext(ctx, network, addr)
+		}
+	} else {
+		t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if err := AuthorizeOutboundDial(ctx, "http", addr, "transport"); err != nil {
+				return nil, err
+			}
+			return baseDialer.DialContext(ctx, network, addr)
+		}
 	}
 	return t
 }

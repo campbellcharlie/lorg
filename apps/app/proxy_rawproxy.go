@@ -380,20 +380,17 @@ func (rp *RawProxyWrapper) onRequest(reqData *rawproxy.RequestData, req *http.Re
 		return req, nil
 	}
 
-	// Scope enforcement: if scope rules are loaded, check if this request is in scope
-	if includes, _ := scopeManager.GetRules(); len(includes) > 0 {
-		fullURL := req.URL.String()
-		if fullURL == "" || !strings.Contains(fullURL, "://") {
-			scheme := "http"
-			if req.TLS != nil {
-				scheme = "https"
-			}
-			fullURL = scheme + "://" + req.Host + req.URL.RequestURI()
+	fullURL := req.URL.String()
+	if fullURL == "" || !strings.Contains(fullURL, "://") {
+		scheme := "http"
+		if req.TLS != nil {
+			scheme = "https"
 		}
-		if inScope, _ := scopeManager.IsInScope(fullURL); !inScope {
-			log.Printf("[RawProxy][SCOPE] Dropping out-of-scope request: %s", fullURL)
-			return req, fmt.Errorf("request blocked: URL is out of scope")
-		}
+		fullURL = scheme + "://" + req.Host + req.URL.RequestURI()
+	}
+	if err := scopeManager.EnforceSend(fullURL); err != nil {
+		log.Printf("[RawProxy][SCOPE] Dropping out-of-scope request: %s (%v)", fullURL, err)
+		return req, err
 	}
 
 	// Track total requests

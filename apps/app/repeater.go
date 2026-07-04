@@ -35,6 +35,10 @@ type RepeaterSendResponse struct {
 
 // sendRepeaterLogic contains the core logic for sending a raw HTTP request and saving to backend.
 func (backend *Backend) sendRepeaterLogic(reqData *RepeaterSendRequest) (*RepeaterSendResponse, error) {
+	if err := enforceOutboundURL(outboundURLFromParts(reqData.TLS, reqData.Host, reqData.Port, reqData.Request)); err != nil {
+		return nil, err
+	}
+
 	timeout := time.Duration(reqData.Timeout) * time.Second
 	respString, timeTaken, err := SendRawHTTPRequest(
 		reqData.Host,

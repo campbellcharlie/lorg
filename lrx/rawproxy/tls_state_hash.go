@@ -10,26 +10,23 @@ import (
 	"sync"
 )
 
-// ja4Cache stores computed JA4 fingerprints keyed by host.
-var ja4Cache sync.Map // map[string]JA4Fingerprint
+// tlsStateHashCache stores computed TLS state hashes keyed by host.
+var tlsStateHashCache sync.Map // map[string]TLSStateHash
 
-// JA4Fingerprint holds computed JA4+ fingerprint data derived from the
+// TLSStateHash holds a post-handshake state hash derived from the
 // server-side TLS connection state observed after a uTLS handshake.
-type JA4Fingerprint struct {
+type TLSStateHash struct {
 	Host        string `json:"host"`
-	JA4         string `json:"ja4"`
+	StateHash   string `json:"stateHash"`
 	TLSVersion  string `json:"tlsVersion"`
 	CipherSuite string `json:"cipherSuite"`
 	ALPN        string `json:"alpn"`
 	ServerName  string `json:"serverName"`
 }
 
-// ComputeJA4 builds a JA4-style fingerprint from a TLS connection state.
-// This captures the server-selected parameters (version, cipher, ALPN) plus
-// peer certificate metadata. Full client-hello JA4 would require parsing the
-// raw ClientHello which is handled internally by uTLS.
-func ComputeJA4(host string, state TLSStateSnapshot) JA4Fingerprint {
-	fp := JA4Fingerprint{
+// ComputeTLSStateHash builds a deterministic hash from a TLS connection state.
+func ComputeTLSStateHash(host string, state TLSStateSnapshot) TLSStateHash {
+	fp := TLSStateHash{
 		Host:       host,
 		ServerName: state.ServerName,
 		ALPN:       state.NegotiatedProtocol,
@@ -74,13 +71,13 @@ func ComputeJA4(host string, state TLSStateSnapshot) JA4Fingerprint {
 
 	raw := strings.Join(components, "_")
 	hash := sha256.Sum256([]byte(raw))
-	fp.JA4 = fmt.Sprintf("%x", hash[:12]) // first 12 bytes = 24 hex chars
+	fp.StateHash = fmt.Sprintf("%x", hash[:12])
 
 	return fp
 }
 
 // TLSStateSnapshot is a minimal subset of TLS connection state fields needed
-// for JA4 computation. This avoids coupling to either crypto/tls or utls
+// for state-hash computation. This avoids coupling to either crypto/tls or utls
 // ConnectionState types directly.
 type TLSStateSnapshot struct {
 	Version            uint16
@@ -90,25 +87,25 @@ type TLSStateSnapshot struct {
 	PeerCertificates   []*x509.Certificate
 }
 
-// CacheJA4 stores a JA4 fingerprint for a host.
-func CacheJA4(host string, fp JA4Fingerprint) {
-	ja4Cache.Store(host, fp)
+// CacheTLSStateHash stores a TLS state hash for a host.
+func CacheTLSStateHash(host string, fp TLSStateHash) {
+	tlsStateHashCache.Store(host, fp)
 }
 
-// GetJA4 retrieves a cached JA4 fingerprint for a host.
-func GetJA4(host string) (JA4Fingerprint, bool) {
-	val, ok := ja4Cache.Load(host)
+// GetTLSStateHash retrieves a cached TLS state hash for a host.
+func GetTLSStateHash(host string) (TLSStateHash, bool) {
+	val, ok := tlsStateHashCache.Load(host)
 	if !ok {
-		return JA4Fingerprint{}, false
+		return TLSStateHash{}, false
 	}
-	return val.(JA4Fingerprint), true
+	return val.(TLSStateHash), true
 }
 
-// GetAllJA4 returns all cached JA4 fingerprints sorted by host.
-func GetAllJA4() []JA4Fingerprint {
-	var results []JA4Fingerprint
-	ja4Cache.Range(func(key, value any) bool {
-		results = append(results, value.(JA4Fingerprint))
+// GetAllTLSStateHash returns all cached TLS state hashes sorted by host.
+func GetAllTLSStateHash() []TLSStateHash {
+	var results []TLSStateHash
+	tlsStateHashCache.Range(func(key, value any) bool {
+		results = append(results, value.(TLSStateHash))
 		return true
 	})
 	sort.Slice(results, func(i, j int) bool {

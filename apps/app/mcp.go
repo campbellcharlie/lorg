@@ -183,7 +183,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("scope",
-			mcp.WithDescription("Manage scope rules for target URL filtering. Actions: load, check, checkMultiple, getRules, addRule, removeRule, reset"),
+			mcp.WithDescription("Manage fail-closed outbound scope rules. Actions: load, check, checkMultiple, getRules, addRule, removeRule, reset, setPolicy"),
 			mcp.WithInputSchema[ConsolidatedScopeArgs](),
 		),
 		backend.scopeHandler,
@@ -255,10 +255,18 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("ja4",
-			mcp.WithDescription("JA4+ TLS fingerprint lookup from proxy traffic. Actions: lookup (by host), list (all cached)"),
-			mcp.WithInputSchema[JA4Args](),
+			mcp.WithDescription("ClientHello JA4 lookup from proxy traffic. Actions: lookup (by host), list (all cached)"),
+			mcp.WithInputSchema[ClientJA4Args](),
 		),
 		backend.ja4Handler,
+	)
+
+	s.AddTool(
+		mcp.NewTool("lorg_tls_state_hash",
+			mcp.WithDescription("Post-handshake TLS state hash lookup from upstream traffic. Actions: lookup (by host), list (all cached)"),
+			mcp.WithInputSchema[TLSStateHashArgs](),
+		),
+		backend.tlsStateHashHandler,
 	)
 
 	s.AddTool(

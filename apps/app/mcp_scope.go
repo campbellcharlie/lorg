@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 
+	"github.com/campbellcharlie/lorg/lrx/rawproxy"
 	"github.com/mark3labs/mcp-go/mcp"
 	"gopkg.in/yaml.v2"
 )
@@ -25,12 +27,20 @@ type ScopeRule struct {
 	Reason   string `json:"reason,omitempty" yaml:"reason"` // why this rule exists
 }
 
+type ScopePolicy string
+
+const (
+	ScopePolicyDenyEmpty ScopePolicy = "deny_empty"
+	ScopePolicyAllowAll  ScopePolicy = "allow_all"
+)
+
 // ScopeManager holds include and exclude rules and provides thread-safe
 // scope-checking against parsed URLs.
 type ScopeManager struct {
 	mu       sync.RWMutex
 	includes []ScopeRule
 	excludes []ScopeRule
+	policy   ScopePolicy
 }
 
 // NewScopeManager returns an initialised ScopeManager with empty rule sets.
@@ -38,6 +48,7 @@ func NewScopeManager() *ScopeManager {
 	return &ScopeManager{
 		includes: make([]ScopeRule, 0),
 		excludes: make([]ScopeRule, 0),
+		policy:   ScopePolicyDenyEmpty,
 	}
 }
 
@@ -45,6 +56,29 @@ func NewScopeManager() *ScopeManager {
 // Package-level because action-dispatch handlers access it without Backend reference.
 // Thread-safe: ScopeManager uses an internal RWMutex for all operations.
 var scopeManager = NewScopeManager()
+
+func init() {
+	rawproxy.SetOutboundAuthorizer(func(ctx context.Context, in rawproxy.OutboundDecisionInput) error {
+		scheme := in.Scheme
+		if scheme == "" {
+			scheme = "http"
+		}
+		host := in.Host
+		if in.Port != "" {
+			host += ":" + in.Port
+		}
+		path := in.Path
+		if path == "" {
+			path = "/"
+		}
+		rawURL := scheme + "://" + host + path
+		err := scopeManager.EnforceSend(rawURL)
+		if err != nil {
+			projectDB.RecordScopeBlocked(in, err.Error())
+		}
+		return err
+	})
+}
 
 // ---------------------------------------------------------------------------
 // Host matching helper
@@ -55,6 +89,11 @@ var scopeManager = NewScopeManager()
 func matchHost(pattern, host string) bool {
 	if pattern == host {
 		return true
+	}
+	if prefix, err := netip.ParsePrefix(pattern); err == nil {
+		if addr, err := netip.ParseAddr(host); err == nil {
+			return prefix.Contains(addr)
+		}
 	}
 	// Simple glob: *.example.com matches sub.example.com
 	if strings.HasPrefix(pattern, "*.") {
@@ -145,6 +184,35 @@ func (sm *ScopeManager) IsInScope(rawURL string) (bool, string) {
 	return true, "in scope"
 }
 
+func (sm *ScopeManager) EnforceSend(rawURL string) error {
+	sm.mu.RLock()
+	policy := sm.policy
+	rules := len(sm.includes)
+	sm.mu.RUnlock()
+
+	if rules == 0 && policy == ScopePolicyAllowAll {
+		return nil
+	}
+
+	ok, reason := sm.IsInScope(rawURL)
+	if ok {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", rawproxy.ErrOutboundDenied, reason)
+}
+
+func (sm *ScopeManager) SetPolicy(policy ScopePolicy) error {
+	switch policy {
+	case ScopePolicyDenyEmpty, ScopePolicyAllowAll:
+	default:
+		return fmt.Errorf("unknown scope policy: %s", policy)
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.policy = policy
+	return nil
+}
+
 // AddRule appends a rule to the include or exclude list.
 func (sm *ScopeManager) AddRule(ruleType string, rule ScopeRule) {
 	sm.mu.Lock()
@@ -187,6 +255,7 @@ func (sm *ScopeManager) Reset() {
 
 	sm.includes = make([]ScopeRule, 0)
 	sm.excludes = make([]ScopeRule, 0)
+	sm.policy = ScopePolicyDenyEmpty
 }
 
 // GetRules returns defensive copies of the include and exclude rule slices.
@@ -201,6 +270,33 @@ func (sm *ScopeManager) GetRules() (includes []ScopeRule, excludes []ScopeRule) 
 	copy(exc, sm.excludes)
 
 	return inc, exc
+}
+
+func (sm *ScopeManager) Snapshot() scopeState {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	inc := make([]ScopeRule, len(sm.includes))
+	copy(inc, sm.includes)
+	exc := make([]ScopeRule, len(sm.excludes))
+	copy(exc, sm.excludes)
+	return scopeState{Includes: inc, Excludes: exc, Policy: sm.policy}
+}
+
+func (sm *ScopeManager) Restore(state scopeState) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.includes = append([]ScopeRule(nil), state.Includes...)
+	sm.excludes = append([]ScopeRule(nil), state.Excludes...)
+	if state.Policy == "" {
+		state.Policy = ScopePolicyDenyEmpty
+	}
+	sm.policy = state.Policy
+}
+
+type scopeState struct {
+	Includes []ScopeRule  `json:"includes"`
+	Excludes []ScopeRule  `json:"excludes"`
+	Policy   ScopePolicy  `json:"policy"`
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +384,10 @@ type ScopeResetArgs struct {
 	Confirm bool `json:"confirm" jsonschema:"required" jsonschema_description:"Must be true to confirm scope reset"`
 }
 
+func persistScopeState() {
+	_ = projectDB.SaveScopeState(scopeManager.Snapshot())
+}
+
 // ---------------------------------------------------------------------------
 // Tool handlers
 // ---------------------------------------------------------------------------
@@ -337,6 +437,7 @@ func (backend *Backend) scopeLoadHandler(ctx context.Context, request mcp.CallTo
 	}
 
 	includes, excludes := scopeManager.GetRules()
+	persistScopeState()
 
 	return mcpJSONResult(map[string]any{
 		"success":    true,
@@ -427,6 +528,7 @@ func (backend *Backend) scopeAddRuleHandler(ctx context.Context, request mcp.Cal
 	}
 
 	scopeManager.AddRule(args.Type, rule)
+	persistScopeState()
 
 	return mcpJSONResult(map[string]any{
 		"success": true,
@@ -448,6 +550,7 @@ func (backend *Backend) scopeRemoveRuleHandler(ctx context.Context, request mcp.
 	if err := scopeManager.RemoveRule(args.Type, args.Index); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	persistScopeState()
 
 	return mcpJSONResult(map[string]any{
 		"success":      true,
@@ -467,6 +570,7 @@ func (backend *Backend) scopeResetHandler(ctx context.Context, request mcp.CallT
 	}
 
 	scopeManager.Reset()
+	persistScopeState()
 
 	return mcpJSONResult(map[string]any{
 		"success": true,

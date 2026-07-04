@@ -9,7 +9,7 @@ import (
 
 func LaunchBrowser(browserType string, proxyAddress string, customCertPath string, profileDir string, startURL string) (*exec.Cmd, error) {
 	if browserType == "" {
-		browserType = "firefox" // Default to Firefox (CamoFox is the supported pentest browser)
+		browserType = "firefox" // Default to the local proxy-attached Firefox launched here; the CamoFox pentest browser is driven separately via the browser* MCP tools (apps/app/mcp_browser.go).
 	}
 
 	browserType = strings.ToLower(browserType)

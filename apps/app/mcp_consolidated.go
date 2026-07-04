@@ -243,6 +243,7 @@ type ConsolidatedScopeArgs struct {
 	Reason   string   `json:"reason,omitempty" jsonschema_description:"Reason for rule (addRule)"`
 	Index    int      `json:"index,omitempty" jsonschema_description:"Rule index to remove (removeRule)"`
 	Confirm  bool     `json:"confirm,omitempty" jsonschema_description:"Must be true to confirm (reset)"`
+	Policy   string   `json:"policy,omitempty" jsonschema_description:"deny_empty or allow_all (setPolicy)"`
 }
 
 func (backend *Backend) scopeHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -283,6 +284,7 @@ func (backend *Backend) scopeHandler(ctx context.Context, request mcp.CallToolRe
 		}
 
 		scopeManager.AddRule(args.RuleType, rule)
+		persistScopeState()
 
 		return mcpJSONResult(map[string]any{
 			"success": true,
@@ -300,6 +302,7 @@ func (backend *Backend) scopeHandler(ctx context.Context, request mcp.CallToolRe
 		if err := scopeManager.RemoveRule(args.RuleType, args.Index); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		persistScopeState()
 
 		return mcpJSONResult(map[string]any{
 			"success":      true,
@@ -311,8 +314,21 @@ func (backend *Backend) scopeHandler(ctx context.Context, request mcp.CallToolRe
 		// Delegate: ScopeResetArgs uses json:"confirm" -- matches.
 		return backend.scopeResetHandler(ctx, request)
 
+	case "setPolicy":
+		if args.Policy == string(ScopePolicyAllowAll) && !args.Confirm {
+			return mcp.NewToolResultError("confirm must be true to set allow_all"), nil
+		}
+		if err := scopeManager.SetPolicy(ScopePolicy(args.Policy)); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		persistScopeState()
+		return mcpJSONResult(map[string]any{
+			"success": true,
+			"policy":  args.Policy,
+		})
+
 	default:
-		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: load, check, checkMultiple, getRules, addRule, removeRule, reset"), nil
+		return mcp.NewToolResultError("unknown action: " + args.Action + ". Valid: load, check, checkMultiple, getRules, addRule, removeRule, reset, setPolicy"), nil
 	}
 }
 

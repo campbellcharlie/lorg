@@ -18,6 +18,7 @@ import (
 
 	"github.com/campbellcharlie/lorg/internal/lorgdb"
 	"github.com/campbellcharlie/lorg/internal/types"
+	"github.com/campbellcharlie/lorg/lrx/rawproxy"
 	"github.com/mark3labs/mcp-go/mcp"
 	_ "modernc.org/sqlite"
 )
@@ -301,11 +302,16 @@ func (p *ProjectDB) openLocked(name string) error {
 		db.Close()
 		return fmt.Errorf("projectDB: schema init failed: %w", err)
 	}
+	if err := ensureScopeSchema(db); err != nil {
+		db.Close()
+		return fmt.Errorf("projectDB: scope schema init failed: %w", err)
+	}
 
 	p.db = db
 	p.name = sanitized
 	p.dbPath = dbFile
 	p.ready = true
+	scopeManager.Restore(p.loadScopeStateLocked())
 
 	status := "opened existing"
 	if isNew {
@@ -313,6 +319,93 @@ func (p *ProjectDB) openLocked(name string) error {
 	}
 	log.Printf("[ProjectDB] %s database: %s", status, dbFile)
 	return nil
+}
+
+func ensureScopeSchema(db *sql.DB) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS scope_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)`,
+		`CREATE TABLE IF NOT EXISTS scope_blocked_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    tool TEXT,
+    scheme TEXT,
+    host TEXT,
+    port TEXT,
+    path TEXT,
+    reason TEXT NOT NULL
+)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *ProjectDB) SaveScopeState(state scopeState) error {
+	p.mu.RLock()
+	db := p.db
+	ready := p.ready
+	p.mu.RUnlock()
+	if !ready || db == nil {
+		return nil
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(
+		`INSERT INTO scope_state (id, data, updated_at) VALUES (1, ?, ?)
+ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`,
+		string(data),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	return err
+}
+
+func (p *ProjectDB) loadScopeStateLocked() scopeState {
+	if p.db == nil {
+		return scopeState{Policy: ScopePolicyDenyEmpty}
+	}
+	var data string
+	err := p.db.QueryRow(`SELECT data FROM scope_state WHERE id = 1`).Scan(&data)
+	if err != nil {
+		return scopeState{Policy: ScopePolicyDenyEmpty}
+	}
+	var state scopeState
+	if json.Unmarshal([]byte(data), &state) != nil {
+		return scopeState{Policy: ScopePolicyDenyEmpty}
+	}
+	if state.Policy == "" {
+		state.Policy = ScopePolicyDenyEmpty
+	}
+	return state
+}
+
+func (p *ProjectDB) RecordScopeBlocked(in rawproxy.OutboundDecisionInput, reason string) {
+	p.mu.RLock()
+	db := p.db
+	ready := p.ready
+	p.mu.RUnlock()
+	if !ready || db == nil {
+		return
+	}
+	_, _ = db.Exec(
+		`INSERT INTO scope_blocked_attempts (timestamp, tool, scheme, host, port, path, reason)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		in.Tool,
+		in.Scheme,
+		in.Host,
+		in.Port,
+		in.Path,
+		reason,
+	)
 }
 
 // initProjectSchema creates the burp-mcp-enhanced schema tables if they do not
