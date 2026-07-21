@@ -241,6 +241,14 @@ func (backend *Backend) mcpInit() {
 	)
 
 	s.AddTool(
+		mcp.NewTool("desyncProbe",
+			mcp.WithDescription("Detect HTTP/1.1 request-smuggling (desync) via a timeout-differential oracle: sends an attack + control probe pair and reports vulnerable=true only when the attack read hangs while the control returns normally. Techniques: CL.TE (default), TE.CL. Requires a raw byte path — targets the origin directly."),
+			mcp.WithInputSchema[DesyncProbeArgs](),
+		),
+		backend.desyncProbeHandler,
+	)
+
+	s.AddTool(
 		mcp.NewTool("graphql",
 			mcp.WithDescription("GraphQL security testing. Actions: introspect (with bypass techniques), buildQuery, suggestPayloads"),
 			mcp.WithInputSchema[ConsolidatedGraphqlArgs](),

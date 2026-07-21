@@ -9,7 +9,7 @@ import (
 // expectedToolCount is the number of tools registered via s.AddTool( in
 // mcp.go. It is asserted against the source so accidental additions or
 // removals of tool registrations are caught in review rather than at runtime.
-const expectedToolCount = 43
+const expectedToolCount = 44
 
 func TestRegisteredToolCountMatchesConstant(t *testing.T) {
 	src, err := os.ReadFile("mcp.go")
