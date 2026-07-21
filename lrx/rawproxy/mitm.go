@@ -302,7 +302,15 @@ func (h *mitmHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	upstreamReq := processedRequest.Clone(context.Background())
 	upstreamReq.URL.Scheme = "https"
 	upstreamReq.URL.Host = h.connectHost
-	upstreamReq.Host = h.host
+	// Preserve the client's original Host header verbatim. h.host is the CONNECT
+	// authority with the port stripped (mitm.go: host[:i]), so overwriting Host
+	// with it drops the port for endpoints on non-standard ports — the client
+	// sends "host:8443" but upstream then receives "Host: host", which strict
+	// gateways reject (e.g. 422). The cloned request already carries the correct
+	// Host; only fall back to the (port-bearing) connect authority if it's empty.
+	if upstreamReq.Host == "" {
+		upstreamReq.Host = h.connectHost
+	}
 	upstreamReq.RequestURI = ""
 	upstreamReq.Body = io.NopCloser(bytes.NewReader(body))
 
