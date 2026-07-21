@@ -22,6 +22,10 @@ type TLSStateHash struct {
 	CipherSuite string `json:"cipherSuite"`
 	ALPN        string `json:"alpn"`
 	ServerName  string `json:"serverName"`
+	// JA4X is the spec FoxIO x509 fingerprint of the leaf cert (issuer/subject/
+	// extension OID hashes). Distinct from StateHash above, which is lorg's own
+	// ad-hoc version_alpn_cipher+CN/SAN identity signal (NOT spec JA4S).
+	JA4X string `json:"ja4x,omitempty"`
 }
 
 // ComputeTLSStateHash builds a deterministic hash from a TLS connection state.
@@ -59,6 +63,7 @@ func ComputeTLSStateHash(host string, state TLSStateSnapshot) TLSStateHash {
 	// Add peer certificate info if available
 	if len(state.PeerCertificates) > 0 {
 		cert := state.PeerCertificates[0]
+		fp.JA4X = ComputeJA4X(cert)
 		components = append(components, cert.Subject.CommonName)
 		// Add SANs sorted for deterministic hashing
 		sans := make([]string, len(cert.DNSNames))

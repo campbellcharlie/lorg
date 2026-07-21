@@ -32,9 +32,10 @@ type SendRawTcpArgs struct {
 }
 
 type SendRawTlsArgs struct {
-	Host               string       `json:"host" jsonschema:"required" jsonschema_description:"Target hostname"`
+	Host               string       `json:"host" jsonschema:"required" jsonschema_description:"Target hostname (also the TLS SNI unless serverName overrides it)"`
 	Port               int          `json:"port" jsonschema:"required" jsonschema_description:"Target port"`
 	Segments           []RawSegment `json:"segments" jsonschema:"required" jsonschema_description:"Data segments to send"`
+	ServerName         string       `json:"serverName,omitempty" jsonschema_description:"TLS SNI override, independent of host. Set to a different value than the Host header inside the request to test SNI-vs-Host routing divergence (SNI-based frontend routing vs Host-based backend routing). Defaults to host when empty."`
 	AlpnProtocols      []string     `json:"alpnProtocols,omitempty" jsonschema_description:"ALPN protocols (e.g. h2, http/1.1)"`
 	InsecureSkipVerify bool         `json:"insecureSkipVerify" jsonschema:"required" jsonschema_description:"Skip TLS certificate verification"`
 	ConnectTimeoutMs   int          `json:"connectTimeoutMs" jsonschema:"required" jsonschema_description:"Connection timeout in ms"`
@@ -177,9 +178,13 @@ func (backend *Backend) sendRawTlsHandler(ctx context.Context, request mcp.CallT
 	connectTimeout := time.Duration(args.ConnectTimeoutMs) * time.Millisecond
 	readTimeout := time.Duration(args.ReadTimeoutMs) * time.Millisecond
 
+	sni := args.ServerName
+	if sni == "" {
+		sni = args.Host
+	}
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: args.InsecureSkipVerify,
-		ServerName:         args.Host,
+		ServerName:         sni,
 	}
 	if len(args.AlpnProtocols) > 0 {
 		tlsConfig.NextProtos = args.AlpnProtocols
