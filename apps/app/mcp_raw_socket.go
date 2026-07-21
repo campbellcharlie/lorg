@@ -63,13 +63,27 @@ type SendHttp2SequenceArgs struct {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// readResponse reads up to maxBytes from a connection within the given timeout.
-// It returns whatever data was read, swallowing EOF and timeout errors since
-// partial reads are expected for raw socket operations.
-func readResponse(conn net.Conn, readTimeout time.Duration, maxBytes int) ([]byte, error) {
+// readResult captures a raw read outcome, including whether the read hit its
+// deadline. timedOut is the load-bearing signal for a timeout-differential
+// desync oracle: an attack payload that hangs the socket (timedOut) paired with
+// a control payload that returns normally (!timedOut) is what distinguishes a
+// real request-smuggling desync from a server that simply hangs on everything.
+type readResult struct {
+	data     []byte
+	timedOut bool
+	elapsed  time.Duration
+}
+
+// readResponseTimed reads up to maxBytes within the given timeout, reporting
+// whether the read hit its deadline and how long it took. Partial reads are
+// expected for raw socket operations, so EOF is not an error; a deadline hit is
+// surfaced via timedOut rather than swallowed.
+func readResponseTimed(conn net.Conn, readTimeout time.Duration, maxBytes int) readResult {
+	start := time.Now()
 	conn.SetReadDeadline(time.Now().Add(readTimeout))
 	buf := make([]byte, 4096)
 	var response []byte
+	var timedOut bool
 
 	for {
 		n, err := conn.Read(buf)
@@ -81,11 +95,21 @@ func readResponse(conn net.Conn, readTimeout time.Duration, maxBytes int) ([]byt
 			break
 		}
 		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				timedOut = true
+			}
 			break // EOF, timeout, or error
 		}
 	}
 
-	return response, nil
+	return readResult{data: response, timedOut: timedOut, elapsed: time.Since(start)}
+}
+
+// readResponse preserves the original signature for callers that don't need the
+// timing/timeout signal. It never returns a non-nil error (partial reads are
+// expected); use readResponseTimed when the deadline outcome matters.
+func readResponse(conn net.Conn, readTimeout time.Duration, maxBytes int) ([]byte, error) {
+	return readResponseTimed(conn, readTimeout, maxBytes).data, nil
 }
 
 // toPreview converts raw bytes to a printable UTF-8 string, replacing
@@ -154,16 +178,16 @@ func (backend *Backend) sendRawTcpHandler(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	response, err := readResponse(conn, readTimeout, args.MaxReadBytes)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("read failed: %v", err)), nil
-	}
+	read := readResponseTimed(conn, readTimeout, args.MaxReadBytes)
+	response := read.data
 
 	return mcpJSONResult(map[string]any{
 		"responseBase64":  base64.StdEncoding.EncodeToString(response),
 		"responsePreview": toPreview(response, args.PreviewBytes),
 		"bytesRead":       len(response),
 		"bytesSent":       totalSent,
+		"timedOut":        read.timedOut,
+		"readMs":          read.elapsed.Milliseconds(),
 	})
 }
 
@@ -197,10 +221,8 @@ func (backend *Backend) sendRawTlsHandler(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	response, err := readResponse(conn, readTimeout, args.MaxReadBytes)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("read failed: %v", err)), nil
-	}
+	read := readResponseTimed(conn, readTimeout, args.MaxReadBytes)
+	response := read.data
 
 	negotiatedProtocol := conn.ConnectionState().NegotiatedProtocol
 
@@ -210,6 +232,8 @@ func (backend *Backend) sendRawTlsHandler(ctx context.Context, request mcp.CallT
 		"bytesRead":          len(response),
 		"bytesSent":          totalSent,
 		"negotiatedProtocol": negotiatedProtocol,
+		"timedOut":           read.timedOut,
+		"readMs":             read.elapsed.Milliseconds(),
 	})
 }
 

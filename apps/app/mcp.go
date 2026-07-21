@@ -58,6 +58,9 @@ func (backend *Backend) mcpInit() {
 		version.CURRENT_BACKEND_VERSION,
 		mcpserver.WithToolCapabilities(true),
 		mcpserver.WithInstructions(lorgMCPInstructions),
+		// Single place lorg gets per-tool-call telemetry; applies to every
+		// registered tool. See mcp_observability.go.
+		mcpserver.WithToolHandlerMiddleware(mcpObservability),
 	)
 
 	// =====================================================================
