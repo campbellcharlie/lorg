@@ -243,6 +243,9 @@ func generateResponseForUserData(userdata *types.UserData, response string) {
 func (backend *Backend) AddRequest(e *echo.Echo) {
 	log.Println("[AddRequest] Registering /api/request/add route")
 	e.POST("/api/request/add", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 		log.Println("[AddRequest] Handler called")
 		var body types.AddRequestBodyType
 		if err := c.Bind(&body); err != nil {

@@ -10,6 +10,9 @@ import (
 
 func (backend *Backend) SearchRegex(e *echo.Echo) {
 	e.POST("/api/regex", func(c echo.Context) error {
+		if err := requireLocalhost(c); err != nil {
+			return err
+		}
 
 		var data map[string]interface{}
 		if err := c.Bind(&data); err != nil {
