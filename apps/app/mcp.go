@@ -242,7 +242,7 @@ func (backend *Backend) mcpInit() {
 
 	s.AddTool(
 		mcp.NewTool("desyncProbe",
-			mcp.WithDescription("Detect HTTP/1.1 request-smuggling (desync) via a timeout-differential oracle: sends an attack + control probe pair and reports vulnerable=true only when the attack read hangs while the control returns normally. Techniques: CL.TE (default), TE.CL. Requires a raw byte path — targets the origin directly."),
+			mcp.WithDescription("Probe HTTP/1.1 request-smuggling (desync) with an attack+control probe pair (CL.TE default, or TE.CL). Returns raw wire OBSERVATIONS — attackTimedOut/attackComplete, controlTimedOut/controlComplete, timings — as ground truth, plus an ADVISORY `vulnerable` hint (attack hangs without completing while control returns normally). Timing is a probable signal, not confirmation: base a finding on the observations and confirm out-of-band; treat `vulnerable` as advisory. Targets the origin directly over a raw byte path."),
 			mcp.WithInputSchema[DesyncProbeArgs](),
 		),
 		backend.desyncProbeHandler,

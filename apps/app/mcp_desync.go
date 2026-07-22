@@ -106,9 +106,16 @@ func desyncOracle(attack, control readResult) (vulnerable bool, reason string) {
 	}
 }
 
+// desyncProbeResult reports both the raw wire OBSERVATIONS (attackTimedOut,
+// attackComplete, controlTimedOut, controlComplete, timings) and an advisory
+// verdict derived from them. The observations are lorg's ground truth — an
+// AI/fiach finding should be based on them and may override `vulnerable`, which
+// is only a convenience hint from the single timeout-differential heuristic
+// (timing is a probable signal; PortSwigger treats a differential *response* as
+// the real confirmation, which lorg does not attempt here).
 type desyncProbeResult struct {
 	Technique       string `json:"technique"`
-	Vulnerable      bool   `json:"vulnerable"`
+	Vulnerable      bool   `json:"vulnerable"` // advisory hint only; confirm via the observations below
 	Reason          string `json:"reason"`
 	AttackTimedOut  bool   `json:"attackTimedOut"`
 	AttackComplete  bool   `json:"attackComplete"`
