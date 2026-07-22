@@ -655,6 +655,7 @@ type ConsolidatedSendRawArgs struct {
 	Host               string              `json:"host,omitempty" jsonschema_description:"Target hostname"`
 	Port               int                 `json:"port,omitempty" jsonschema_description:"Target port"`
 	Segments           []RawSegment        `json:"segments,omitempty" jsonschema_description:"Data segments to send in order (tcp, tls)"`
+	ServerName         string              `json:"serverName,omitempty" jsonschema_description:"TLS SNI override, independent of host (tls). Set different from the Host header inside the request to test SNI-vs-Host routing divergence. Defaults to host when empty."`
 	ConnectTimeoutMs   int                 `json:"connectTimeoutMs,omitempty" jsonschema_description:"Connection timeout in ms"`
 	ReadTimeoutMs      int                 `json:"readTimeoutMs,omitempty" jsonschema_description:"Read timeout in ms"`
 	MaxReadBytes       int                 `json:"maxReadBytes,omitempty" jsonschema_description:"Maximum bytes to read from response"`
