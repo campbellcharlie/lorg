@@ -165,14 +165,22 @@ func parsePrivateKeyPEM(keyPEM []byte) (any, error) {
 	return nil, fmt.Errorf("unsupported private key PEM")
 }
 
+// hostFromAuthority returns the host portion of a CONNECT authority, stripping
+// the port via net.SplitHostPort so bracketed IPv6 ("[::1]:8443" -> "::1") is
+// handled correctly rather than mangled by a naive first-colon split. A
+// host-only authority (no port) is returned unchanged.
+func hostFromAuthority(authority string) string {
+	if h, _, err := net.SplitHostPort(authority); err == nil {
+		return h
+	}
+	return authority
+}
+
 // MitmHTTPS terminates TLS with client, sends requests upstream over TLS, captures both sides
 // Supports both HTTP/1.1 and HTTP/2 automatically via ALPN negotiation
 func MitmHTTPS(clientConn net.Conn, connectReq *http.Request, requestID string, config *Config) {
 	// NOTE: Don't defer clientConn.Close() here - the HTTP server will manage the connection
-	host := connectReq.Host
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i]
-	}
+	host := hostFromAuthority(connectReq.Host)
 
 	leaf, err := config.MITM.CertForHost(host)
 	if err != nil {
