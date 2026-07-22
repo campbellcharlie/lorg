@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -48,7 +49,10 @@ const (
 // technique. Line endings are CRLF as required by HTTP/1.1. Connection:
 // keep-alive keeps the socket open so a hung server keeps waiting (rather than
 // seeing EOF), which is what lets the read deadline fire.
-func buildDesyncProbes(host, path string, technique desyncTechnique) (attack, control []byte) {
+// buildDesyncProbes takes the exact Host header value (including a non-default
+// port when applicable — the caller uses net.JoinHostPort so a probe to :8443
+// sends "Host: host:8443", not a mangled "Host: host").
+func buildDesyncProbes(hostHeader, path string, technique desyncTechnique) (attack, control []byte) {
 	if path == "" {
 		path = "/"
 	}
@@ -61,7 +65,7 @@ func buildDesyncProbes(host, path string, technique desyncTechnique) (attack, co
 				"Connection: keep-alive\r\n"+
 				"\r\n"+
 				"%s",
-			path, host, contentLength, body))
+			path, hostHeader, contentLength, body))
 	}
 
 	switch technique {
@@ -83,17 +87,22 @@ func buildDesyncProbes(host, path string, technique desyncTechnique) (attack, co
 	return attack, control
 }
 
-// desyncOracle applies the timeout-differential decision to a probe pair.
+// desyncOracle applies the timeout-differential decision to a probe pair. The
+// signal is "hung" = timed out WITHOUT a complete response; a complete response
+// on a kept-alive socket is not a hang. Vulnerable requires the attack to hang
+// while the control does not — so a server that stalls on everything (both hang)
+// is inconclusive, not a false positive.
 func desyncOracle(attack, control readResult) (vulnerable bool, reason string) {
+	attackHung := attack.timedOut && !attack.complete
+	controlHung := control.timedOut && !control.complete
+
 	switch {
-	case attack.timedOut && !control.timedOut:
-		return true, "attack probe hung (read timed out) while the control probe returned normally — the server frames the body differently under Content-Length vs Transfer-Encoding"
-	case attack.timedOut && control.timedOut:
-		return false, "both probes timed out — server likely hangs on everything (not a framing disagreement); inconclusive"
-	case !attack.timedOut:
-		return false, "attack probe returned normally — no read-hang differential observed"
+	case attackHung && !controlHung:
+		return true, "attack probe hung without completing a response while the control returned normally — the server frames the body differently under Content-Length vs Transfer-Encoding"
+	case attackHung && controlHung:
+		return false, "both probes hung without a complete response — server likely stalls on everything (not a framing disagreement); inconclusive"
 	default:
-		return false, "no differential observed"
+		return false, "attack probe completed/returned — no read-hang differential observed"
 	}
 }
 
@@ -102,7 +111,9 @@ type desyncProbeResult struct {
 	Vulnerable      bool   `json:"vulnerable"`
 	Reason          string `json:"reason"`
 	AttackTimedOut  bool   `json:"attackTimedOut"`
+	AttackComplete  bool   `json:"attackComplete"`
 	ControlTimedOut bool   `json:"controlTimedOut"`
+	ControlComplete bool   `json:"controlComplete"`
 	AttackMs        int64  `json:"attackMs"`
 	ControlMs       int64  `json:"controlMs"`
 }
@@ -138,7 +149,7 @@ func sendOneProbe(host string, port int, useTLS bool, payload []byte, connectTO,
 
 // runDesyncProbe sends the attack/control pair and applies the oracle.
 func runDesyncProbe(host string, port int, useTLS bool, technique desyncTechnique, path string, connectTO, readTO time.Duration) (desyncProbeResult, error) {
-	attackReq, controlReq := buildDesyncProbes(host, path, technique)
+	attackReq, controlReq := buildDesyncProbes(desyncHostHeader(host, port, useTLS), path, technique)
 
 	attack, err := sendOneProbe(host, port, useTLS, attackReq, connectTO, readTO)
 	if err != nil {
@@ -155,10 +166,22 @@ func runDesyncProbe(host string, port int, useTLS bool, technique desyncTechniqu
 		Vulnerable:      vulnerable,
 		Reason:          reason,
 		AttackTimedOut:  attack.timedOut,
+		AttackComplete:  attack.complete,
 		ControlTimedOut: control.timedOut,
+		ControlComplete: control.complete,
 		AttackMs:        attack.elapsed.Milliseconds(),
 		ControlMs:       control.elapsed.Milliseconds(),
 	}, nil
+}
+
+// desyncHostHeader returns the Host header value: the bare host for the default
+// port (443 TLS / 80 plaintext), otherwise host:port so a non-standard-port
+// target receives a faithful authority.
+func desyncHostHeader(host string, port int, useTLS bool) string {
+	if (useTLS && port == 443) || (!useTLS && port == 80) {
+		return host
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // ---------------------------------------------------------------------------
@@ -181,9 +204,16 @@ func (backend *Backend) desyncProbeHandler(ctx context.Context, request mcp.Call
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// Empty selects the documented default; an unrecognised value is rejected
+	// rather than silently coerced to CL.TE (a typo must not run the wrong probe).
 	technique := techCLTE
-	if desyncTechnique(args.Technique) == techTECL {
+	switch desyncTechnique(args.Technique) {
+	case "", techCLTE:
+		technique = techCLTE
+	case techTECL:
 		technique = techTECL
+	default:
+		return mcp.NewToolResultError("unknown technique: " + args.Technique + ". Valid: CL.TE (default), TE.CL"), nil
 	}
 	connectTO := time.Duration(intOrDefault(args.ConnectTimeoutMs, 5000)) * time.Millisecond
 	readTO := time.Duration(intOrDefault(args.ReadTimeoutMs, 5000)) * time.Millisecond

@@ -159,4 +159,52 @@ func TestDesyncOracleDecision(t *testing.T) {
 	if v, _ := desyncOracle(ok, to); v {
 		t.Error("attack-ok must NOT be vulnerable regardless of control")
 	}
+	// A read that timed out but DID complete a response (idle keep-alive socket)
+	// is not a hang and must not be flagged vulnerable.
+	completeButIdle := readResult{timedOut: true, complete: true}
+	if v, _ := desyncOracle(completeButIdle, ok); v {
+		t.Error("timed-out-but-complete attack must NOT be vulnerable (keep-alive, not a hang)")
+	}
+}
+
+// TestReadResponseTimedKeepAlive is the regression for the bug an independent
+// review found: a complete Content-Length response on a socket the server keeps
+// open must be reported as complete (and not a hang), even though the socket
+// then sits idle. Previously readResponseTimed hit its deadline and reported
+// timedOut=true for a perfectly normal keep-alive reply.
+func TestReadResponseTimedKeepAlive(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		if _, err := readRequestHead(br); err != nil {
+			return
+		}
+		io.ReadFull(br, make([]byte, 5)) // consume the control body
+		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"))
+		time.Sleep(300 * time.Millisecond) // keep the connection open (no close)
+	}()
+
+	host, portText, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	_, control := buildDesyncProbes(host, "/", techCLTE)
+	got, err := sendOneProbe(host, port, false, control, time.Second, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.complete {
+		t.Errorf("complete keep-alive response should set complete=true; bytes=%d", len(got.data))
+	}
+	if got.timedOut {
+		t.Error("complete keep-alive response must NOT be reported as timedOut")
+	}
 }
