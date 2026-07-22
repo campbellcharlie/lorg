@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,29 +66,124 @@ type SendHttp2SequenceArgs struct {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// readResponse reads up to maxBytes from a connection within the given timeout.
-// It returns whatever data was read, swallowing EOF and timeout errors since
-// partial reads are expected for raw socket operations.
-func readResponse(conn net.Conn, readTimeout time.Duration, maxBytes int) ([]byte, error) {
+// readResult captures a raw read outcome. For a timeout-differential desync
+// oracle the load-bearing distinction is (timedOut && !complete) — a socket that
+// hit its deadline WITHOUT a complete HTTP response, i.e. the server is still
+// waiting for request bytes. A complete response that arrives on a kept-alive
+// connection sets complete=true and timedOut=false even though the socket then
+// sits idle, so a normal keep-alive reply is never misread as a hang.
+type readResult struct {
+	data     []byte
+	timedOut bool
+	complete bool // a complete HTTP/1 response was parsed from data
+	elapsed  time.Duration
+}
+
+// readResponseTimed reads up to maxBytes within the given timeout. It stops as
+// soon as a complete HTTP/1 response is present (so an idle keep-alive socket is
+// not misclassified as a hang), on EOF/error, on maxBytes, or on the deadline —
+// the last of which sets timedOut.
+func readResponseTimed(conn net.Conn, readTimeout time.Duration, maxBytes int) readResult {
+	start := time.Now()
 	conn.SetReadDeadline(time.Now().Add(readTimeout))
 	buf := make([]byte, 4096)
 	var response []byte
+	var timedOut bool
 
 	for {
 		n, err := conn.Read(buf)
 		if n > 0 {
 			response = append(response, buf[:n]...)
 		}
+		if responseComplete(response) {
+			break // full response in hand — stop before the deadline
+		}
 		if len(response) >= maxBytes {
 			response = response[:maxBytes]
 			break
 		}
 		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				timedOut = true
+			}
 			break // EOF, timeout, or error
 		}
 	}
 
-	return response, nil
+	return readResult{
+		data:     response,
+		timedOut: timedOut,
+		complete: responseComplete(response),
+		elapsed:  time.Since(start),
+	}
+}
+
+// responseComplete reports whether data holds a complete HTTP/1 response. It
+// handles Content-Length, chunked framing, and bodyless statuses (1xx/204/304).
+// A response with neither Content-Length nor chunked framing is delimited by
+// connection close, so this returns false for it (the read loop still ends on
+// EOF).
+func responseComplete(data []byte) bool {
+	i := bytes.Index(data, []byte("\r\n\r\n"))
+	if i < 0 {
+		return false // headers not fully received yet
+	}
+	head := data[:i]
+	body := data[i+4:]
+
+	status := responseStatusCode(head)
+	if status >= 100 && status < 200 { // interim 1xx — the real response follows
+		return false
+	}
+	if status == 204 || status == 304 { // defined to have no body
+		return true
+	}
+
+	lower := bytes.ToLower(head)
+	if bytes.Contains(lower, []byte("\r\ntransfer-encoding:")) && bytes.Contains(lower, []byte("chunked")) {
+		return bytes.Contains(body, []byte("0\r\n\r\n"))
+	}
+	if cl, ok := responseContentLength(lower); ok {
+		return len(body) >= cl
+	}
+	return false // no CL, no chunked → terminated by connection close
+}
+
+func responseStatusCode(head []byte) int {
+	line := head
+	if j := bytes.IndexByte(line, '\n'); j >= 0 {
+		line = line[:j]
+	}
+	fields := bytes.Fields(line) // HTTP/1.x <code> <reason>
+	if len(fields) < 2 {
+		return 0
+	}
+	code, _ := strconv.Atoi(string(fields[1]))
+	return code
+}
+
+func responseContentLength(lowerHead []byte) (int, bool) {
+	key := []byte("\r\ncontent-length:")
+	k := bytes.Index(lowerHead, key)
+	if k < 0 {
+		return 0, false
+	}
+	rest := lowerHead[k+len(key):]
+	if e := bytes.IndexByte(rest, '\r'); e >= 0 {
+		rest = rest[:e]
+	}
+	n, err := strconv.Atoi(string(bytes.TrimSpace(rest)))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// readResponse preserves the original signature for callers that don't need the
+// timing/timeout signal. It never returns a non-nil error (partial reads are
+// expected); use readResponseTimed when the deadline outcome matters.
+func readResponse(conn net.Conn, readTimeout time.Duration, maxBytes int) ([]byte, error) {
+	return readResponseTimed(conn, readTimeout, maxBytes).data, nil
 }
 
 // toPreview converts raw bytes to a printable UTF-8 string, replacing
@@ -155,16 +252,16 @@ func (backend *Backend) sendRawTcpHandler(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	response, err := readResponse(conn, readTimeout, args.MaxReadBytes)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("read failed: %v", err)), nil
-	}
+	read := readResponseTimed(conn, readTimeout, args.MaxReadBytes)
+	response := read.data
 
 	return mcpJSONResult(map[string]any{
 		"responseBase64":  base64.StdEncoding.EncodeToString(response),
 		"responsePreview": toPreview(response, args.PreviewBytes),
 		"bytesRead":       len(response),
 		"bytesSent":       totalSent,
+		"timedOut":        read.timedOut,
+		"readMs":          read.elapsed.Milliseconds(),
 	})
 }
 
@@ -202,10 +299,8 @@ func (backend *Backend) sendRawTlsHandler(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	response, err := readResponse(conn, readTimeout, args.MaxReadBytes)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("read failed: %v", err)), nil
-	}
+	read := readResponseTimed(conn, readTimeout, args.MaxReadBytes)
+	response := read.data
 
 	negotiatedProtocol := conn.ConnectionState().NegotiatedProtocol
 
@@ -215,6 +310,8 @@ func (backend *Backend) sendRawTlsHandler(ctx context.Context, request mcp.CallT
 		"bytesRead":          len(response),
 		"bytesSent":          totalSent,
 		"negotiatedProtocol": negotiatedProtocol,
+		"timedOut":           read.timedOut,
+		"readMs":             read.elapsed.Milliseconds(),
 	})
 }
 
