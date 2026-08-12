@@ -20,7 +20,7 @@ func (d *LorgDB) SaveRecord(r *Record) error {
 // insertRecord performs an INSERT for the record.
 func (d *LorgDB) insertRecord(r *Record) error {
 	cols, placeholders, vals := buildInsertArgs(r, d.tableColumns(r.TableName))
-	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+	query := fmt.Sprintf("INSERT INTO \"%s\" (%s) VALUES (%s)",
 		r.TableName,
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),
@@ -37,7 +37,7 @@ func (d *LorgDB) insertRecord(r *Record) error {
 func (d *LorgDB) updateRecord(r *Record) error {
 	sets, vals := buildUpdateArgs(r, d.tableColumns(r.TableName))
 	vals = append(vals, r.Id)
-	query := fmt.Sprintf("UPDATE %s SET %s WHERE id = ?",
+	query := fmt.Sprintf("UPDATE \"%s\" SET %s WHERE id = ?",
 		r.TableName,
 		strings.Join(sets, ", "),
 	)
@@ -87,7 +87,7 @@ func (d *LorgDB) FindFirstRecord(tableName, where string, args ...any) (*Record,
 
 // FindRecords returns all records matching the WHERE clause, ordered by rowid.
 func (d *LorgDB) FindRecords(tableName, where string, args ...any) ([]*Record, error) {
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s ORDER BY rowid", tableName, where)
+	query := fmt.Sprintf("SELECT * FROM \"%s\" WHERE %s ORDER BY rowid", tableName, where)
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("lorgdb: find in %s: %w", tableName, err)
@@ -98,7 +98,7 @@ func (d *LorgDB) FindRecords(tableName, where string, args ...any) ([]*Record, e
 
 // FindRecordsSorted returns records matching the WHERE clause with custom ORDER BY.
 func (d *LorgDB) FindRecordsSorted(tableName, where, orderBy string, limit, offset int, args ...any) ([]*Record, error) {
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s", tableName, where)
+	query := fmt.Sprintf("SELECT * FROM \"%s\" WHERE %s", tableName, where)
 	if orderBy != "" {
 		query += " ORDER BY " + orderBy
 	}
@@ -118,7 +118,7 @@ func (d *LorgDB) FindRecordsSorted(tableName, where, orderBy string, limit, offs
 
 // DeleteRecord deletes a single record by ID.
 func (d *LorgDB) DeleteRecord(tableName, id string) error {
-	_, err := d.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE id = ?", tableName), id)
+	_, err := d.db.Exec(fmt.Sprintf("DELETE FROM \"%s\" WHERE id = ?", tableName), id)
 	if err != nil {
 		return fmt.Errorf("lorgdb: delete from %s id=%s: %w", tableName, id, err)
 	}
@@ -127,7 +127,7 @@ func (d *LorgDB) DeleteRecord(tableName, id string) error {
 
 // DeleteWhere deletes all records matching the WHERE clause.
 func (d *LorgDB) DeleteWhere(tableName, where string, args ...any) error {
-	_, err := d.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s", tableName, where), args...)
+	_, err := d.db.Exec(fmt.Sprintf("DELETE FROM \"%s\" WHERE %s", tableName, where), args...)
 	if err != nil {
 		return fmt.Errorf("lorgdb: delete from %s: %w", tableName, err)
 	}
@@ -207,7 +207,7 @@ func buildUpdateArgs(r *Record, knownCols map[string]bool) (sets []string, vals 
 
 // findOne returns the first matching record or sql.ErrNoRows.
 func (d *LorgDB) findOne(tableName, where string, args ...any) (*Record, error) {
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT 1", tableName, where)
+	query := fmt.Sprintf("SELECT * FROM \"%s\" WHERE %s LIMIT 1", tableName, where)
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("lorgdb: find in %s: %w", tableName, err)

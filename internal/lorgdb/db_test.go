@@ -388,3 +388,34 @@ func TestSeedDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestHyphenatedCollectionName is a regression test: per-host collection tables carry hyphens (and
+// dots), e.g. https_ypf-gateway-stage.finance.yahoo.com. SQLite reads an unquoted hyphen as a minus
+// operator (near "-": syntax error), so DML must quote the table identifier. Before the fix, every
+// insert/find/update/delete into such a table failed and the collection was silently empty.
+func TestHyphenatedCollectionName(t *testing.T) {
+	db := testDB(t)
+	table := "https_ypf-gateway-stage.finance.yahoo.com"
+	if _, err := db.db.Exec(fmt.Sprintf("CREATE TABLE \"%s\" (id TEXT PRIMARY KEY NOT NULL, created TEXT DEFAULT '', updated TEXT DEFAULT '', host TEXT)", table)); err != nil {
+		t.Fatalf("create hyphenated table: %v", err)
+	}
+	r := NewRecord(table)
+	r.Set("host", "example")
+	if err := db.SaveRecord(r); err != nil {
+		t.Fatalf("INSERT into hyphenated table failed (the bug): %v", err)
+	}
+	got, err := db.FindRecordById(table, r.Id)
+	if err != nil {
+		t.Fatalf("FindRecordById on hyphenated table failed: %v", err)
+	}
+	if got.GetString("host") != "example" {
+		t.Errorf("host = %q, want %q", got.GetString("host"), "example")
+	}
+	got.Set("host", "example2")
+	if err := db.SaveRecord(got); err != nil {
+		t.Fatalf("UPDATE on hyphenated table failed: %v", err)
+	}
+	if err := db.DeleteRecord(table, got.Id); err != nil {
+		t.Fatalf("DELETE on hyphenated table failed: %v", err)
+	}
+}

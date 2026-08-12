@@ -146,7 +146,7 @@ func (t *LorgTx) SaveRecord(r *Record) error {
 
 func (t *LorgTx) insertRecord(r *Record) error {
 	cols, placeholders, vals := buildInsertArgs(r, t.db.tableColumns(r.TableName))
-	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
+	query := fmt.Sprintf("INSERT INTO \"%s\" (%s) VALUES (%s)",
 		r.TableName,
 		strings.Join(cols, ", "),
 		strings.Join(placeholders, ", "),
@@ -162,7 +162,7 @@ func (t *LorgTx) insertRecord(r *Record) error {
 func (t *LorgTx) updateRecord(r *Record) error {
 	sets, vals := buildUpdateArgs(r, t.db.tableColumns(r.TableName))
 	vals = append(vals, r.Id)
-	query := fmt.Sprintf("UPDATE %s SET %s WHERE id = ?",
+	query := fmt.Sprintf("UPDATE \"%s\" SET %s WHERE id = ?",
 		r.TableName,
 		strings.Join(sets, ", "),
 	)
