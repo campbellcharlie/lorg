@@ -491,6 +491,19 @@ func migrateProjectSchema(db *sql.DB) error {
 		log.Printf("[ProjectDB] migrated schema → v6 (http_traffic superset: fingerprint, generated_by, global_seq)")
 	}
 
+	if version < 7 {
+		// Persist the upstream-negotiated ALPN (h2 / http/1.1) captured during the MITM
+		// handshake so passive readers can compute HTTP-version signals with no active probe.
+		if _, err := db.Exec("ALTER TABLE http_traffic ADD COLUMN alpn TEXT NOT NULL DEFAULT ''"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("v7 migration: %w", err)
+		}
+		if _, err := db.Exec("INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (7, ?)", time.Now().UnixMilli()); err != nil {
+			return fmt.Errorf("v7 version stamp: %w", err)
+		}
+		log.Printf("[ProjectDB] migrated schema → v7 (http_traffic.alpn)")
+	}
+
 	return nil
 }
 
@@ -641,6 +654,13 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 	fingerprint := ComputeFingerprint(status, mime, []byte(respBody))
 	generatedBy := userdata.GeneratedBy
 	globalSeq := time.Now().UnixNano()
+	// Upstream-negotiated ALPN recorded during the MITM handshake (in-memory cache keyed
+	// by host; empty for plain-HTTP hosts). Persisting it lets passive readers see the
+	// HTTP version without a second probe.
+	alpn := ""
+	if fp, ok := rawproxy.GetTLSStateHash(host); ok {
+		alpn = fp.ALPN
+	}
 
 	// doInsert writes the row (three inserts in one tx — ADR-003 A3) to a handle.
 	doInsert := func(db *sql.DB) error {
@@ -651,11 +671,11 @@ func (p *ProjectDB) LogTraffic(userdata types.UserData, rawReq, rawResp string) 
 		result, err := tx.Exec(`INSERT INTO http_traffic
 			(timestamp, tool, method, host, path, query, param_count, status_code,
 			 response_length, protocol, port, url, mime_type, extension, page_title,
-			 content_type, request_hash, session_tag, fingerprint, generated_by, global_seq)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 content_type, request_hash, session_tag, fingerprint, generated_by, global_seq, alpn)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			timestamp, tool, method, host, path, query, paramCount, status,
 			respLength, protocol, port, fullURL, mime, ext, title, contentType,
-			requestHash, "", fingerprint, generatedBy, globalSeq,
+			requestHash, "", fingerprint, generatedBy, globalSeq, alpn,
 		)
 		if err != nil {
 			_ = tx.Rollback()
@@ -1374,7 +1394,8 @@ var burpMCPSchema = []string{
     notes         TEXT,
     fingerprint   TEXT    NOT NULL DEFAULT '',
     generated_by  TEXT    NOT NULL DEFAULT '',
-    global_seq    INTEGER NOT NULL DEFAULT 0
+    global_seq    INTEGER NOT NULL DEFAULT 0,
+    alpn          TEXT    NOT NULL DEFAULT ''
 )`,
 	`CREATE INDEX idx_ht_fingerprint ON http_traffic(fingerprint)`,
 	`CREATE INDEX idx_ht_global_seq ON http_traffic(global_seq)`,
